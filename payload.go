@@ -41,7 +41,7 @@ func post(apiToken string, payload Payload) (*ResponsePayload, error) {
 		payload.Model = defaultModel
 	}
 	if payload.MaxTokens == 0 {
-		payload.MaxTokens = 20
+		payload.MaxTokens = 120
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
