@@ -45,5 +45,5 @@ maxTokens: 2048
 
 ## 🎉 Examples
 
-[![asciicast](https://asciinema.org/a/rySW8Wwv9aOEmqpjPPHjKpuyG.svg)](https://asciinema.org/a/rySW8Wwv9aOEmqpjPPHjKpuyG)
+![sample session](./sample.svg)
 
