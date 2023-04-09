@@ -33,7 +33,11 @@ func main() {
 		os.Exit(1)
 	}
 	if *flagContinuous {
-		err = runContinuousCompletion(ctx, cfg)
+		if cfg.Stream {
+			err = runContinuousCompletionStreaming(ctx, cfg)
+		} else {
+			err = runContinuousCompletion(ctx, cfg)
+		}
 	} else {
 		err = runOneShotCompletion(ctx, cfg)
 	}

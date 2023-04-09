@@ -1,23 +1,24 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
 // newCompletionPayload creates a new completion payload.
 func newCompletionPayload(cfg *Config) *ChatCompletionPayload {
 	p := &ChatCompletionPayload{
-		Model: cfg.Model,
-		N:     1,
-
-		// Stream: true,
+		Model:  cfg.Model,
+		Stream: cfg.Stream,
 	}
 	if p.Model == "" {
 		p.Model = defaultModel
@@ -106,6 +107,22 @@ type ResponsePayload struct {
 	} `json:"usage,omitempty"`
 }
 
+// StreamResponsePayload is the response payload from the OpenAI API.
+type StreamResponsePayload struct {
+	ID      string  `json:"id,omitempty"`
+	Created float64 `json:"created,omitempty"`
+	Model   string  `json:"model,omitempty"`
+	Object  string  `json:"object,omitempty"`
+	Choices []struct {
+		Index float64 `json:"index,omitempty"`
+		Delta struct {
+			Role    string `json:"role,omitempty"`
+			Content string `json:"content,omitempty"`
+		} `json:"delta,omitempty"`
+		FinishReason interface{} `json:"finish_reason,omitempty"`
+	} `json:"choices,omitempty"`
+}
+
 // performCompletion posts the request to the OpenAI API.
 func performCompletion(ctx context.Context, apiToken string, payload *ChatCompletionPayload) (*ResponsePayload, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -123,17 +140,6 @@ func performCompletion(ctx context.Context, apiToken string, payload *ChatComple
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiToken)
-	// req.Header.Set("X-OpenAI-Client-User-Agent", `{"bindings_version": "0.27.4", "httplib": "requests", "lang": "python", "lang_version": "3.11.2", "platform": "macOS-13.3.1-arm64-i386-64bit", "publisher": "openai", "uname": "Darwin 22.4.0 Darwin Kernel Version 22.4.0: Mon Mar  6 21:01:02 PST 2023; root:xnu-8796.101.5~3/RELEASE_ARM64_T8112 arm64 i386"}`)
-	// req.Header.Set("User-Agent", "OpenAI/v1 PythonBindings/0.27.4")
-
-	// dump request
-	/*
-		dump, err := httputil.DumpRequest(req, true)
-		if err != nil {
-			return nil, err
-		}
-		fmt.Println(string(dump))
-	*/
 
 	response, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -141,17 +147,7 @@ func performCompletion(ctx context.Context, apiToken string, payload *ChatComple
 	}
 	defer response.Body.Close()
 
-	/*
-		// dump response:
-		dump, err = httputil.DumpResponse(response, true)
-		if err != nil {
-			return nil, err
-		}
-		fmt.Println(string(dump))
-	*/
-
 	responseBody, _ := io.ReadAll(response.Body)
-	//fmt.Fprintln(os.Stderr, string(responseBody))
 	var responsePayload ResponsePayload
 	err = json.NewDecoder(bytes.NewReader(responseBody)).Decode(&responsePayload)
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -162,4 +158,61 @@ func performCompletion(ctx context.Context, apiToken string, payload *ChatComple
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 	return &responsePayload, nil
+}
+
+// performCompletionStreaming posts the request to the OpenAI API.
+func performCompletionStreaming(ctx context.Context, apiToken string, payload *ChatCompletionPayload) (<-chan (StreamResponsePayload), error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	requestBody := bytes.NewReader(payloadBytes)
+	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", requestBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("API request failed with status: %v", response.Status)
+	}
+
+	scanner := bufio.NewScanner(response.Body)
+	responseChan := make(chan StreamResponsePayload)
+	go func() {
+		defer cancel()
+		defer close(responseChan)
+		defer response.Body.Close()
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+			if !strings.HasPrefix(line, "data:") {
+				log.Fatalf("unexpected line: %v", line)
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				return
+			}
+			//fmt.Println("data:", data)
+			var streamPayload StreamResponsePayload
+			err := json.NewDecoder(bytes.NewReader([]byte(data))).Decode(&streamPayload)
+			if err != nil {
+				log.Fatalf("failed to decode stream payload: %v", err)
+			}
+			responseChan <- streamPayload
+		}
+		if err := scanner.Err(); err != nil {
+			log.Fatalf("failed to scan response: %v", err)
+		}
+	}()
+	return responseChan, nil
 }
