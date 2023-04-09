@@ -32,7 +32,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Missing API key in config. Please set the OPENAI_API_KEY environment variable or add it to the config file.")
 		os.Exit(1)
 	}
-	fmt.Println("config:", cfg)
 
 	s, err := newCompletionService(cfg)
 	if err != nil {

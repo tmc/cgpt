@@ -4,6 +4,10 @@
 
 You can imagine it as a command line ChatGPT clone.
 
+It supports:
+- Streaming output
+- History saving/loading
+
 ## 🚀 Installation
 
 ```shell
@@ -19,10 +23,12 @@ Usage of cgpt:
     	Path to the configuration file (default "config.yaml")
   -continuous
     	Run in continuous mode
+  -hist-in string
+    	File to read history from
+  -hist-out string
+    	File to store history in
   -input string
     	The input text to complete. If '-', read from stdin. (default "-")
-  -json
-    	Output JSON
 ```
 
 ### Configuration

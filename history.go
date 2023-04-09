@@ -35,6 +35,9 @@ func (s *completionService) loadHistory() error {
 
 // saveHistory saves the history to the history file (as yaml)
 func (s *completionService) saveHistory() error {
+	if s.historyOutFile == "" {
+		return nil
+	}
 	f, err := os.Create(s.historyOutFile)
 	if err != nil {
 		return fmt.Errorf("failed to create history file %q: %w", s.historyOutFile, err)
