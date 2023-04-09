@@ -20,6 +20,8 @@ type Config struct {
 	MaxTokens int    `yaml:"maxTokens"`
 
 	SystemPrompt string `yaml:"systemPrompt"`
+
+	LogitBias map[string]float64 `yaml:"logitBias"`
 }
 
 // loadConfig loads the config file from the given path.

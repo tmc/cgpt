@@ -20,6 +20,8 @@ func newCompletionPayload(cfg *Config) *ChatCompletionPayload {
 		Model:     cfg.Model,
 		Stream:    cfg.Stream,
 		MaxTokens: cfg.MaxTokens,
+
+		LogitBias: cfg.LogitBias,
 	}
 	if p.MaxTokens == 0 {
 		p.MaxTokens = defaultMaxTokens
@@ -42,7 +44,7 @@ type ChatCompletionPayload struct {
 	PresencePenalty  *float64 `json:"presence_penalty,omitempty"`
 	FrequencyPenalty *float64 `json:"frequency_penalty,omitempty"`
 
-	Logprobs int `json:"logprobs,omitempty"`
+	LogitBias map[string]float64 `json:"logit_bias,omitempty"`
 }
 
 // ChatCompletionMessage is the message payload for the OpenAI chat completion API.
@@ -123,7 +125,7 @@ type StreamResponsePayload struct {
 
 // performCompletion posts the request to the OpenAI API.
 func performCompletion(ctx context.Context, apiToken string, payload *ChatCompletionPayload) (*ResponsePayload, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	defer spin()()
 
