@@ -81,7 +81,7 @@ func runContinuousCompletionStreaming(ctx context.Context, cfg *Config) error {
 	scanner := bufio.NewScanner(os.Stdin)
 
 	payload := newCompletionPayload(cfg)
-	fmt.Println("system prompt: ", cfg.SystemPrompt)
+	fmt.Println("system prompt:", cfg.SystemPrompt)
 	if cfg.SystemPrompt != "" {
 		payload.addSystemMessage(cfg.SystemPrompt)
 	}

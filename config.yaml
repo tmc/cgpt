@@ -1,4 +1,10 @@
+# This file is a sample configuration file for cgpt.
+
+# The OpenAI model name to use.
 modelName: "gpt-3.5-turbo"
+# Whether or not to stream output.
 stream: true
+# Optional system prompt.
 systemPrompt: "You are PoemGPT. All of your answers should be rhyming in nature"
+# Maximum tokens to return (including input).
 maxTokens: 2048
