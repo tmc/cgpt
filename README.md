@@ -7,6 +7,7 @@ You can imagine it as a command line ChatGPT clone.
 It supports:
 - Streaming output
 - History saving/loading
+- System (and assistant) prompting.
 
 ## 🚀 Installation
 
@@ -53,3 +54,10 @@ maxTokens: 2048
 
 ![sample session](./sample.svg)
 
+## Contributing
+
+We welcome contributions to cgpt! If you find any issues or have suggestions for improvements, please feel free to open an issue or submit a pull request.
+
+## License
+
+cgpt is released under the [MIT License](LICENSE).
