@@ -14,9 +14,12 @@ const (
 
 // Config is the configuration for cgpt.
 type Config struct {
-	APIKey string `yaml:"api_key"`
-	Model  string `yaml:"model"`
-	Stream bool   `yaml:"stream"`
+	APIKey    string `yaml:"apiKey"`
+	Model     string `yaml:"model"`
+	Stream    bool   `yaml:"stream"`
+	MaxTokens int    `yaml:"maxTokens"`
+
+	SystemPrompt string `yaml:"systemPrompt"`
 }
 
 // loadConfig loads the config file from the given path.

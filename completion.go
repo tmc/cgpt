@@ -21,7 +21,12 @@ func runOneShotCompletion(ctx context.Context, cfg *Config) error {
 		input = string(b)
 	}
 
+	// Currently, we don't support streaming for one-shot completions.
+	cfg.Stream = false
 	payload := newCompletionPayload(cfg)
+	if cfg.SystemPrompt != "" {
+		payload.addSystemMessage(cfg.SystemPrompt)
+	}
 	payload.addUserMessage(input)
 	r, err := performCompletion(ctx, cfg.APIKey, payload)
 	if err != nil {
@@ -43,18 +48,21 @@ func runContinuousCompletion(ctx context.Context, cfg *Config) error {
 	// read until two newlines using a scanner:
 	scanner := bufio.NewScanner(os.Stdin)
 
-	completionPayload := newCompletionPayload(cfg)
+	payload := newCompletionPayload(cfg)
+	if cfg.SystemPrompt != "" {
+		payload.addSystemMessage(cfg.SystemPrompt)
+	}
 	for {
 		input, err := readUntilBlank(scanner, "> ")
 		if err != nil {
 			return err
 		}
-		completionPayload.addUserMessage(input)
-		r, err := performCompletion(ctx, cfg.APIKey, completionPayload)
+		payload.addUserMessage(input)
+		r, err := performCompletion(ctx, cfg.APIKey, payload)
 		if err != nil {
 			return err
 		}
-		completionPayload.addAssistantMessage(r.Choices[0].Message.Content)
+		payload.addAssistantMessage(r.Choices[0].Message.Content)
 		if *flagJSON {
 			e := json.NewEncoder(os.Stdout)
 			e.SetIndent("", "  ")
@@ -72,14 +80,18 @@ func runContinuousCompletionStreaming(ctx context.Context, cfg *Config) error {
 	// read until two newlines using a scanner:
 	scanner := bufio.NewScanner(os.Stdin)
 
-	completionPayload := newCompletionPayload(cfg)
+	payload := newCompletionPayload(cfg)
+	fmt.Println("system prompt: ", cfg.SystemPrompt)
+	if cfg.SystemPrompt != "" {
+		payload.addSystemMessage(cfg.SystemPrompt)
+	}
 	for {
 		input, err := readUntilBlank(scanner, "> ")
 		if err != nil {
 			return err
 		}
-		completionPayload.addUserMessage(input)
-		streamPayloads, err := performCompletionStreaming(ctx, cfg.APIKey, completionPayload)
+		payload.addUserMessage(input)
+		streamPayloads, err := performCompletionStreaming(ctx, cfg.APIKey, payload)
 		if err != nil {
 			return err
 		}
@@ -94,7 +106,7 @@ func runContinuousCompletionStreaming(ctx context.Context, cfg *Config) error {
 				fmt.Print(r.Choices[0].Delta.Content)
 			}
 		}
-		completionPayload.addAssistantMessage(content.String())
+		payload.addAssistantMessage(content.String())
 		fmt.Println()
 	}
 }

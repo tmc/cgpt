@@ -17,11 +17,9 @@ import (
 // newCompletionPayload creates a new completion payload.
 func newCompletionPayload(cfg *Config) *ChatCompletionPayload {
 	p := &ChatCompletionPayload{
-		Model:  cfg.Model,
-		Stream: cfg.Stream,
-	}
-	if p.Model == "" {
-		p.Model = defaultModel
+		Model:     cfg.Model,
+		Stream:    cfg.Stream,
+		MaxTokens: cfg.MaxTokens,
 	}
 	if p.MaxTokens == 0 {
 		p.MaxTokens = defaultMaxTokens
@@ -155,7 +153,7 @@ func performCompletion(ctx context.Context, apiToken string, payload *ChatComple
 		return nil, errors.New(errMsg)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode response: %w\nbody: %v", err, string(responseBody))
 	}
 	return &responsePayload, nil
 }
