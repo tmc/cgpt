@@ -3,111 +3,150 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 )
 
-// runOneShotCompletion runs the completion API once.
-func runOneShotCompletion(ctx context.Context, cfg *Config) error {
-	input := *flagInput
-	if input == "-" {
-		b, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return err
-		}
-		input = string(b)
-	}
+type completionService struct {
+	cfg *Config
 
-	// Currently, we don't support streaming for one-shot completions.
-	cfg.Stream = false
-	payload := newCompletionPayload(cfg)
-	if cfg.SystemPrompt != "" {
-		payload.addSystemMessage(cfg.SystemPrompt)
+	payload *ChatCompletionPayload
+
+	historyIn      io.Reader
+	historyOutFile string
+}
+
+func newCompletionService(cfg *Config) (*completionService, error) {
+	s := &completionService{
+		cfg:     cfg,
+		payload: newCompletionPayload(cfg),
 	}
-	payload.addUserMessage(input)
-	r, err := performCompletion(ctx, cfg.APIKey, payload)
+	return s, nil
+}
+
+func (s *completionService) run(ctx context.Context, runCfg runConfig) error {
+	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
+		log.Println("failed to handle history:", err)
+	}
+	if !s.loadedWithHistory() && s.cfg.SystemPrompt != "" {
+		s.payload.addSystemMessage(s.cfg.SystemPrompt)
+	}
+	if runCfg.Continuous {
+		if s.cfg.Stream {
+			return s.runContinuousCompletionStreaming(ctx)
+		} else {
+			return s.runContinuousCompletion(ctx)
+		}
+	}
+	return s.runOneShotCompletion(ctx, runCfg.Input)
+}
+
+func (s *completionService) loadedWithHistory() bool {
+	return s.historyIn != nil
+}
+
+func (s *completionService) handleHistory(historyIn, historyOut string) error {
+	s.historyOutFile = historyOut
+	if historyIn != "" {
+		f, err := os.Open(historyIn)
+		if err != nil {
+			return fmt.Errorf("failed to open history file %q: %w", historyIn, err)
+		}
+		s.historyIn = f
+		defer f.Close()
+	}
+	loadErr := s.loadHistory()
+	if loadErr == nil {
+		if err := s.saveHistory(); err != nil {
+			return fmt.Errorf("failed to save history: %w", err)
+		}
+	}
+	return loadErr
+}
+
+// runOneShotCompletion runs the completion API once.
+func (s *completionService) runOneShotCompletion(ctx context.Context, inputFile string) error {
+	var (
+		input io.Reader
+		err   error
+	)
+	if inputFile == "-" {
+		input = os.Stdin
+	} else {
+		input, err = os.Open(inputFile)
+	}
+	b, err := io.ReadAll(input)
 	if err != nil {
 		return err
 	}
-	if *flagJSON {
-		e := json.NewEncoder(os.Stdout)
-		e.SetIndent("", "  ")
-		return e.Encode(r)
-	} else {
-		fmt.Println(r.Choices[0].Message.Content)
+	contents := string(b)
+
+	// Currently, we don't support streaming for one-shot completions.
+	s.cfg.Stream = false
+	s.payload.addUserMessage(contents)
+	r, err := performCompletion(ctx, s.cfg.APIKey, s.payload)
+	if err != nil {
+		return err
 	}
+	fmt.Println(r.Choices[0].Message.Content)
 	return nil
 }
 
 // runContinuousCompletion runs the completion API in a loop, using the previous output as the input for the next request.
-func runContinuousCompletion(ctx context.Context, cfg *Config) error {
+func (s *completionService) runContinuousCompletion(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
 	// read until two newlines using a scanner:
 	scanner := bufio.NewScanner(os.Stdin)
 
-	payload := newCompletionPayload(cfg)
-	if cfg.SystemPrompt != "" {
-		payload.addSystemMessage(cfg.SystemPrompt)
-	}
 	for {
 		input, err := readUntilBlank(scanner, "> ")
 		if err != nil {
 			return err
 		}
-		payload.addUserMessage(input)
-		r, err := performCompletion(ctx, cfg.APIKey, payload)
+		s.payload.addUserMessage(input)
+		r, err := performCompletion(ctx, s.cfg.APIKey, s.payload)
 		if err != nil {
 			return err
 		}
-		payload.addAssistantMessage(r.Choices[0].Message.Content)
-		if *flagJSON {
-			e := json.NewEncoder(os.Stdout)
-			e.SetIndent("", "  ")
-			return e.Encode(r)
-		} else {
-			fmt.Println(r.Choices[0].Message.Content)
-			fmt.Println("")
+		s.payload.addAssistantMessage(r.Choices[0].Message.Content)
+		fmt.Println(r.Choices[0].Message.Content)
+		fmt.Println()
+		if err := s.saveHistory(); err != nil {
+			return fmt.Errorf("failed to save history: %w", err)
 		}
 	}
 }
 
 // runContinuousCompletionStreaming runs the completion API in a loop, using the previous output as the input for the next request.
-func runContinuousCompletionStreaming(ctx context.Context, cfg *Config) error {
+func (s *completionService) runContinuousCompletionStreaming(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
 	// read until two newlines using a scanner:
 	scanner := bufio.NewScanner(os.Stdin)
 
-	payload := newCompletionPayload(cfg)
-	fmt.Println("system prompt:", cfg.SystemPrompt)
-	if cfg.SystemPrompt != "" {
-		payload.addSystemMessage(cfg.SystemPrompt)
-	}
 	for {
 		input, err := readUntilBlank(scanner, "> ")
 		if err != nil {
 			return err
 		}
-		payload.addUserMessage(input)
-		streamPayloads, err := performCompletionStreaming(ctx, cfg.APIKey, payload)
+		s.payload.addUserMessage(input)
+		streamPayloads, err := performCompletionStreaming(ctx, s.cfg.APIKey, s.payload)
 		if err != nil {
 			return err
 		}
 		content := strings.Builder{}
 		for r := range streamPayloads {
 			content.WriteString(r.Choices[0].Delta.Content)
-			if *flagJSON {
-				e := json.NewEncoder(os.Stdout)
-				e.SetIndent("", "  ")
-				return e.Encode(r)
-			} else {
-				fmt.Print(r.Choices[0].Delta.Content)
-			}
+			fmt.Print(r.Choices[0].Delta.Content)
 		}
-		payload.addAssistantMessage(content.String())
+		s.payload.addAssistantMessage(content.String())
 		fmt.Println()
+
+		if err := s.saveHistory(); err != nil {
+			return fmt.Errorf("failed to save history: %w", err)
+		}
 	}
 }
 

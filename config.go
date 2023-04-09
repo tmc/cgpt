@@ -15,7 +15,7 @@ const (
 // Config is the configuration for cgpt.
 type Config struct {
 	APIKey    string `yaml:"apiKey"`
-	Model     string `yaml:"model"`
+	Model     string `yaml:"modelName"`
 	Stream    bool   `yaml:"stream"`
 	MaxTokens int    `yaml:"maxTokens"`
 

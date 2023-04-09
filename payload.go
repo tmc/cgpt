@@ -133,6 +133,7 @@ func performCompletion(ctx context.Context, apiToken string, payload *ChatComple
 	if err != nil {
 		return nil, err
 	}
+	// print the payload to the console
 	requestBody := bytes.NewReader(payloadBytes)
 	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/chat/completions", requestBody)
 	if err != nil {
@@ -181,7 +182,8 @@ func performCompletionStreaming(ctx context.Context, apiToken string, payload *C
 		return nil, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("API request failed with status: %v", response.Status)
+		body, _ := io.ReadAll(response.Body)
+		return nil, fmt.Errorf("API request failed with status: %v\n%v\n", response.Status, string(body))
 	}
 
 	scanner := bufio.NewScanner(response.Body)
