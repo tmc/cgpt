@@ -125,7 +125,7 @@ type StreamResponsePayload struct {
 
 // performCompletion posts the request to the OpenAI API.
 func performCompletion(ctx context.Context, apiToken string, payload *ChatCompletionPayload) (*ResponsePayload, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	defer spin()()
 
@@ -163,8 +163,9 @@ func performCompletion(ctx context.Context, apiToken string, payload *ChatComple
 
 // performCompletionStreaming posts the request to the OpenAI API.
 func performCompletionStreaming(ctx context.Context, apiToken string, payload *ChatCompletionPayload) (<-chan (StreamResponsePayload), error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 
+	payload.Stream = true
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -204,7 +205,6 @@ func performCompletionStreaming(ctx context.Context, apiToken string, payload *C
 			if data == "[DONE]" {
 				return
 			}
-			//fmt.Println("data:", data)
 			var streamPayload StreamResponsePayload
 			err := json.NewDecoder(bytes.NewReader([]byte(data))).Decode(&streamPayload)
 			if err != nil {

@@ -27,22 +27,31 @@ type Config struct {
 // loadConfig loads the config file from the given path.
 // if the file is not found, it returns the default config.
 func loadConfig(path string) (*Config, error) {
+	var cfg Config
+	if path == "" {
+		return setDefaults(&cfg), nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("unable to read config file: %w", err)
+		return setDefaults(&cfg), fmt.Errorf("unable to read config file: %w", err)
 	}
-	var cfg Config
 	err = yaml.Unmarshal(data, &cfg)
 	if err != nil {
-		return nil, fmt.Errorf("unable to parse config file: %w", err)
+		return setDefaults(&cfg), fmt.Errorf("unable to parse config file: %w", err)
 	}
+	return setDefaults(&cfg), nil
+}
+
+func setDefaults(cfg *Config) *Config {
 	if cfg.Model == "" {
 		cfg.Model = defaultModel
 	}
-
+	if cfg.MaxTokens == 0 {
+		cfg.MaxTokens = defaultMaxTokens
+	}
 	// Prefer env var over config file:
 	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
 		cfg.APIKey = apiKey
 	}
-	return &cfg, nil
+	return cfg
 }

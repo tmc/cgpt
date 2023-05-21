@@ -13,11 +13,13 @@ import (
 
 var (
 	flagInput      = flag.String("input", "-", "The input text to complete. If '-', read from stdin.")
-	flagConfig     = flag.String("config", "config.yaml", "Path to the configuration file")
+	flagConfig     = flag.String("config", "", "Path to the configuration file")
 	flagContinuous = flag.Bool("continuous", false, "Run in continuous mode")
+	flagStream     = flag.Bool("stream", true, "Stream results")
 
-	flagHistoryIn  = flag.String("hist-in", "", "File to read history from")
-	flagHistoryOut = flag.String("hist-out", "", "File to store history in")
+	flagHistoryIn    = flag.String("hist-in", "", "File to read history from")
+	flagHistoryOut   = flag.String("hist-out", "", "File to store history in")
+	flagNCompletions = flag.Int("completions", 0, "Number of completions (when running with history)")
 )
 
 func main() {
@@ -25,8 +27,7 @@ func main() {
 	ctx := context.Background()
 	cfg, err := loadConfig(*flagConfig)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "issue loading config: %v\n", err)
 	}
 	if cfg.APIKey == "" {
 		fmt.Fprintln(os.Stderr, "Missing API key in config. Please set the OPENAI_API_KEY environment variable or add it to the config file.")
@@ -40,10 +41,12 @@ func main() {
 	}
 
 	if err = s.run(ctx, runConfig{
-		Input:      *flagInput,
-		Continuous: *flagContinuous,
-		HistoryIn:  *flagHistoryIn,
-		HistoryOut: *flagHistoryOut,
+		Input:        *flagInput,
+		Continuous:   *flagContinuous,
+		Stream:       *flagStream,
+		HistoryIn:    *flagHistoryIn,
+		HistoryOut:   *flagHistoryOut,
+		NCompletions: *flagNCompletions,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -56,9 +59,14 @@ type runConfig struct {
 	Input string
 	// Continuous will run the completion API in a loop, using the previous output as the input for the next request.
 	Continuous bool
+	// Stream will stream results as they come in.
+	Stream bool
 
 	// HistoryIn is the file to read history from.
 	HistoryIn string
 	// HistoryOut is the file to store history in.
 	HistoryOut string
+
+	// NCompletions is the number of completions to complete in a history-enabled context.
+	NCompletions int
 }
