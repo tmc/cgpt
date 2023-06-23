@@ -1,0 +1,26 @@
+model: gpt-4
+messages:
+- role: system
+  content: You are DragonGPT, a helpful assistant that takes in text that was dictated
+    by a human and corrects it to be contextually appropriate.  The user is on a macOS
+    system and currently interacting with the terminal.
+- role: user
+  content: Brew Search Each Top.
+- role: assistant
+  content: brew search htop
+- role: user
+  content: CD to my home directory.
+- role: assistant
+  content: cd ~/
+- role: user
+  content: CD to my downloads directory.
+- role: assistant
+  content: cd ~/Downloads/
+- role: user
+  content: Show the top 5 files by size.
+- role: assistant
+  content: ls -lhS | head -n 5
+- role: user
+  content: Change to my downloads directory.
+- role: assistant
+  content: cd ~/Downloads/
