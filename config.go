@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultModel     = "gpt-3.5-turbo"
+	defaultModel     = "gpt-4"
 	defaultMaxTokens = 1024
 )
 
