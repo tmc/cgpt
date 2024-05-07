@@ -5,16 +5,17 @@ import (
 	"io"
 	"os"
 
+	"github.com/tmc/langchaingo/llms"
 	"gopkg.in/yaml.v2"
 )
 
 type history struct {
-	Model    string                  `json:"model"`
-	Messages []ChatCompletionMessage `json:"messages"`
+	Model    string                `json:"model"`
+	Messages []llms.MessageContent `json:"messages"`
 }
 
 // loadHistory loads the history from the history file (as yaml)
-func (s *completionService) loadHistory() error {
+func (s *CompletionService) loadHistory() error {
 	if s.historyIn == nil {
 		return nil
 	}
@@ -34,7 +35,7 @@ func (s *completionService) loadHistory() error {
 }
 
 // saveHistory saves the history to the history file (as yaml)
-func (s *completionService) saveHistory() error {
+func (s *CompletionService) saveHistory() error {
 	if s.historyOutFile == "" {
 		return nil
 	}

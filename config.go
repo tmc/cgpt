@@ -4,24 +4,24 @@ import (
 	"fmt"
 	"os"
 
-	"gopkg.in/yaml.v2"
+	"github.com/spf13/viper"
 )
 
-const (
-	defaultModel     = "gpt-4"
-	defaultMaxTokens = 1024
-)
+var defaultBackend = "anthropic"
+var defaultModels = map[string]string{
+	"openai":    "gpt-4",
+	"anthropic": "claude-3-opus-20240229",
+}
 
 // Config is the configuration for cgpt.
 type Config struct {
-	APIKey    string `yaml:"apiKey"`
+	Backend   string `yaml:"backend"`
 	Model     string `yaml:"modelName"`
 	Stream    bool   `yaml:"stream"`
 	MaxTokens int    `yaml:"maxTokens"`
 
-	SystemPrompt string `yaml:"systemPrompt"`
-
-	LogitBias map[string]float64 `yaml:"logitBias"`
+	SystemPrompt string             `yaml:"systemPrompt"`
+	LogitBias    map[string]float64 `yaml:"logitBias"`
 }
 
 // loadConfig loads the config file from the given path.
@@ -31,27 +31,32 @@ func loadConfig(path string) (*Config, error) {
 	if path == "" {
 		return setDefaults(&cfg), nil
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return setDefaults(&cfg), fmt.Errorf("unable to read config file: %w", err)
-	}
-	err = yaml.Unmarshal(data, &cfg)
-	if err != nil {
+	viper.AddConfigPath("/etc/cgpt/")
+	viper.AddConfigPath("$HOME/.cgpt")
+	viper.AddConfigPath(".")
+	viper.SetConfigFile(path)
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			fmt.Fprintln(os.Stderr, "config file not found, using defaults (%w)", err)
+			return setDefaults(&cfg), nil
+		}
 		return setDefaults(&cfg), fmt.Errorf("unable to parse config file: %w", err)
+	}
+	if err := viper.Unmarshal(&cfg); err != nil {
+		return setDefaults(&cfg), fmt.Errorf("unable to unmarshal config file: %w", err)
 	}
 	return setDefaults(&cfg), nil
 }
 
 func setDefaults(cfg *Config) *Config {
+	if cfg.Backend == "" {
+		cfg.Backend = defaultBackend
+	}
 	if cfg.Model == "" {
-		cfg.Model = defaultModel
+		cfg.Model = defaultModels[cfg.Backend]
 	}
 	if cfg.MaxTokens == 0 {
-		cfg.MaxTokens = defaultMaxTokens
-	}
-	// Prefer env var over config file:
-	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
-		cfg.APIKey = apiKey
+		cfg.MaxTokens = 2048
 	}
 	return cfg
 }

@@ -8,10 +8,14 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	"github.com/tmc/langchaingo/llms"
 )
 
-type completionService struct {
+type CompletionService struct {
 	cfg *Config
+
+	model llms.Model
 
 	payload *ChatCompletionPayload
 
@@ -19,15 +23,20 @@ type completionService struct {
 	historyOutFile string
 }
 
-func newCompletionService(cfg *Config) (*completionService, error) {
-	s := &completionService{
+func NewCompletionService(cfg *Config) (*CompletionService, error) {
+	model, err := initializeModel(cfg.Backend, cfg.Model)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize model: %w", err)
+	}
+	s := &CompletionService{
 		cfg:     cfg,
+		model:   model,
 		payload: newCompletionPayload(cfg),
 	}
 	return s, nil
 }
 
-func (s *completionService) run(ctx context.Context, runCfg runConfig) error {
+func (s *CompletionService) run(ctx context.Context, runCfg runConfig) error {
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
 		log.Println("failed to handle history:", err)
 	}
@@ -50,11 +59,11 @@ func (s *completionService) run(ctx context.Context, runCfg runConfig) error {
 	return s.runOneShotCompletion(ctx, runCfg.Input)
 }
 
-func (s *completionService) loadedWithHistory() bool {
+func (s *CompletionService) loadedWithHistory() bool {
 	return s.historyIn != nil
 }
 
-func (s *completionService) handleHistory(historyIn, historyOut string) error {
+func (s *CompletionService) handleHistory(historyIn, historyOut string) error {
 	s.historyOutFile = historyOut
 	if historyIn != "" {
 		f, err := os.Open(historyIn)
@@ -73,7 +82,7 @@ func (s *completionService) handleHistory(historyIn, historyOut string) error {
 	return loadErr
 }
 
-func (s *completionService) runNCompletions(ctx context.Context, n int) error {
+func (s *CompletionService) runNCompletions(ctx context.Context, n int) error {
 	fmt.Println("Running", n, "completions")
 
 	for i := 0; i < n; i++ {
@@ -85,13 +94,22 @@ func (s *completionService) runNCompletions(ctx context.Context, n int) error {
 	return nil
 }
 
-func (s *completionService) getLastUserMessage() string {
+func (s *CompletionService) getLastUserMessage() string {
 	// TODO(tmc): user msg
-	return s.payload.Messages[len(s.payload.Messages)-1].Content
+	if len(s.payload.Messages) == 0 {
+		return ""
+	}
+	last := s.payload.Messages[len(s.payload.Messages)-1]
+	var parts []string
+	for _, m := range last.Parts {
+		parts = append(parts, fmt.Sprint(m))
+	}
+
+	return strings.Join(parts, "\n")
 }
 
 // runOneCompletion runs the completion API once.
-func (s *completionService) runOneCompletion(ctx context.Context, input io.Reader) error {
+func (s *CompletionService) runOneCompletion(ctx context.Context, input io.Reader) error {
 	b, err := io.ReadAll(input)
 	if err != nil {
 		return err
@@ -101,11 +119,11 @@ func (s *completionService) runOneCompletion(ctx context.Context, input io.Reade
 	// Currently, we don't support streaming for these completions.
 	s.payload.Stream = false
 	s.payload.addUserMessage(contents)
-	r, err := performCompletion(ctx, s.cfg.APIKey, s.payload)
+	r, err := s.PerformCompletion(ctx, s.payload)
 	if err != nil {
 		return err
 	}
-	fmt.Println(r.Choices[0].Message.Content)
+	fmt.Println(r)
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
 	}
@@ -113,7 +131,7 @@ func (s *completionService) runOneCompletion(ctx context.Context, input io.Reade
 }
 
 // runOneShotCompletion runs the completion API once.
-func (s *completionService) runOneShotCompletion(ctx context.Context, inputFile string) error {
+func (s *CompletionService) runOneShotCompletion(ctx context.Context, inputFile string) error {
 	// TODO: exit gracefully if no input is provided within a certain time period.
 	var (
 		input io.Reader
@@ -135,11 +153,11 @@ func (s *completionService) runOneShotCompletion(ctx context.Context, inputFile 
 
 	s.payload.Stream = false
 	s.payload.addUserMessage(contents)
-	r, err := performCompletion(ctx, s.cfg.APIKey, s.payload)
+	response, err := s.PerformCompletion(ctx, s.payload)
 	if err != nil {
 		return fmt.Errorf("failed to perform completion: %w", err)
 	}
-	fmt.Println(r.Choices[0].Message.Content)
+	fmt.Println(response)
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
 	}
@@ -147,14 +165,16 @@ func (s *completionService) runOneShotCompletion(ctx context.Context, inputFile 
 }
 
 // runOneShotCompletion runs the completion API once.
-func (s *completionService) runOneShotCompletionStreaming(ctx context.Context, inputFile string) error {
+func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, inputFile string) error {
 	// TODO: exit gracefully if no input is provided within a certain time period.
 	var (
-		input io.Reader
-		err   error
+		input             io.Reader
+		err               error
+		shouldShowSpinner = false
 	)
 	if inputFile == "-" {
 		input = os.Stdin
+		shouldShowSpinner = stdinAppearsToBeTTY() && !*flagStream
 	} else {
 		input, err = os.Open(inputFile)
 		if err != nil {
@@ -169,14 +189,14 @@ func (s *completionService) runOneShotCompletionStreaming(ctx context.Context, i
 
 	s.payload.Stream = true
 	s.payload.addUserMessage(contents)
-	streamPayloads, err := performCompletionStreaming(ctx, s.cfg.APIKey, s.payload)
+	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, shouldShowSpinner)
 	if err != nil {
 		return err
 	}
 	content := strings.Builder{}
 	for r := range streamPayloads {
-		content.WriteString(r.Choices[0].Delta.Content)
-		fmt.Print(r.Choices[0].Delta.Content)
+		content.WriteString(r)
+		fmt.Print(r)
 	}
 	s.payload.addAssistantMessage(content.String())
 	if err := s.saveHistory(); err != nil {
@@ -186,7 +206,7 @@ func (s *completionService) runOneShotCompletionStreaming(ctx context.Context, i
 }
 
 // runContinuousCompletion runs the completion API in a loop, using the previous output as the input for the next request.
-func (s *completionService) runContinuousCompletion(ctx context.Context) error {
+func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
 	// read until two newlines using a scanner:
 	scanner := bufio.NewScanner(os.Stdin)
@@ -197,12 +217,12 @@ func (s *completionService) runContinuousCompletion(ctx context.Context) error {
 			return err
 		}
 		s.payload.addUserMessage(input)
-		r, err := performCompletion(ctx, s.cfg.APIKey, s.payload)
+		response, err := s.PerformCompletion(ctx, s.payload)
 		if err != nil {
 			return err
 		}
-		s.payload.addAssistantMessage(r.Choices[0].Message.Content)
-		fmt.Println(r.Choices[0].Message.Content)
+		s.payload.addAssistantMessage(response)
+		fmt.Println(response)
 		fmt.Println()
 		if err := s.saveHistory(); err != nil {
 			return fmt.Errorf("failed to save history: %w", err)
@@ -211,7 +231,7 @@ func (s *completionService) runContinuousCompletion(ctx context.Context) error {
 }
 
 // runContinuousCompletionStreaming runs the completion API in a loop, using the previous output as the input for the next request.
-func (s *completionService) runContinuousCompletionStreaming(ctx context.Context) error {
+func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
 	// read until two newlines using a scanner:
 	scanner := bufio.NewScanner(os.Stdin)
@@ -222,14 +242,14 @@ func (s *completionService) runContinuousCompletionStreaming(ctx context.Context
 			return err
 		}
 		s.payload.addUserMessage(input)
-		streamPayloads, err := performCompletionStreaming(ctx, s.cfg.APIKey, s.payload)
+		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, true)
 		if err != nil {
 			return err
 		}
 		content := strings.Builder{}
 		for r := range streamPayloads {
-			content.WriteString(r.Choices[0].Delta.Content)
-			fmt.Print(r.Choices[0].Delta.Content)
+			content.WriteString(r)
+			fmt.Print(r)
 		}
 		s.payload.addAssistantMessage(content.String())
 		fmt.Println()
@@ -253,4 +273,9 @@ func readUntilBlank(s *bufio.Scanner, linePrompt string) (string, error) {
 		fmt.Print(linePrompt)
 	}
 	return strings.Join(lines, "\n"), s.Err()
+}
+
+func stdinAppearsToBeTTY() bool {
+	stat, _ := os.Stdin.Stat()
+	return (stat.Mode() & os.ModeCharDevice) != 0
 }

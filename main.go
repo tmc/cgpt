@@ -1,4 +1,4 @@
-// Command cgpt is a command line tool for interacting with the OpenAI completion APIs.
+// Command cgpt is a command line tool for interacting with LLMs.
 //
 // The -continuous flag will run the completion API in a loop, using the previous output as the
 // input for the next request. It will run after two newlines are entered.
@@ -12,8 +12,10 @@ import (
 )
 
 var (
+	flagBackend    = flag.String("backend", "openai", "The backend to use")
+	flagModel      = flag.String("model", "gpt-4", "The model to use")
 	flagInput      = flag.String("input", "-", "The input text to complete. If '-', read from stdin.")
-	flagConfig     = flag.String("config", "", "Path to the configuration file")
+	flagConfig     = flag.String("config", "config.yaml", "Path to the configuration file")
 	flagContinuous = flag.Bool("continuous", false, "Run in continuous mode")
 	flagStream     = flag.Bool("stream", true, "Stream results")
 
@@ -29,12 +31,8 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "issue loading config: %v\n", err)
 	}
-	if cfg.APIKey == "" {
-		fmt.Fprintln(os.Stderr, "Missing API key in config. Please set the OPENAI_API_KEY environment variable or add it to the config file.")
-		os.Exit(1)
-	}
 
-	s, err := newCompletionService(cfg)
+	s, err := NewCompletionService(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

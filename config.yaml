@@ -1,7 +1,9 @@
 # This file is a sample configuration file for cgpt.
 
-# The OpenAI model name to use.
-modelName: "gpt-3.5-turbo"
+# The backend to use.
+backend: "openai"
+# The model to use.
+modelName: "gpt-4"
 # Whether or not to stream output.
 stream: true
 # Optional system prompt.
