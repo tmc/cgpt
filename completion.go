@@ -1,7 +1,6 @@
-package main
+package cgpt
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -9,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chzyer/readline"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -23,6 +23,7 @@ type CompletionService struct {
 	historyOutFile string
 }
 
+// NewCompletionService creates a new CompletionService with the given configuration.
 func NewCompletionService(cfg *Config) (*CompletionService, error) {
 	model, err := initializeModel(cfg.Backend, cfg.Model)
 	if err != nil {
@@ -36,7 +37,25 @@ func NewCompletionService(cfg *Config) (*CompletionService, error) {
 	return s, nil
 }
 
-func (s *CompletionService) run(ctx context.Context, runCfg runConfig) error {
+// RunConfig is the configuration for the Run method.
+type RunConfig struct {
+	// Input is the input text to complete. If "-", read from stdin.
+	Input string
+	// Continuous will run the completion API in a loop, using the previous output as the input for the next request.
+	Continuous bool
+	// Stream will stream results as they come in.
+	Stream bool
+
+	// HistoryIn is the file to read history from.
+	HistoryIn string
+	// HistoryOut is the file to store history in.
+	HistoryOut string
+
+	// NCompletions is the number of completions to complete in a history-enabled context.
+	NCompletions int
+}
+
+func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
 		log.Println("failed to handle history:", err)
 	}
@@ -73,13 +92,14 @@ func (s *CompletionService) handleHistory(historyIn, historyOut string) error {
 		s.historyIn = f
 		defer f.Close()
 	}
-	loadErr := s.loadHistory()
-	if loadErr == nil {
-		if err := s.saveHistory(); err != nil {
-			return fmt.Errorf("failed to save history: %w", err)
-		}
+	err := s.loadHistory()
+	if err != nil {
+		return fmt.Errorf("failed to load history: %w", err)
 	}
-	return loadErr
+	if err := s.saveHistory(); err != nil {
+		return fmt.Errorf("failed to save history: %w", err)
+	}
+	return nil
 }
 
 func (s *CompletionService) runNCompletions(ctx context.Context, n int) error {
@@ -95,7 +115,7 @@ func (s *CompletionService) runNCompletions(ctx context.Context, n int) error {
 }
 
 func (s *CompletionService) getLastUserMessage() string {
-	// TODO(tmc): user msg
+	// TODO: user msg
 	if len(s.payload.Messages) == 0 {
 		return ""
 	}
@@ -108,7 +128,6 @@ func (s *CompletionService) getLastUserMessage() string {
 	return strings.Join(parts, "\n")
 }
 
-// runOneCompletion runs the completion API once.
 func (s *CompletionService) runOneCompletion(ctx context.Context, input io.Reader) error {
 	b, err := io.ReadAll(input)
 	if err != nil {
@@ -130,15 +149,23 @@ func (s *CompletionService) runOneCompletion(ctx context.Context, input io.Reade
 	return nil
 }
 
-// runOneShotCompletion runs the completion API once.
 func (s *CompletionService) runOneShotCompletion(ctx context.Context, inputFile string) error {
-	// TODO: exit gracefully if no input is provided within a certain time period.
 	var (
 		input io.Reader
 		err   error
 	)
 	if inputFile == "-" {
-		input = os.Stdin
+		rl, err := newReadline()
+		if err != nil {
+			return fmt.Errorf("failed to initialize readline: %w", err)
+		}
+		defer rl.Close()
+
+		line, err := rl.Readline()
+		if err != nil {
+			return fmt.Errorf("failed to read input: %w", err)
+		}
+		input = strings.NewReader(line)
 	} else {
 		input, err = os.Open(inputFile)
 		if err != nil {
@@ -164,17 +191,23 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, inputFile 
 	return nil
 }
 
-// runOneShotCompletion runs the completion API once.
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, inputFile string) error {
-	// TODO: exit gracefully if no input is provided within a certain time period.
 	var (
-		input             io.Reader
-		err               error
-		shouldShowSpinner = false
+		input io.Reader
+		err   error
 	)
 	if inputFile == "-" {
-		input = os.Stdin
-		//shouldShowSpinner = stdinAppearsToBeTTY() && !*flagStream
+		rl, err := readline.New("> ")
+		if err != nil {
+			return fmt.Errorf("failed to initialize readline: %w", err)
+		}
+		defer rl.Close()
+
+		line, err := rl.Readline()
+		if err != nil {
+			return fmt.Errorf("failed to read input: %w", err)
+		}
+		input = strings.NewReader(line)
 	} else {
 		input, err = os.Open(inputFile)
 		if err != nil {
@@ -189,7 +222,7 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, i
 
 	s.payload.Stream = true
 	s.payload.addUserMessage(contents)
-	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, shouldShowSpinner)
+	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, true)
 	if err != nil {
 		return err
 	}
@@ -205,18 +238,20 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, i
 	return nil
 }
 
-// runContinuousCompletion runs the completion API in a loop, using the previous output as the input for the next request.
 func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
-	// read until two newlines using a scanner:
-	scanner := bufio.NewScanner(os.Stdin)
+	rl, err := readline.New("> ")
+	if err != nil {
+		return fmt.Errorf("failed to initialize readline: %w", err)
+	}
+	defer rl.Close()
 
 	for {
-		input, err := readUntilBlank(scanner, "> ")
+		line, err := rl.Readline()
 		if err != nil {
 			return err
 		}
-		s.payload.addUserMessage(input)
+		s.payload.addUserMessage(line)
 		response, err := s.PerformCompletion(ctx, s.payload)
 		if err != nil {
 			return err
@@ -230,18 +265,20 @@ func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 	}
 }
 
-// runContinuousCompletionStreaming runs the completion API in a loop, using the previous output as the input for the next request.
 func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
-	// read until two newlines using a scanner:
-	scanner := bufio.NewScanner(os.Stdin)
+	rl, err := readline.New("> ")
+	if err != nil {
+		return fmt.Errorf("failed to initialize readline: %w", err)
+	}
+	defer rl.Close()
 
 	for {
-		input, err := readUntilBlank(scanner, "> ")
+		line, err := rl.Readline()
 		if err != nil {
 			return err
 		}
-		s.payload.addUserMessage(input)
+		s.payload.addUserMessage(line)
 		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, true)
 		if err != nil {
 			return err
@@ -253,29 +290,8 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 		}
 		s.payload.addAssistantMessage(content.String())
 		fmt.Println()
-
 		if err := s.saveHistory(); err != nil {
 			return fmt.Errorf("failed to save history: %w", err)
 		}
 	}
-}
-
-// readUntilBlank reads lines from the scanner until a blank line is encountered.
-func readUntilBlank(s *bufio.Scanner, linePrompt string) (string, error) {
-	var lines []string
-	fmt.Print(linePrompt)
-	for s.Scan() {
-		line := s.Text()
-		if line == "" {
-			break
-		}
-		lines = append(lines, line)
-		fmt.Print(linePrompt)
-	}
-	return strings.Join(lines, "\n"), s.Err()
-}
-
-func stdinAppearsToBeTTY() bool {
-	stat, _ := os.Stdin.Stat()
-	return (stat.Mode() & os.ModeCharDevice) != 0
 }

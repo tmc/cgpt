@@ -6,6 +6,7 @@ toolchain go1.22.2
 
 require (
 	github.com/briandowns/spinner v1.23.0
+	github.com/chzyer/readline v1.5.1
 	github.com/spf13/viper v1.18.2
 	github.com/tmc/langchaingo v0.1.10-pre.0
 	gopkg.in/yaml.v2 v2.4.0

@@ -1,4 +1,4 @@
-package main
+package cgpt
 
 import (
 	"fmt"
@@ -24,9 +24,9 @@ type Config struct {
 	LogitBias    map[string]float64 `yaml:"logitBias"`
 }
 
-// loadConfig loads the config file from the given path.
+// LoadConfigFromPath loads the config file from the given path.
 // if the file is not found, it returns the default config.
-func loadConfig(path string) (*Config, error) {
+func LoadConfigFromPath(path string) (*Config, error) {
 	var cfg Config
 	if path == "" {
 		return setDefaults(&cfg), nil

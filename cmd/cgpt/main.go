@@ -9,6 +9,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/tmc/cgpt"
 )
 
 var (
@@ -27,18 +29,18 @@ var (
 func main() {
 	flag.Parse()
 	ctx := context.Background()
-	cfg, err := loadConfig(*flagConfig)
+	cfg, err := cgpt.LoadConfigFromPath(*flagConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "issue loading config: %v\n", err)
 	}
 
-	s, err := NewCompletionService(cfg)
+	s, err := cgpt.NewCompletionService(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	if err = s.run(ctx, runConfig{
+	if err = s.Run(ctx, cgpt.RunConfig{
 		Input:        *flagInput,
 		Continuous:   *flagContinuous,
 		Stream:       *flagStream,
@@ -49,22 +51,4 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-}
-
-// struct to hold flag values for the run command
-type runConfig struct {
-	// Input is the input text to complete. If "-", read from stdin.
-	Input string
-	// Continuous will run the completion API in a loop, using the previous output as the input for the next request.
-	Continuous bool
-	// Stream will stream results as they come in.
-	Stream bool
-
-	// HistoryIn is the file to read history from.
-	HistoryIn string
-	// HistoryOut is the file to store history in.
-	HistoryOut string
-
-	// NCompletions is the number of completions to complete in a history-enabled context.
-	NCompletions int
 }

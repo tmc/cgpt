@@ -1,4 +1,4 @@
-package main
+package cgpt
 
 import (
 	"context"
