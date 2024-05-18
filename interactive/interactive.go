@@ -86,11 +86,7 @@ func (s *InteractiveSession) Run() error {
 		timeDelta := now.Sub(s.lastInput)
 		s.lastInput = now
 
-		if s.mlState == MultilineNone {
-			line, err = s.reader.Readline()
-		} else {
-			line, err = s.readMultiline()
-		}
+		line, err = s.reader.Readline()
 
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
@@ -122,7 +118,7 @@ func (s *InteractiveSession) Run() error {
 			}
 		}
 
-		if timeDelta < pasteThreshold && s.isInputComplete() {
+		if timeDelta > pasteThreshold && s.isInputComplete() {
 			input := s.buffer.String()
 			if err := s.config.ProcessFn(input); err != nil {
 				return err
@@ -137,30 +133,18 @@ func (s *InteractiveSession) Run() error {
 }
 
 func (s *InteractiveSession) readInput() (string, error) {
-	if s.mlState == MultilineNone {
-		line, err := s.reader.Readline()
-		if s.shouldStartMultiline(line) {
-			s.mlState = MultilineActive
-			s.changePrompt(true)
-			line = strings.TrimPrefix(line, `"""`)
-		}
-		return line, err
-	} else {
-		line, err := s.readMultiline()
-
-		if s.shouldEndMultiline(line) {
-			s.mlState = MultilineNone
-			s.changePrompt(false)
-			line = strings.TrimSuffix(line, `"""`)
-		}
-		return line, err
+	line, err := s.reader.Readline()
+	if s.shouldStartMultiline(line) {
+		s.mlState = MultilineActive
+		s.changePrompt(true)
+		line = strings.TrimPrefix(line, `"""`)
 	}
-}
-
-func (s *InteractiveSession) readMultiline() (string, error) {
-	rl := bufio.NewReader(s.reader.Config.Stdin)
-	line, err := rl.ReadString('\n')
-	return strings.TrimSuffix(line, "\n") + "\n", err
+	if s.shouldEndMultiline(line) {
+		s.mlState = MultilineNone
+		s.changePrompt(false)
+		line = strings.TrimSuffix(line, `"""`)
+	}
+	return line, err
 }
 
 func (s *InteractiveSession) readPastedInput() string {

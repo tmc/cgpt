@@ -5,6 +5,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
+	"github.com/tmc/langchaingo/llms/ollama"
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
@@ -14,6 +15,9 @@ var constructors = map[string]func(modelName string) (llms.Model, error){
 	},
 	"anthropic": func(modelName string) (llms.Model, error) {
 		return anthropic.New(anthropic.WithModel(modelName))
+	},
+	"ollama": func(modelName string) (llms.Model, error) {
+		return ollama.New(ollama.WithModel(modelName))
 	},
 }
 

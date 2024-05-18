@@ -1,11 +1,11 @@
 # This file is a sample configuration file for cgpt.
 
-# The backend to use.
-backend: "openai"
-# The model to use.
-modelName: "gpt-4o"
-# Whether or not to stream output.
-stream: true
+# # The backend to use.
+# backend: "openai"
+# # The model to use.
+# modelName: "gpt-4o"
+# # Whether or not to stream output.
+# stream: true
 # Optional system prompt.
 systemPrompt: "You are a helpful programming assistant. Your output MUST always be valid JSON blobs"
 # Maximum tokens to return (including input).

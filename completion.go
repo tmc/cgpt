@@ -231,7 +231,7 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, i
 
 // Enhanced function to run continuous completion mode.
 func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
-	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
+	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
 
 	processFn := func(input string) error {
 		s.payload.addUserMessage(input)

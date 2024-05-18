@@ -33,6 +33,8 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "issue loading config: %v\n", err)
 	}
+	cfg.Backend = *flagBackend
+	cfg.Model = *flagModel
 
 	s, err := cgpt.NewCompletionService(cfg)
 	if err != nil {
