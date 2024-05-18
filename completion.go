@@ -174,7 +174,7 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, i
 	)
 	if inputFile == "-" {
 		input = os.Stdin
-		shouldShowSpinner = stdinAppearsToBeTTY() && !*flagStream
+		//shouldShowSpinner = stdinAppearsToBeTTY() && !*flagStream
 	} else {
 		input, err = os.Open(inputFile)
 		if err != nil {

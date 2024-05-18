@@ -9,7 +9,7 @@ import (
 
 var defaultBackend = "anthropic"
 var defaultModels = map[string]string{
-	"openai":    "gpt-4",
+	"openai":    "gpt-4o",
 	"anthropic": "claude-3-opus-20240229",
 }
 
@@ -56,7 +56,7 @@ func setDefaults(cfg *Config) *Config {
 		cfg.Model = defaultModels[cfg.Backend]
 	}
 	if cfg.MaxTokens == 0 {
-		cfg.MaxTokens = 2048
+		cfg.MaxTokens = 3072
 	}
 	return cfg
 }
