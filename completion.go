@@ -1,6 +1,7 @@
 package cgpt
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -8,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/chzyer/readline"
+	"github.com/tmc/cgpt/interactive"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -29,12 +30,11 @@ func NewCompletionService(cfg *Config) (*CompletionService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize model: %w", err)
 	}
-	s := &CompletionService{
+	return &CompletionService{
 		cfg:     cfg,
 		model:   model,
 		payload: newCompletionPayload(cfg),
-	}
-	return s, nil
+	}, nil
 }
 
 // RunConfig is the configuration for the Run method.
@@ -115,7 +115,6 @@ func (s *CompletionService) runNCompletions(ctx context.Context, n int) error {
 }
 
 func (s *CompletionService) getLastUserMessage() string {
-	// TODO: user msg
 	if len(s.payload.Messages) == 0 {
 		return ""
 	}
@@ -155,13 +154,9 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, inputFile 
 		err   error
 	)
 	if inputFile == "-" {
-		rl, err := newReadline()
-		if err != nil {
-			return fmt.Errorf("failed to initialize readline: %w", err)
-		}
-		defer rl.Close()
-
-		line, err := rl.Readline()
+		fmt.Printf("> ")
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read input: %w", err)
 		}
@@ -197,13 +192,9 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, i
 		err   error
 	)
 	if inputFile == "-" {
-		rl, err := readline.New("> ")
-		if err != nil {
-			return fmt.Errorf("failed to initialize readline: %w", err)
-		}
-		defer rl.Close()
-
-		line, err := rl.Readline()
+		fmt.Printf("> ")
+		reader := bufio.NewReader(os.Stdin)
+		line, err := reader.ReadString('\n')
 		if err != nil {
 			return fmt.Errorf("failed to read input: %w", err)
 		}
@@ -238,20 +229,12 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, i
 	return nil
 }
 
+// Enhanced function to run continuous completion mode.
 func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
-	rl, err := readline.New("> ")
-	if err != nil {
-		return fmt.Errorf("failed to initialize readline: %w", err)
-	}
-	defer rl.Close()
 
-	for {
-		line, err := rl.Readline()
-		if err != nil {
-			return err
-		}
-		s.payload.addUserMessage(line)
+	processFn := func(input string) error {
+		s.payload.addUserMessage(input)
 		response, err := s.PerformCompletion(ctx, s.payload)
 		if err != nil {
 			return err
@@ -262,23 +245,30 @@ func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 		if err := s.saveHistory(); err != nil {
 			return fmt.Errorf("failed to save history: %w", err)
 		}
+		return nil
 	}
+
+	sessionConfig := interactive.Config{
+		Prompt:      ">>> ",
+		AltPrompt:   "... ",
+		HistoryFile: s.historyOutFile,
+		ProcessFn:   processFn,
+	}
+
+	session, err := interactive.NewInteractiveSession(sessionConfig)
+	if err != nil {
+		return err
+	}
+
+	return session.Run()
 }
 
+// Enhanced function to run continuous streaming completion mode.
 func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
-	rl, err := readline.New("> ")
-	if err != nil {
-		return fmt.Errorf("failed to initialize readline: %w", err)
-	}
-	defer rl.Close()
 
-	for {
-		line, err := rl.Readline()
-		if err != nil {
-			return err
-		}
-		s.payload.addUserMessage(line)
+	processFn := func(input string) error {
+		s.payload.addUserMessage(input)
 		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, true)
 		if err != nil {
 			return err
@@ -293,5 +283,20 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 		if err := s.saveHistory(); err != nil {
 			return fmt.Errorf("failed to save history: %w", err)
 		}
+		return nil
 	}
+
+	sessionConfig := interactive.Config{
+		Prompt:      ">>> ",
+		AltPrompt:   "... ",
+		HistoryFile: s.historyOutFile,
+		ProcessFn:   processFn,
+	}
+
+	session, err := interactive.NewInteractiveSession(sessionConfig)
+	if err != nil {
+		return err
+	}
+
+	return session.Run()
 }
