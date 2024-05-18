@@ -21,9 +21,9 @@ var (
 	flagContinuous = flag.Bool("continuous", false, "Run in continuous mode")
 	flagStream     = flag.Bool("stream", true, "Stream results")
 
-	flagHistoryIn    = flag.String("hist-in", "", "File to read history from")
-	flagHistoryOut   = flag.String("hist-out", "", "File to store history in")
-	flagNCompletions = flag.Int("completions", 0, "Number of completions (when running with history)")
+	flagHistoryIn    = flag.String("in", "", "File to read completion history from")
+	flagHistoryOut   = flag.String("out", "", "File to store completion history in")
+	flagNCompletions = flag.Int("completions", 0, "Number of completions (when running non-interactively with history)")
 )
 
 func main() {
