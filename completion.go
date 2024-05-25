@@ -53,8 +53,12 @@ type RunConfig struct {
 
 	// NCompletions is the number of completions to complete in a history-enabled context.
 	NCompletions int
+
+	// Verbose will enable verbose output.
+	Verbose bool
 }
 
+// Run runs the completion service with the given configuration.
 func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
 		log.Println("failed to handle history:", err)
@@ -188,18 +192,10 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, inputFile 
 
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, inputFile string) error {
 	var (
-		input io.Reader
+		input io.Reader = os.Stdin
 		err   error
 	)
-	if inputFile == "-" {
-		fmt.Printf("> ")
-		reader := bufio.NewReader(os.Stdin)
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("failed to read input: %w", err)
-		}
-		input = strings.NewReader(line)
-	} else {
+	if inputFile != "-" {
 		input, err = os.Open(inputFile)
 		if err != nil {
 			return fmt.Errorf("failed to open input file %q: %w", inputFile, err)
@@ -232,7 +228,6 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, i
 // Enhanced function to run continuous completion mode.
 func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
-
 	processFn := func(input string) error {
 		s.payload.addUserMessage(input)
 		response, err := s.PerformCompletion(ctx, s.payload)
@@ -265,7 +260,7 @@ func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 
 // Enhanced function to run continuous streaming completion mode.
 func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context) error {
-	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press Ctrl+C to exit.")
+	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
 
 	processFn := func(input string) error {
 		s.payload.addUserMessage(input)

@@ -20,6 +20,7 @@ var (
 	flagConfig     = flag.String("config", "config.yaml", "Path to the configuration file")
 	flagContinuous = flag.Bool("continuous", false, "Run in continuous mode")
 	flagStream     = flag.Bool("stream", true, "Stream results")
+	flagVerbose    = flag.Bool("v", false, "Verbose output")
 
 	flagHistoryIn    = flag.String("in", "", "File to read completion history from")
 	flagHistoryOut   = flag.String("out", "", "File to store completion history in")
@@ -49,6 +50,7 @@ func main() {
 		HistoryIn:    *flagHistoryIn,
 		HistoryOut:   *flagHistoryOut,
 		NCompletions: *flagNCompletions,
+		Verbose:      *flagVerbose,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
