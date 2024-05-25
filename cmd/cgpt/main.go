@@ -30,8 +30,9 @@ var (
 func main() {
 	flag.Parse()
 	ctx := context.Background()
+	// attempt to load config, but don't fail if it doesn't exist.
 	cfg, err := cgpt.LoadConfigFromPath(*flagConfig)
-	if err != nil {
+	if err != nil && *flagVerbose {
 		fmt.Fprintf(os.Stderr, "issue loading config: %v\n", err)
 	}
 	cfg.Backend = *flagBackend
