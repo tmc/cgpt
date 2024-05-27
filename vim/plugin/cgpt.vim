@@ -2,20 +2,28 @@
 " Vim plugin to run cgpt commands.
 
 function! s:handle_output(channel, msg)
-  " echom "Output received: " . a:msg
   for line in split(a:msg, "\n")
     " Append the line after the visual selection end
     call append(line("'>"), line)
     " Move the end mark down to maintain the correct range
-    normal! `>j
-    " Reselect the visual range
-    normal! gv
+    let l:end_line = line("'>") + 1
+    call setpos("'>", [0, l:end_line, 1, 0])
   endfor
 endfunction
 
 function! s:job_exit(channel, msg)
   " Handle job exit if needed
   echo "Job exited with message: " . a:msg
+
+ " Restore visual selection:
+  " Move the end mark back to the last line of the output
+  " This is needed because the last line of the output is not included in the range
+  " when the job exits
+  let l:end_line = line("'>") - 1
+  call setpos("'>", [0, l:end_line, 1, 0])
+  " Restore visual selection
+  normal! gv
+
 endfunction
 
 function! RunCgpt()
@@ -43,7 +51,8 @@ function! RunCgpt()
         \ 'err_io': 'pipe',
         \ 'out_cb': function('s:handle_output'),
         \ 'err_cb': function('s:handle_output'),
-        \ 'exit_cb': function('s:job_exit')
+        \ 'exit_cb': function('s:job_exit'),
+        \ 'noblock': 1
         \ })
 
   " Check if job status:
@@ -55,9 +64,14 @@ function! RunCgpt()
   " Get the channel to send input
   let l:channel = job_getchannel(l:job_id)
 
-  " Delete selected lines then re-enable visual mode
+  " Capture the cursor position
+  let l:cursor_pos = getcurpos()
+
+  " Delete the visual selection:
   execute l:range_start . "," . l:range_end . "d"
-  normal! gv
+
+  " Restore the cursor to the starting line
+  call setpos('.', l:cursor_pos)
 
   " Send the input to the job
   call ch_sendraw(l:channel, l:input . "\n")
