@@ -1,0 +1,40 @@
+*cgpt.txt*			Plugin to run `cgpt` on visual selection
+
+SUMMARY                                                       *cgpt*
+
+This plugin provides a function to run the `cgpt` command on the current
+visual selection in Vim, and append the output after the selection.
+
+CONFIGURATION                                                 *cgpt-config*
+
+There is no specific configuration required for this plugin. Simply source the
+plugin file and use the provided mapping.
+
+FUNCTIONS                                                    *cgpt-functions*
+
+RunCgpt()							*RunCgpt*
+  Captures the visual selection, runs the `cgpt` command on it, and appends
+  the output after the selection.
+
+MAPPINGS                                                      *cgpt-mappings*
+
+vnoremap <silent> <leader>r :<C-U>call RunCgpt()<CR>
+  This mapping allows you to run the `RunCgpt` function on the current visual
+  selection by pressing `<leader>r`.
+
+USAGE                                                          *cgpt-usage*
+
+1. Visually select the text you want to process with `cgpt`.
+2. Press `<leader>r` to run the `cgpt` command on the selected text.
+3. The output of the `cgpt` command will be appended after the visual selection.
+
+EXAMPLE                                                       *cgpt-example*
+
+  Suppose you have the following text selected:
+
+    This is a test.
+
+  After pressing `<leader>r`, the output from the `cgpt` command will be appended after the selection.
+
+vim:tw=78:et:ft=help:norl:
+

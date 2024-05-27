@@ -47,6 +47,14 @@ Usage of cgpt:
     	Stream results (default true)
 ```
 
+## VIM Integration
+
+`cgpt` can be used as a completion engine in Vim. To do this, you can use the following configuration:
+
+```vim
+    Plug 'tmc/cgpt', { 'rtp': 'vim', 'do': 'go install ./cmd/cgpt' }
+```
+
 ### Configuration
 
 To use `cgpt`, you need to provide your OpenAI API key. You can do this by either exporting it as an environment variable or specifying it in a configuration file (`config.yaml`).
