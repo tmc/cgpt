@@ -15,15 +15,11 @@ function! s:job_exit(channel, msg)
   " Handle job exit if needed
   echo "Job exited with message: " . a:msg
 
- " Restore visual selection:
-  " Move the end mark back to the last line of the output
-  " This is needed because the last line of the output is not included in the range
-  " when the job exits
-  let l:end_line = line("'>") - 1
+  " Restore visual selection:
+  let l:end_line = line("'>") + 1
   call setpos("'>", [0, l:end_line, 1, 0])
   " Restore visual selection
   normal! gv
-
 endfunction
 
 function! RunCgpt()
@@ -34,7 +30,7 @@ function! RunCgpt()
   " Capture the selected lines
   let l:input = join(getline(l:range_start, l:range_end), "\n")
   " echom "Input to be sent: " . l:input
-  
+
   " Build the command with system prompt and config file options
   let l:command = ['cgpt']
   if exists('g:cgpt_system_prompt') && !empty(g:cgpt_system_prompt)
@@ -64,14 +60,11 @@ function! RunCgpt()
   " Get the channel to send input
   let l:channel = job_getchannel(l:job_id)
 
-  " Capture the cursor position
-  let l:cursor_pos = getcurpos()
-
   " Delete the visual selection:
   execute l:range_start . "," . l:range_end . "d"
 
   " Restore the cursor to the starting line
-  call setpos('.', l:cursor_pos)
+  call setpos('.', [0, l:range_start, 1, 0])
 
   " Send the input to the job
   call ch_sendraw(l:channel, l:input . "\n")
