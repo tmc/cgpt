@@ -8,6 +8,8 @@ import (
 	"github.com/tmc/langchaingo/llms"
 )
 
+// The default maximum number of tokens allowed in a single request.
+// This value is used to limit the size of the input to prevent excessive resource usage.
 var defaultMaxTokens = 2048
 
 // newCompletionPayload creates a new completion payload.

@@ -14,13 +14,14 @@ import (
 )
 
 var (
-	flagBackend    = flag.String("backend", "openai", "The backend to use")
-	flagModel      = flag.String("model", "gpt-4o", "The model to use")
-	flagInput      = flag.String("input", "-", "The input text to complete. If '-', read from stdin.")
-	flagConfig     = flag.String("config", "config.yaml", "Path to the configuration file")
-	flagContinuous = flag.Bool("continuous", false, "Run in continuous mode")
-	flagStream     = flag.Bool("stream", true, "Stream results")
-	flagVerbose    = flag.Bool("v", false, "Verbose output")
+	flagBackend      = flag.String("backend", "openai", "The backend to use")
+	flagModel        = flag.String("model", "gpt-4o", "The model to use")
+	flagInput        = flag.String("input", "-", "The input text to complete. If '-', read from stdin.")
+	flagConfig       = flag.String("config", "config.yaml", "Path to the configuration file")
+	flagContinuous   = flag.Bool("continuous", false, "Run in continuous mode")
+	flagStream       = flag.Bool("stream", true, "Stream results")
+	flagVerbose      = flag.Bool("v", false, "Verbose output")
+	flagSystemPrompt = flag.String("system-prompt", "", "System prompt to use")
 
 	flagHistoryIn    = flag.String("in", "", "File to read completion history from")
 	flagHistoryOut   = flag.String("out", "", "File to store completion history in")
@@ -37,6 +38,10 @@ func main() {
 	}
 	cfg.Backend = *flagBackend
 	cfg.Model = *flagModel
+
+	if *flagSystemPrompt != "" {
+		cfg.SystemPrompt = *flagSystemPrompt
+	}
 
 	s, err := cgpt.NewCompletionService(cfg)
 	if err != nil {

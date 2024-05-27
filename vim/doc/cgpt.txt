@@ -7,8 +7,17 @@ visual selection in Vim, and append the output after the selection.
 
 CONFIGURATION                                                 *cgpt-config*
 
-There is no specific configuration required for this plugin. Simply source the
-plugin file and use the provided mapping.
+g:cgpt_system_prompt                                          *g:cgpt_system_prompt*
+  Set the system prompt for cgpt. Default is an empty string.
+  Example: >
+    let g:cgpt_system_prompt = "You are a helpful assistant."
+<
+
+g:cgpt_config_file                                            *g:cgpt_config_file*
+  Set the path to the cgpt configuration file. Default is an empty string.
+  Example: >
+    let g:cgpt_config_file = "~/cgpt_config.yaml"
+<
 
 FUNCTIONS                                                    *cgpt-functions*
 
@@ -37,4 +46,3 @@ EXAMPLE                                                       *cgpt-example*
   After pressing `<leader>r`, the output from the `cgpt` command will be appended after the selection.
 
 vim:tw=78:et:ft=help:norl:
-

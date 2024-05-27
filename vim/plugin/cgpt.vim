@@ -1,10 +1,15 @@
+" cgpt.vim
+" Vim plugin to run cgpt commands.
+
 function! s:handle_output(channel, msg)
   " echom "Output received: " . a:msg
   for line in split(a:msg, "\n")
     " Append the line after the visual selection end
     call append(line("'>"), line)
     " Move the end mark down to maintain the correct range
-    normal! gvG
+    normal! `>j
+    " Reselect the visual range
+    normal! gv
   endfor
 endfunction
 
@@ -22,8 +27,17 @@ function! RunCgpt()
   let l:input = join(getline(l:range_start, l:range_end), "\n")
   " echom "Input to be sent: " . l:input
   
+  " Build the command with system prompt and config file options
+  let l:command = ['cgpt']
+  if exists('g:cgpt_system_prompt') && !empty(g:cgpt_system_prompt)
+    let l:command += ['--system-prompt', g:cgpt_system_prompt]
+  endif
+  if exists('g:cgpt_config_file') && !empty(g:cgpt_config_file)
+    let l:command += ['--config', g:cgpt_config_file]
+  endif
+
   " Start the job and handle the output incrementally
-  let l:job_id = job_start(['cgpt'], {
+  let l:job_id = job_start(l:command, {
         \ 'in_io': 'pipe',
         \ 'out_io': 'pipe',
         \ 'err_io': 'pipe',
@@ -53,4 +67,3 @@ endfunction
 
 " Map the visual selection command to <leader>r
 vnoremap <silent> <leader>r :<C-U>call RunCgpt()<CR>
-
