@@ -34,6 +34,7 @@ brews:
     homepage: https://github.com/tmc/cgpt
     description: A simple command line tool for working with LLMs.
     repository:
+      owner: tmc
       name: cgpt
 
 changelog:
