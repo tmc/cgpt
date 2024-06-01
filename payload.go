@@ -3,7 +3,6 @@ package cgpt
 import (
 	"context"
 	"log"
-	"time"
 
 	"github.com/tmc/langchaingo/llms"
 )
@@ -44,7 +43,7 @@ func (p *ChatCompletionPayload) addAssistantMessage(content string) {
 }
 
 func (s *CompletionService) PerformCompletion(ctx context.Context, payload *ChatCompletionPayload) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, s.completionTimeout)
 	defer cancel()
 	defer spin()()
 

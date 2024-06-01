@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/tmc/cgpt/interactive"
 	"github.com/tmc/langchaingo/llms"
@@ -20,8 +21,11 @@ type CompletionService struct {
 
 	payload *ChatCompletionPayload
 
-	historyIn      io.Reader
-	historyOutFile string
+	completionTimeout time.Duration
+
+	historyIn           io.Reader
+	historyOutFile      string
+	readlineHistoryFile string
 }
 
 // NewCompletionService creates a new CompletionService with the given configuration.
@@ -31,9 +35,10 @@ func NewCompletionService(cfg *Config) (*CompletionService, error) {
 		return nil, fmt.Errorf("failed to initialize model: %w", err)
 	}
 	return &CompletionService{
-		cfg:     cfg,
-		model:   model,
-		payload: newCompletionPayload(cfg),
+		cfg:               cfg,
+		model:             model,
+		payload:           newCompletionPayload(cfg),
+		completionTimeout: cfg.CompletionTimeout,
 	}, nil
 }
 
@@ -46,9 +51,9 @@ type RunConfig struct {
 	// Stream will stream results as they come in.
 	Stream bool
 
-	// HistoryIn is the file to read history from.
+	// HistoryIn is the file to read cgpt history from.
 	HistoryIn string
-	// HistoryOut is the file to store history in.
+	// HistoryOut is the file to store cgpt history in.
 	HistoryOut string
 
 	// NCompletions is the number of completions to complete in a history-enabled context.
@@ -56,6 +61,12 @@ type RunConfig struct {
 
 	// Verbose will enable verbose output.
 	Verbose bool
+
+	// ReadlineHistoryFile is the file to store readline history in.
+	ReadlineHistoryFile string
+
+	// MaximumTimeout is the maximum time to wait for a response.
+	MaximumTimeout time.Duration
 }
 
 // Run runs the completion service with the given configuration.
@@ -246,7 +257,7 @@ func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 	sessionConfig := interactive.Config{
 		Prompt:      ">>> ",
 		AltPrompt:   "... ",
-		HistoryFile: s.historyOutFile,
+		HistoryFile: s.readlineHistoryFile,
 		ProcessFn:   processFn,
 	}
 

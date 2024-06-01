@@ -7,6 +7,6 @@
 # # Whether or not to stream output.
 # stream: true
 # Optional system prompt.
-systemPrompt: "You are a helpful programming assistant. Your output MUST always be valid JSON blobs"
+# systemPrompt: "You are a helpful programming assistant. Your output MUST always be valid JSON blobs"
 # Maximum tokens to return (including input).
-maxTokens: 2048
+#maxTokens: 2048
