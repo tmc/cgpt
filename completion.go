@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -71,8 +70,9 @@ type RunConfig struct {
 
 // Run runs the completion service with the given configuration.
 func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
+	s.readlineHistoryFile = runCfg.ReadlineHistoryFile
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
-		log.Println("failed to handle history:", err)
+		fmt.Fprintln(os.Stderr, err)
 	}
 	if !s.loadedWithHistory() && s.cfg.SystemPrompt != "" {
 		s.payload.addSystemMessage(s.cfg.SystemPrompt)
@@ -102,7 +102,7 @@ func (s *CompletionService) handleHistory(historyIn, historyOut string) error {
 	if historyIn != "" {
 		f, err := os.Open(historyIn)
 		if err != nil {
-			return fmt.Errorf("failed to open history file %q: %w", historyIn, err)
+			return fmt.Errorf("issue reading input history file: %w", err)
 		}
 		s.historyIn = f
 		defer f.Close()
@@ -257,7 +257,7 @@ func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
 	sessionConfig := interactive.Config{
 		Prompt:      ">>> ",
 		AltPrompt:   "... ",
-		HistoryFile: s.readlineHistoryFile,
+		HistoryFile: expandTilde(s.readlineHistoryFile),
 		ProcessFn:   processFn,
 	}
 
@@ -295,7 +295,7 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 	sessionConfig := interactive.Config{
 		Prompt:      ">>> ",
 		AltPrompt:   "... ",
-		HistoryFile: s.historyOutFile,
+		HistoryFile: expandTilde(s.readlineHistoryFile),
 		ProcessFn:   processFn,
 	}
 
@@ -305,4 +305,11 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 	}
 
 	return session.Run()
+}
+
+func expandTilde(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		return strings.Replace(path, "~", os.Getenv("HOME"), 1)
+	}
+	return path
 }

@@ -41,11 +41,9 @@ func NewInteractiveSession(cfg Config) (*InteractiveSession, error) {
 		Prompt:            cfg.Prompt,
 		InterruptPrompt:   "^C",
 		EOFPrompt:         "exit",
+		HistoryFile:       cfg.HistoryFile,
 		HistorySearchFold: true,
 		AutoComplete:      readline.NewPrefixCompleter(),
-	}
-	if cfg.HistoryFile != "" {
-		readlineConfig.HistoryFile = cfg.HistoryFile
 	}
 
 	reader, err := readline.NewEx(readlineConfig)
@@ -57,12 +55,6 @@ func NewInteractiveSession(cfg Config) (*InteractiveSession, error) {
 		reader:    reader,
 		config:    cfg,
 		lastInput: time.Now(),
-	}
-
-	if cfg.HistoryFile != "" {
-		if err := session.loadHistory(); err != nil {
-			return nil, err
-		}
 	}
 
 	return session, nil
@@ -124,7 +116,6 @@ func (s *InteractiveSession) Run() error {
 				return err
 			}
 			s.buffer.Reset()
-			s.saveHistory(input)
 			s.changePrompt(false) // Back to normal prompt after completing multiline input
 		}
 	}
@@ -196,8 +187,4 @@ func (s *InteractiveSession) loadHistory() error {
 		return err
 	}
 	return nil
-}
-
-func (s *InteractiveSession) saveHistory(input string) {
-	s.reader.SaveHistory(input)
 }

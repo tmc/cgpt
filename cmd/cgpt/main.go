@@ -26,12 +26,12 @@ var (
 	flagStream       = flag.Bool("stream", true, "Stream results")
 	flagConfig       = flag.String("config", "config.yaml", "Path to the configuration file")
 	flagVerbose      = flag.BoolP("verbose", "v", false, "Verbose output")
+	flagNCompletions = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
 	flagMaxTokens      = flag.IntP("max-tokens", "t", 2048, "Maximum tokens to generate")
 	flagMaximumTimeout = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
 
 	flagReadlineHistoryFile = flag.String("readline-history-file", "~/.cgpt_history", "File to store readline history in")
-	flagNCompletions        = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
 	flagHelp                = flag.BoolP("help", "h", false, "")
 )
 

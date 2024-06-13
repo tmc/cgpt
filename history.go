@@ -10,6 +10,7 @@ import (
 )
 
 type history struct {
+	Backend  string                `json:"backend"`
 	Model    string                `json:"model"`
 	Messages []llms.MessageContent `json:"messages"`
 }
@@ -48,6 +49,7 @@ func (s *CompletionService) saveHistory() error {
 		return nil
 	}
 	h := history{
+		Backend:  s.cfg.Backend,
 		Model:    s.payload.Model,
 		Messages: s.payload.Messages,
 	}
