@@ -13,7 +13,7 @@
 To install `cgpt`, you'll need Go installed on your machine. Then, run:
 
 ```shell
-go install github.com/tmc/cgpt@latest
+go install github.com/tmc/cgpt/cmd/cgpt@latest
 ```
 
 ## 📖 Usage
@@ -112,8 +112,7 @@ To run `cgpt` locally for development:
 
 3. Build and run:
     ```shell
-    go build -o cgpt
-    ./cgpt -h
+    go install ./cmd/cgpt
     ```
 
 4. Run tests:
