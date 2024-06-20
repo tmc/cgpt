@@ -1,6 +1,7 @@
 package cgpt
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -63,6 +64,11 @@ func LoadConfig(path string, flagSet *pflag.FlagSet) (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
 	}
+	if v, _ := flagSet.GetBool("verbose"); v {
+		fmt.Fprint(os.Stderr, "config ")
+		json.NewEncoder(os.Stderr).Encode(cfg)
+	}
+
 	return cfg, nil
 }
 

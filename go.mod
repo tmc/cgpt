@@ -6,8 +6,9 @@ toolchain go1.22.2
 
 require (
 	github.com/chzyer/readline v1.5.1
+	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.18.2
-	github.com/tmc/langchaingo v0.1.11-0.20240613232315-d131fc2b6125
+	github.com/tmc/langchaingo v0.1.11
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -25,7 +26,6 @@ require (
 	github.com/sourcegraph/conc v0.3.0 // indirect
 	github.com/spf13/afero v1.11.0 // indirect
 	github.com/spf13/cast v1.6.0 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
