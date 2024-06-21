@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/tmc/langchaingo/llms"
-	"gopkg.in/yaml.v2"
+	"sigs.k8s.io/yaml"
 )
 
 type history struct {
@@ -53,5 +53,13 @@ func (s *CompletionService) saveHistory() error {
 		Model:    s.payload.Model,
 		Messages: s.payload.Messages,
 	}
-	return yaml.NewEncoder(f).Encode(h)
+	// encode with k8s yaml encoder: which doesn't define NewEncoder:
+	ybytes, err := yaml.Marshal(h)
+	if err != nil {
+		return fmt.Errorf("failed to marshal history: %w", err)
+	}
+	if _, err := f.Write(ybytes); err != nil {
+		return fmt.Errorf("failed to write history file %q: %w", s.historyOutFile, err)
+	}
+	return nil
 }

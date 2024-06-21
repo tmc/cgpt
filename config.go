@@ -12,7 +12,7 @@ import (
 )
 
 var defaultModels = map[string]string{
-	"anthropic": "claude-3-opus-20240229",
+	"anthropic": "claude-3-5-sonnet-20240620",
 	"openai":    "gpt-4o",
 	"ollama":    "llama3",
 }
@@ -81,7 +81,7 @@ func (cfg *Config) SetDefaults(defaultBackend string) *Config {
 		cfg.Model = defaultModels[cfg.Backend]
 	}
 	if cfg.MaxTokens == 0 {
-		cfg.MaxTokens = 3072
+		cfg.MaxTokens = 4000
 	}
 	if cfg.CompletionTimeout == 0 {
 		cfg.CompletionTimeout = 2 * time.Minute

@@ -16,8 +16,8 @@ import (
 )
 
 var (
-	flagBackend      = flag.StringP("backend", "b", "openai", "The backend to use")
-	flagModel        = flag.StringP("model", "m", "gpt-4o", "The model to use")
+	flagBackend      = flag.StringP("backend", "b", "anthropic", "The backend to use")
+	flagModel        = flag.StringP("model", "m", "claude-3-5-sonnet-20240620", "The model to use")
 	flagInput        = flag.StringP("input", "i", "-", "The input file to use. Use - for stdin (default)")
 	flagContinuous   = flag.BoolP("continuous", "c", false, "Run in continuous mode (interactive)")
 	flagSystemPrompt = flag.StringP("system-prompt", "s", "", "System prompt to use")
