@@ -5,20 +5,20 @@
 class Cgpt < Formula
   desc "A simple command line tool for working with LLMs."
   homepage "https://github.com/tmc/cgpt"
-  version "0.1.1"
+  version "0.2.0"
 
   on_macos do
     if Hardware::CPU.intel?
-      url "https://github.com/tmc/cgpt/releases/download/v0.1.1/cgpt_Darwin_x86_64.tar.gz"
-      sha256 "6cc5989d77a8e5bc31d42731351e36f496eef0239b98fb72c6b433b345da0502"
+      url "https://github.com/tmc/cgpt/releases/download/v0.2.0/cgpt_Darwin_x86_64.tar.gz"
+      sha256 "ef9405af73339d847da838d9dce73ccca5aea6a3cec73b52ec816a9a4e13033e"
 
       def install
         bin.install "cgpt"
       end
     end
     if Hardware::CPU.arm?
-      url "https://github.com/tmc/cgpt/releases/download/v0.1.1/cgpt_Darwin_arm64.tar.gz"
-      sha256 "6849a1a72f868508fc742b8bd2a71627f0de53645d69389f84194046ae38a1cd"
+      url "https://github.com/tmc/cgpt/releases/download/v0.2.0/cgpt_Darwin_arm64.tar.gz"
+      sha256 "2f8d789cc234696ae180f4c4578a596212ec73ad88e5cf877e836bceb7bba822"
 
       def install
         bin.install "cgpt"
@@ -28,16 +28,16 @@ class Cgpt < Formula
 
   on_linux do
     if Hardware::CPU.intel?
-      url "https://github.com/tmc/cgpt/releases/download/v0.1.1/cgpt_Linux_x86_64.tar.gz"
-      sha256 "b2f110040ff2d30900237c40daf6712fd206176d57a4481b790d5aab63456178"
+      url "https://github.com/tmc/cgpt/releases/download/v0.2.0/cgpt_Linux_x86_64.tar.gz"
+      sha256 "b40117c0cb78cfe8eeba8d86974dfa0dc8af8d8b0cf2a0ff47f4fe4e929928ae"
 
       def install
         bin.install "cgpt"
       end
     end
     if Hardware::CPU.arm? && Hardware::CPU.is_64_bit?
-      url "https://github.com/tmc/cgpt/releases/download/v0.1.1/cgpt_Linux_arm64.tar.gz"
-      sha256 "299770b5c1b6b372d7198bd22bb960067a7a0b022260a3bd54c72a062e6849db"
+      url "https://github.com/tmc/cgpt/releases/download/v0.2.0/cgpt_Linux_arm64.tar.gz"
+      sha256 "1a9f1f05c8c60b4b899638e4932f1adb931ba3e8abe1c768e95cd2ca040c33ca"
 
       def install
         bin.install "cgpt"
