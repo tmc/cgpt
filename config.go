@@ -54,23 +54,31 @@ func LoadConfig(path string, flagSet *pflag.FlagSet) (*Config, error) {
 		name = strings.ReplaceAll(string(result), "-", "")
 		return pflag.NormalizedName(name)
 	})
-	viper.BindPFlags(flagSet)
 
+	// Print the config to stderr if verbose flag is set.
+	defer func() {
+		if v, _ := flagSet.GetBool("verbose"); v {
+			fmt.Fprint(os.Stderr, "config ")
+			json.NewEncoder(os.Stderr).Encode(cfg)
+		}
+	}()
+	if err := viper.BindPFlags(flagSet); err != nil {
+		return cfg, fmt.Errorf("unable to bind flags: %w", err)
+	}
+	// marshal here in case the config file below doesn't exist
+	if err := viper.Unmarshal(&cfg); err != nil {
+		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
+	}
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			fmt.Fprintln(os.Stderr, "config file not found, using defaults (%w)", err)
 			return cfg, nil
 		}
-		return cfg, fmt.Errorf("unable to parse config file: %w", err)
+		return cfg, err
 	}
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
 	}
-	if v, _ := flagSet.GetBool("verbose"); v {
-		fmt.Fprint(os.Stderr, "config ")
-		json.NewEncoder(os.Stderr).Encode(cfg)
-	}
-
 	return cfg, nil
 }
 
