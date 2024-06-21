@@ -8,7 +8,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.18.2
-	github.com/tmc/langchaingo v0.1.11
+	github.com/tmc/langchaingo v0.1.12
 	go.uber.org/zap v1.21.0
 	sigs.k8s.io/yaml v1.3.0
 )
