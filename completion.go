@@ -11,10 +11,14 @@ import (
 
 	"github.com/tmc/cgpt/interactive"
 	"github.com/tmc/langchaingo/llms"
+	"go.uber.org/zap"
 )
 
 type CompletionService struct {
 	cfg *Config
+
+	loggerCfg zap.Config
+	logger    *zap.SugaredLogger
 
 	model llms.Model
 
@@ -29,12 +33,19 @@ type CompletionService struct {
 
 // NewCompletionService creates a new CompletionService with the given configuration.
 func NewCompletionService(cfg *Config) (*CompletionService, error) {
-	model, err := initializeModel(cfg.Backend, cfg.Model)
+	model, err := initializeModel(cfg.Backend, cfg.Model, cfg.Debug)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize model: %w", err)
 	}
+	loggerCfg := zap.NewDevelopmentConfig()
+	logger, err := loggerCfg.Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize logger: %w", err)
+	}
 	return &CompletionService{
 		cfg:               cfg,
+		loggerCfg:         loggerCfg,
+		logger:            logger.Sugar(),
 		model:             model,
 		payload:           newCompletionPayload(cfg),
 		completionTimeout: cfg.CompletionTimeout,
@@ -61,6 +72,9 @@ type RunConfig struct {
 	// Verbose will enable verbose output.
 	Verbose bool
 
+	// DebugMode will enable debug output.
+	DebugMode bool
+
 	// ReadlineHistoryFile is the file to store readline history in.
 	ReadlineHistoryFile string
 
@@ -70,7 +84,13 @@ type RunConfig struct {
 
 // Run runs the completion service with the given configuration.
 func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
-	s.readlineHistoryFile = runCfg.ReadlineHistoryFile
+	s.loggerCfg.Level.SetLevel(zap.WarnLevel)
+	if runCfg.Verbose {
+		s.loggerCfg.Level.SetLevel(zap.InfoLevel)
+	}
+	if runCfg.DebugMode {
+		s.loggerCfg.Level.SetLevel(zap.DebugLevel)
+	}
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 	}
@@ -88,9 +108,9 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 		return s.runNCompletions(ctx, runCfg.NCompletions)
 	}
 	if runCfg.Stream {
-		return s.runOneShotCompletionStreaming(ctx, runCfg.Input)
+		return s.runOneShotCompletionStreaming(ctx, runCfg)
 	}
-	return s.runOneShotCompletion(ctx, runCfg.Input)
+	return s.runOneShotCompletion(ctx, runCfg)
 }
 
 func (s *CompletionService) loadedWithHistory() bool {
@@ -118,7 +138,7 @@ func (s *CompletionService) handleHistory(historyIn, historyOut string) error {
 }
 
 func (s *CompletionService) runNCompletions(ctx context.Context, n int) error {
-	fmt.Println("Running", n, "completions")
+	s.logger.Info("running n completions", "n", n)
 
 	for i := 0; i < n; i++ {
 		in := s.getLastUserMessage()
@@ -163,11 +183,13 @@ func (s *CompletionService) runOneCompletion(ctx context.Context, input io.Reade
 	return nil
 }
 
-func (s *CompletionService) runOneShotCompletion(ctx context.Context, inputFile string) error {
+func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg RunConfig) error {
 	var (
 		input io.Reader
 		err   error
 	)
+	s.logger.Debug("running one-shot completion without streaming")
+	inputFile := runCfg.Input
 	if inputFile == "-" {
 		fmt.Printf("> ")
 		reader := bufio.NewReader(os.Stdin)
@@ -201,11 +223,13 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, inputFile 
 	return nil
 }
 
-func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, inputFile string) error {
+func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
 	var (
 		input io.Reader = os.Stdin
 		err   error
 	)
+	s.logger.Debug("running one-shot completion with streaming")
+	inputFile := runCfg.Input
 	if inputFile != "-" {
 		input, err = os.Open(inputFile)
 		if err != nil {

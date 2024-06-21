@@ -28,6 +28,8 @@ type Config struct {
 	LogitBias    map[string]float64 `yaml:"logitBias"`
 
 	CompletionTimeout time.Duration `yaml:"completionTimeout"`
+
+	Debug bool `yaml:"debug"`
 }
 
 // LoadConfig loads the config file from the given path.

@@ -26,6 +26,7 @@ var (
 	flagStream       = flag.Bool("stream", true, "Stream results")
 	flagConfig       = flag.String("config", "config.yaml", "Path to the configuration file")
 	flagVerbose      = flag.BoolP("verbose", "v", false, "Verbose output")
+	flagDebug        = flag.BoolP("debug", "", false, "Debug output")
 	flagNCompletions = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
 	flagMaxTokens      = flag.IntP("max-tokens", "t", 2048, "Maximum tokens to generate")
@@ -63,6 +64,7 @@ func main() {
 		HistoryOut:   *flagHistoryOut,
 		NCompletions: *flagNCompletions,
 		Verbose:      *flagVerbose,
+		DebugMode:    *flagDebug,
 
 		ReadlineHistoryFile: *flagReadlineHistoryFile,
 	}); err != nil {

@@ -57,10 +57,12 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		if showSpinner {
 			defer spin()()
 		}
-		_, err := s.model.GenerateContent(ctx, payload.Messages, llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-			ch <- string(chunk)
-			return nil
-		}))
+		_, err := s.model.GenerateContent(ctx, payload.Messages,
+			llms.WithMaxTokens(s.cfg.MaxTokens),
+			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+				ch <- string(chunk)
+				return nil
+			}))
 		if err != nil {
 			log.Fatalf("failed to generate content: %v", err)
 		}
