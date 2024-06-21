@@ -7,6 +7,7 @@
 - **Streaming Output**: Real-time responses as you type.
 - **History Management**: Save and load conversation history.
 - **Customizable Prompts**: Set system and assistant prompts.
+- **VIM Integration**: Use `cgpt` as a tool from within vim.
 
 ## 🚀 Installation
 
@@ -26,25 +27,27 @@ cgpt -h
 
 Example output:
 ```shell
+cgpt is a command line tool for interacting with generative AI models.
+
 Usage of cgpt:
-  -backend string
-    	The backend to use (default "openai")
-  -completions int
-    	Number of completions (when running non-interactively with history)
-  -config string
-    	Path to the configuration file (default "config.yaml")
-  -continuous
-    	Run in continuous mode
-  -in string
-    	File to read completion history from
-  -input string
-    	The input text to complete. If '-', read from stdin. (default "-")
-  -model string
-    	The model to use (default "gpt-4o")
-  -out string
-    	File to store completion history in
-  -stream
-    	Stream results (default true)
+  -b, --backend string                The backend to use (default "anthropic")
+  -m, --model string                  The model to use (default "claude-3-5-sonnet-20240620")
+  -i, --input string                  The input file to use. Use - for stdin (default) (default "-")
+  -c, --continuous                    Run in continuous mode (interactive)
+  -s, --system-prompt string          System prompt to use
+  -I, --history-load string           File to read completion history from
+  -O, --history-save string           File to store completion history in
+      --config string                 Path to the configuration file (default "config.yaml")
+  -v, --verbose                       Verbose output
+      --debug                         Debug output
+  -n, --completions int               Number of completions (when running non-interactively with history)
+  -t, --max-tokens int                Maximum tokens to generate (default 2048)
+      --completion-timeout duration   Maximum time to wait for a response (default 2m0s)
+  -h, --help
+
+Examples:
+	$ cgpt -i "Once upon a time"
+	$ echo "explain plan 9 in one sentence" | cgpt
 ```
 
 ## VIM Integration
