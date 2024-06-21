@@ -46,7 +46,7 @@ Usage of cgpt:
   -h, --help
 
 Examples:
-	$ cgpt -i "Once upon a time"
+	$ echo "how should I interpret the output of nvidia-smi?" | cgpt
 	$ echo "explain plan 9 in one sentence" | cgpt
 ```
 
@@ -83,7 +83,7 @@ Below is an example of a session using `cgpt`. Make sure to replace placeholders
 
 ```shell
 export OPENAI_API_KEY=your_openai_api_key
-cgpt -config path/to/your/config.yaml
+cgpt --config path/to/your/config.yaml
 ```
 
 Here's a visual example of using `cgpt`:
