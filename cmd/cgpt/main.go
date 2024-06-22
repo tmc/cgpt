@@ -78,7 +78,7 @@ func initFlags() {
 	flag.CommandLine.MarkHidden("readline-history-file")
 	flag.CommandLine.MarkHidden("stream")
 	flag.Usage = func() {
-		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
+		fmt.Println("cgpt is a command line tool for interacting with generative AI models\n")
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		flag.CommandLine.PrintDefaults()
 		fmt.Println(`
