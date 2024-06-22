@@ -15,11 +15,13 @@ var defaultModels = map[string]string{
 	"anthropic": "claude-3-5-sonnet-20240620",
 	"openai":    "gpt-4o",
 	"ollama":    "llama3",
+	"googleai":  "gemini-pro",
 }
 
 // Config is the configuration for cgpt.
 type Config struct {
 	Backend   string `yaml:"backend"`
+	APIKey    string `yaml:"apiKey"`
 	Model     string `yaml:"modelName"`
 	Stream    bool   `yaml:"stream"`
 	MaxTokens int    `yaml:"maxTokens"`
