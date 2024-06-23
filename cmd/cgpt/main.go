@@ -46,10 +46,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "issue loading config: %v\n", err)
 	}
 
-	if *flagSystemPrompt != "" {
-		cfg.SystemPrompt = *flagSystemPrompt
-	}
-
 	s, err := cgpt.NewCompletionService(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

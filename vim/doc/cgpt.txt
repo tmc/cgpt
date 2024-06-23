@@ -2,15 +2,27 @@
 
 SUMMARY                                                       *cgpt*
 
-This plugin provides a function to run the `cgpt` command on the current
+This plugin provides functionality to run the `cgpt` command on the current
 visual selection in Vim, and append the output after the selection.
 
 CONFIGURATION                                                 *cgpt-config*
 
-g:cgpt_system_prompt                                          *g:cgpt_system_prompt*
-  Set the system prompt for cgpt. Default is an empty string.
+g:cgpt_backend                                                *g:cgpt_backend*
+  Set the backend for cgpt. Default is 'anthropic'.
   Example: >
-    let g:cgpt_system_prompt = "You are a helpful assistant."
+    let g:cgpt_backend = 'anthropic'
+<
+
+g:cgpt_model                                                  *g:cgpt_model*
+  Set the model for cgpt. Default is 'claude-3-5-sonnet-20240620'.
+  Example: >
+    let g:cgpt_model = 'claude-3-5-sonnet-20240620'
+<
+
+g:cgpt_system_prompt                                          *g:cgpt_system_prompt*
+  Set the system prompt for cgpt. Default is a prompt for programming tasks.
+  Example: >
+    let g:cgpt_system_prompt = "The user is submitting a visual selection in the vim editor to you to help them with a programming task. Prefer to output code directly without surrounding commentary."
 <
 
 g:cgpt_config_file                                            *g:cgpt_config_file*
@@ -19,22 +31,34 @@ g:cgpt_config_file                                            *g:cgpt_config_fil
     let g:cgpt_config_file = "~/cgpt_config.yaml"
 <
 
+g:cgpt_include_filetype                                       *g:cgpt_include_filetype*
+  Include the current filetype in the prompt. Default is 0 (disabled).
+  Example: >
+    let g:cgpt_include_filetype = 1
+<
+
 FUNCTIONS                                                    *cgpt-functions*
 
-RunCgpt()							*RunCgpt*
+RunCgpt()							*RunCgpt()*
   Captures the visual selection, runs the `cgpt` command on it, and appends
-  the output after the selection.
+  the output after the selection. This function supports a range, allowing
+  it to be used with the :CgptRun command.
+
+COMMANDS                                                     *cgpt-commands*
+
+:CgptRun                                                     *:CgptRun*
+  Run the cgpt command on the current visual selection or specified range.
 
 MAPPINGS                                                      *cgpt-mappings*
 
-vnoremap <silent> <leader>r :<C-U>call RunCgpt()<CR>
+vnoremap <silent> cg :call RunCgpt()<CR>
   This mapping allows you to run the `RunCgpt` function on the current visual
-  selection by pressing `<leader>r`.
+  selection by pressing `cg` in visual mode.
 
 USAGE                                                          *cgpt-usage*
 
 1. Visually select the text you want to process with `cgpt`.
-2. Press `<leader>r` to run the `cgpt` command on the selected text.
+2. Press `cg` or use the `:CgptRun` command to run the `cgpt` command on the selected text.
 3. The output of the `cgpt` command will be appended after the visual selection.
 
 EXAMPLE                                                       *cgpt-example*
@@ -43,6 +67,6 @@ EXAMPLE                                                       *cgpt-example*
 
     This is a test.
 
-  After pressing `<leader>r`, the output from the `cgpt` command will be appended after the selection.
+  After pressing `cg` or running `:CgptRun`, the output from the `cgpt` command will be appended after the selection.
 
 vim:tw=78:et:ft=help:norl:
