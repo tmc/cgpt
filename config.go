@@ -15,14 +15,18 @@ var defaultModels = map[string]string{
 	"anthropic": "claude-3-5-sonnet-20240620",
 	"openai":    "gpt-4o",
 	"ollama":    "llama3",
+	"googleai":  "gemini-pro",
 }
 
 // Config is the configuration for cgpt.
 type Config struct {
-	Backend   string `yaml:"backend"`
-	Model     string `yaml:"modelName"`
-	Stream    bool   `yaml:"stream"`
-	MaxTokens int    `yaml:"maxTokens"`
+	Backend           string `yaml:"backend"`
+	OPENAI_API_KEY    string `yaml:"OPENAI_API_KEY"`
+	ANTHROPIC_API_KEY string `yaml:"ANTHROPIC_API_KEY"`
+	GOOGLE_API_KEY    string `yaml:"GOOGLE_API_KEY"`
+	Model             string `yaml:"modelName"`
+	Stream            bool   `yaml:"stream"`
+	MaxTokens         int    `yaml:"maxTokens"`
 
 	SystemPrompt string             `yaml:"systemPrompt"`
 	LogitBias    map[string]float64 `yaml:"logitBias"`
