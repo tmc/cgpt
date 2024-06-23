@@ -1,13 +1,10 @@
 " cgpt.vim
 " Minimal Vim plugin to run cgpt commands with streaming output and filetype context.
 
-Here's the commented version:
-" Check if the plugin is already loaded
+" comment this:
 if exists('g:loaded_cgpt')
-  " If it's already loaded, exit early to avoid redefining everything
   finish
 endif
-" Set a global variable to indicate that the plugin is now loaded
 let g:loaded_cgpt = 1
 
 let g:cgpt_backend = get(g:, 'cgpt_backend', 'anthropic')
