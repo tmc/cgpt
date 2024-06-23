@@ -20,11 +20,13 @@ var defaultModels = map[string]string{
 
 // Config is the configuration for cgpt.
 type Config struct {
-	Backend   string `yaml:"backend"`
-	APIKey    string `yaml:"apiKey"`
-	Model     string `yaml:"modelName"`
-	Stream    bool   `yaml:"stream"`
-	MaxTokens int    `yaml:"maxTokens"`
+	Backend           string `yaml:"backend"`
+	OPENAI_API_KEY    string `yaml:"OPENAI_API_KEY"`
+	ANTHROPIC_API_KEY string `yaml:"ANTHROPIC_API_KEY"`
+	GOOGLE_API_KEY    string `yaml:"GOOGLE_API_KEY"`
+	Model             string `yaml:"modelName"`
+	Stream            bool   `yaml:"stream"`
+	MaxTokens         int    `yaml:"maxTokens"`
 
 	SystemPrompt string             `yaml:"systemPrompt"`
 	LogitBias    map[string]float64 `yaml:"logitBias"`

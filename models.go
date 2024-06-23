@@ -54,10 +54,19 @@ var constructors = map[string]func(modelName string, debugMode bool, apiKey stri
 	},
 }
 
-func initializeModel(backend, modelName string, debugMode bool, apiKey string) (llms.Model, error) {
+func initializeModel(backend, modelName string, debugMode bool, cfg *Config) (llms.Model, error) {
 	constructor, ok := constructors[backend]
 	if !ok {
 		return nil, fmt.Errorf("unknown backend %q", backend)
+	}
+	var apiKey string
+	switch backend {
+	case "openai":
+		apiKey = cfg.OPENAI_API_KEY
+	case "anthropic":
+		apiKey = cfg.ANTHROPIC_API_KEY
+	case "googleai":
+		apiKey = cfg.GOOGLE_API_KEY
 	}
 	return constructor(modelName, debugMode, apiKey)
 }

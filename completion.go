@@ -33,7 +33,7 @@ type CompletionService struct {
 
 // NewCompletionService creates a new CompletionService with the given configuration.
 func NewCompletionService(cfg *Config) (*CompletionService, error) {
-	model, err := initializeModel(cfg.Backend, cfg.Model, cfg.Debug, cfg.APIKey)
+	model, err := initializeModel(cfg.Backend, cfg.Model, cfg.Debug, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize model: %w", err)
 	}
