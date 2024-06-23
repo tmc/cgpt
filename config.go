@@ -20,13 +20,10 @@ var defaultModels = map[string]string{
 
 // Config is the configuration for cgpt.
 type Config struct {
-	Backend           string `yaml:"backend"`
-	OPENAI_API_KEY    string `yaml:"OPENAI_API_KEY"`
-	ANTHROPIC_API_KEY string `yaml:"ANTHROPIC_API_KEY"`
-	GOOGLE_API_KEY    string `yaml:"GOOGLE_API_KEY"`
-	Model             string `yaml:"modelName"`
-	Stream            bool   `yaml:"stream"`
-	MaxTokens         int    `yaml:"maxTokens"`
+	Backend   string `yaml:"backend"`
+	Model     string `yaml:"modelName"`
+	Stream    bool   `yaml:"stream"`
+	MaxTokens int    `yaml:"maxTokens"`
 
 	SystemPrompt string             `yaml:"systemPrompt"`
 	LogitBias    map[string]float64 `yaml:"logitBias"`
@@ -34,6 +31,11 @@ type Config struct {
 	CompletionTimeout time.Duration `yaml:"completionTimeout"`
 
 	Debug bool `yaml:"debug"`
+
+	// API keys
+	OpenAIAPIKey    string `yaml:"openaiAPIKey"`
+	AnthropicAPIKey string `yaml:"anthropicAPIKey"`
+	GoogleAPIKey    string `yaml:"googleAPIKey"`
 }
 
 // LoadConfig loads the config file from the given path.
@@ -51,6 +53,12 @@ func LoadConfig(path string, flagSet *pflag.FlagSet) (*Config, error) {
 	viper.AddConfigPath("$HOME/.cgpt")
 	viper.AddConfigPath(".")
 	viper.SetConfigFile(path)
+
+	viper.SetEnvPrefix("CGPT")
+	viper.AutomaticEnv()
+	viper.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
+	viper.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
+	viper.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
 
 	normalizeFunc := flagSet.GetNormalizeFunc()
 	flagSet.SetNormalizeFunc(func(fs *pflag.FlagSet, name string) pflag.NormalizedName {

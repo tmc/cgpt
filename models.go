@@ -62,11 +62,11 @@ func initializeModel(backend, modelName string, debugMode bool, cfg *Config) (ll
 	var apiKey string
 	switch backend {
 	case "openai":
-		apiKey = cfg.OPENAI_API_KEY
+		apiKey = cfg.OpenAIAPIKey
 	case "anthropic":
-		apiKey = cfg.ANTHROPIC_API_KEY
+		apiKey = cfg.AnthropicAPIKey
 	case "googleai":
-		apiKey = cfg.GOOGLE_API_KEY
+		apiKey = cfg.GoogleAPIKey
 	}
 	return constructor(modelName, debugMode, apiKey)
 }
