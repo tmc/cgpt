@@ -84,6 +84,7 @@ type RunConfig struct {
 
 // Run runs the completion service with the given configuration.
 func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
+	s.readlineHistoryFile = runCfg.ReadlineHistoryFile
 	s.loggerCfg.Level.SetLevel(zap.WarnLevel)
 	if runCfg.Verbose {
 		s.loggerCfg.Level.SetLevel(zap.InfoLevel)
