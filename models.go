@@ -33,6 +33,9 @@ var constructors = map[string]func(modelName string, debugMode bool, apiKey stri
 		if debugMode {
 			options = append(options, anthropic.WithHTTPClient(httputil.DebugHTTPClient))
 		}
+		if modelName == "claude-3-5-sonnet-20240620" {
+			options = append(options, anthropic.WithAnthropicBetaHeader(anthropic.MaxTokensAnthropicSonnet35))
+		}
 		return anthropic.New(options...)
 	},
 	"ollama": func(modelName string, debugMode bool, apiKey string) (llms.Model, error) {

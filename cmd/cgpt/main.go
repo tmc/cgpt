@@ -29,7 +29,7 @@ var (
 	flagDebug        = flag.BoolP("debug", "", false, "Debug output")
 	flagNCompletions = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
-	flagMaxTokens      = flag.IntP("max-tokens", "t", 2048, "Maximum tokens to generate")
+	flagMaxTokens      = flag.IntP("max-tokens", "t", 8000, "Maximum tokens to generate")
 	flagMaximumTimeout = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
 
 	flagReadlineHistoryFile = flag.String("readline-history-file", "~/.cgpt_history", "File to store readline history in")

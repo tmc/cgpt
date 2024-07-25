@@ -41,7 +41,7 @@ Usage of cgpt:
   -v, --verbose                       Verbose output
       --debug                         Debug output
   -n, --completions int               Number of completions (when running non-interactively with history)
-  -t, --max-tokens int                Maximum tokens to generate (default 2048)
+  -t, --max-tokens int                Maximum tokens to generate (default 8000)
       --completion-timeout duration   Maximum time to wait for a response (default 2m0s)
   -h, --help
 
@@ -74,7 +74,7 @@ stream: true
 # Optional system prompt.
 systemPrompt: "You are PoemGPT. All of your answers should be rhyming in nature."
 # Maximum tokens to return (including input).
-maxTokens: 2048
+maxTokens: 8000
 ```
 
 ## 🎉 Examples
