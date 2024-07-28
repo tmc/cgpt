@@ -38,13 +38,6 @@ var (
 
 func main() {
 	initFlags()
-
-	// Check if no arguments were provided
-	if len(os.Args) == 1 {
-		flag.Usage()
-		return
-	}
-
 	ctx := context.Background()
 
 	// Attempt to load config, but don't fail if it doesn't exist.
