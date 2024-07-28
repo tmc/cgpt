@@ -8,6 +8,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.18.2
+	github.com/stretchr/testify v1.9.0
 	github.com/tmc/langchaingo v0.1.12
 	go.uber.org/zap v1.21.0
 	sigs.k8s.io/yaml v1.3.0
@@ -23,6 +24,7 @@ require (
 	cloud.google.com/go/iam v1.1.7 // indirect
 	cloud.google.com/go/longrunning v0.5.7 // indirect
 	cloud.google.com/go/vertexai v0.10.0 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/dlclark/regexp2 v1.10.0 // indirect
 	github.com/fatih/color v1.17.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -43,6 +45,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.1.0 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.6 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/sagikazarmark/locafero v0.4.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
 	github.com/sourcegraph/conc v0.3.0 // indirect

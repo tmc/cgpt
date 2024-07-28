@@ -44,21 +44,15 @@ func LoadConfig(path string, flagSet *pflag.FlagSet) (*Config, error) {
 	cfg := &Config{}
 	flagBackend, flagModel := flagSet.Lookup("backend"), flagSet.Lookup("model")
 	defaultBackend := flagBackend.Value.String()
-	cfg.SetDefaults(defaultBackend)
-	if !flagModel.Changed {
-		flagModel.Value.Set(cfg.Model)
-	}
-
-	viper.AddConfigPath("/etc/cgpt/")
-	viper.AddConfigPath("$HOME/.cgpt")
-	viper.AddConfigPath(".")
-	viper.SetConfigFile(path)
 
 	viper.SetEnvPrefix("CGPT")
 	viper.AutomaticEnv()
-	viper.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
-	viper.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
-	viper.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// Bind all flags to Viper
+	if err := viper.BindPFlags(flagSet); err != nil {
+		return cfg, fmt.Errorf("unable to bind flags: %w", err)
+	}
 
 	normalizeFunc := flagSet.GetNormalizeFunc()
 	flagSet.SetNormalizeFunc(func(fs *pflag.FlagSet, name string) pflag.NormalizedName {
@@ -67,30 +61,38 @@ func LoadConfig(path string, flagSet *pflag.FlagSet) (*Config, error) {
 		return pflag.NormalizedName(name)
 	})
 
-	// Print the config to stderr if verbose flag is set.
-	defer func() {
-		if v, _ := flagSet.GetBool("verbose"); v {
-			fmt.Fprint(os.Stderr, "config ")
-			json.NewEncoder(os.Stderr).Encode(cfg)
-		}
-	}()
-	if err := viper.BindPFlags(flagSet); err != nil {
-		return cfg, fmt.Errorf("unable to bind flags: %w", err)
-	}
-	// marshal here in case the config file below doesn't exist
-	if err := viper.Unmarshal(&cfg); err != nil {
-		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
-	}
+	// Read the config file
+	viper.AddConfigPath("/etc/cgpt/")
+	viper.AddConfigPath("$HOME/.cgpt")
+	viper.AddConfigPath(".")
+	viper.SetConfigFile(path)
 	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			fmt.Fprintln(os.Stderr, "config file not found, using defaults (%w)", err)
-			return cfg, nil
+			fmt.Fprintf(os.Stderr, "Config file not found, using defaults (%v)\n", err)
+		} else {
+			return cfg, err
 		}
-		return cfg, err
 	}
+
+	// Unmarshal the configuration
 	if err := viper.Unmarshal(&cfg); err != nil {
-		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
+		return cfg, fmt.Errorf("unable to unmarshal config: %w", err)
 	}
+
+	// Set defaults after unmarshaling
+	cfg.SetDefaults(defaultBackend)
+
+	// Override model if not explicitly set by flag
+	if !flagModel.Changed {
+		cfg.Model = defaultModels[cfg.Backend]
+	}
+
+	// Print the config to stderr if verbose flag is set
+	if v, _ := flagSet.GetBool("verbose"); v {
+		fmt.Fprint(os.Stderr, "config: ")
+		json.NewEncoder(os.Stderr).Encode(cfg)
+	}
+
 	return cfg, nil
 }
 
@@ -98,9 +100,6 @@ func LoadConfig(path string, flagSet *pflag.FlagSet) (*Config, error) {
 func (cfg *Config) SetDefaults(defaultBackend string) *Config {
 	if cfg.Backend == "" {
 		cfg.Backend = defaultBackend
-	}
-	if cfg.Model == "" {
-		cfg.Model = defaultModels[cfg.Backend]
 	}
 	if cfg.MaxTokens == 0 {
 		cfg.MaxTokens = 4000
