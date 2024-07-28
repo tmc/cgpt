@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -30,11 +29,23 @@ func TestLoadConfig(t *testing.T) {
 		resetViperAndEnv()
 		fs := createFlagSet()
 		cfg, err := LoadConfig("", fs)
-		assert.NoError(t, err)
-		assert.Equal(t, "anthropic", cfg.Backend)
-		assert.Equal(t, "claude-3-5-sonnet-20240620", cfg.Model)
-		assert.Equal(t, 4000, cfg.MaxTokens)
-		assert.Equal(t, 2*time.Minute, cfg.CompletionTimeout)
+
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if cfg.Backend != "anthropic" {
+			t.Errorf("Expected Backend to be 'anthropic', got '%s'", cfg.Backend)
+		}
+		if cfg.Model != "claude-3-5-sonnet-20240620" {
+			t.Errorf("Expected Model to be 'claude-3-5-sonnet-20240620', got '%s'", cfg.Model)
+		}
+		if cfg.MaxTokens != 4000 {
+			t.Errorf("Expected MaxTokens to be 4000, got %d", cfg.MaxTokens)
+		}
+		if cfg.CompletionTimeout != 2*time.Minute {
+			t.Errorf("Expected CompletionTimeout to be 2 minutes, got %v", cfg.CompletionTimeout)
+		}
+
 	})
 
 	t.Run("ConfigFromFlags", func(t *testing.T) {
@@ -43,9 +54,17 @@ func TestLoadConfig(t *testing.T) {
 		fs.Set("backend", "openai")
 		fs.Set("model", "gpt-3.5-turbo")
 		cfg, err := LoadConfig("", fs)
-		assert.NoError(t, err)
-		assert.Equal(t, "openai", cfg.Backend)
-		assert.Equal(t, "gpt-3.5-turbo", cfg.Model)
+
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if cfg.Backend != "openai" {
+			t.Errorf("Expected backend to be 'openai', but got '%s'", cfg.Backend)
+		}
+		if cfg.Model != "gpt-3.5-turbo" {
+			t.Errorf("Expected model to be 'gpt-3.5-turbo', but got '%s'", cfg.Model)
+		}
+
 	})
 
 	t.Run("ConfigFromEnv", func(t *testing.T) {
@@ -53,9 +72,17 @@ func TestLoadConfig(t *testing.T) {
 		os.Setenv("CGPT_BACKEND", "googleai")
 		fs := createFlagSet()
 		cfg, err := LoadConfig("", fs)
-		assert.NoError(t, err)
-		assert.Equal(t, "googleai", cfg.Backend)
-		assert.Equal(t, "gemini-pro", cfg.Model)
+
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if cfg.Backend != "googleai" {
+			t.Errorf("Expected backend to be 'googleai', but got '%s'", cfg.Backend)
+		}
+		if cfg.Model != "gemini-pro" {
+			t.Errorf("Expected model to be 'gemini-pro', but got '%s'", cfg.Model)
+		}
+
 	})
 
 	t.Run("ConfigPriority", func(t *testing.T) {
@@ -64,9 +91,17 @@ func TestLoadConfig(t *testing.T) {
 		fs := createFlagSet()
 		fs.Set("backend", "openai")
 		cfg, err := LoadConfig("", fs)
-		assert.NoError(t, err)
-		assert.Equal(t, "openai", cfg.Backend)
-		assert.Equal(t, "gpt-4o", cfg.Model)
+
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if cfg.Backend != "openai" {
+			t.Errorf("Expected backend to be 'openai', but got '%s'", cfg.Backend)
+		}
+		if cfg.Model != "gpt-4o" {
+			t.Errorf("Expected model to be 'gpt-4o', but got '%s'", cfg.Model)
+		}
+
 	})
 
 	t.Run("CustomModel", func(t *testing.T) {
@@ -75,9 +110,17 @@ func TestLoadConfig(t *testing.T) {
 		fs.Set("backend", "openai")
 		fs.Set("model", "gpt-4-32k")
 		cfg, err := LoadConfig("", fs)
-		assert.NoError(t, err)
-		assert.Equal(t, "openai", cfg.Backend)
-		assert.Equal(t, "gpt-4-32k", cfg.Model)
+
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if cfg.Backend != "openai" {
+			t.Errorf("Expected backend to be 'openai', but got '%s'", cfg.Backend)
+		}
+		if cfg.Model != "gpt-4-32k" {
+			t.Errorf("Expected model to be 'gpt-4-32k', but got '%s'", cfg.Model)
+		}
+
 	})
 
 	t.Run("InvalidBackend", func(t *testing.T) {
@@ -85,8 +128,16 @@ func TestLoadConfig(t *testing.T) {
 		fs := createFlagSet()
 		fs.Set("backend", "invalid")
 		cfg, err := LoadConfig("", fs)
-		assert.NoError(t, err)
-		assert.Equal(t, "invalid", cfg.Backend)
-		assert.Equal(t, "", cfg.Model)
+
+		if err != nil {
+			t.Errorf("Unexpected error: %v", err)
+		}
+		if cfg.Backend != "invalid" {
+			t.Errorf("Expected Backend to be 'invalid', but got '%s'", cfg.Backend)
+		}
+		if cfg.Model != "" {
+			t.Errorf("Expected Model to be empty, but got '%s'", cfg.Model)
+		}
+
 	})
 }
