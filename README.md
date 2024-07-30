@@ -1,128 +1,94 @@
-# cgpt
+# cgpt: Your Command-Line AI Assistant
 
-`cgpt` is a simple command line interface (CLI) for interacting with OpenAI's chat completion APIs. It can be thought of as a command line ChatGPT clone.
+cgpt is a simple yet powerful command-line tool for interacting with Large Language Models (LLMs). It's designed to be your AI-powered sidekick right in your terminal! 💻✨
 
-## ✨ Features
+## 🛠 Installation
 
-- **Streaming Output**: Real-time responses as you type.
-- **History Management**: Save and load conversation history.
-- **Customizable Prompts**: Set system and assistant prompts.
-- **VIM Integration**: Use `cgpt` as a tool from within vim.
+### Prerequisites
 
-## 🚀 Installation
+Before installing cgpt, you'll need to have Go installed on your system. Here's how to do it:
 
-To install `cgpt`, you'll need Go installed on your machine. Then, run:
+<details>
+<summary>Installing Go</summary>
 
-```shell
+#### macOS (using Homebrew)
+
+If you're on macOS and have Homebrew installed, you can easily install Go with:
+
+```bash
+brew install go
+```
+
+#### Other systems
+
+1. Visit the [official Go download page](https://golang.org/dl/).
+2. Download the appropriate package for your operating system.
+3. Follow the installation instructions for your platform.
+
+After installation, verify Go is correctly installed by running:
+
+```bash
+go version
+```
+
+This should display the installed Go version.
+
+</details>
+
+### Installing cgpt
+
+Once you have Go installed, you can install cgpt using the following command:
+
+```bash
 go install github.com/tmc/cgpt/cmd/cgpt@latest
 ```
 
-## 📖 Usage
+This will download, compile, and install the `cgpt` binary in your `$GOPATH/bin` directory.
 
-Run `cgpt` with the `-h` flag to see available commands and options:
+## 🚀 Usage
 
-```shell
-cgpt -h
+Here are some quick examples to get you started:
+
+```bash
+# Ask a question
+echo "how should I interpret the output of nvidia-smi?" | cgpt
+
+# Get a quick explanation
+echo "explain plan 9 in one sentence" | cgpt
 ```
 
-Example output:
-```shell
-cgpt is a command line tool for interacting with generative AI models.
+For more detailed usage instructions and options, run:
 
-Usage of cgpt:
-  -b, --backend string                The backend to use (default "anthropic")
-  -m, --model string                  The model to use (default "claude-3-5-sonnet-20240620")
-  -i, --input string                  The input file to use. Use - for stdin (default) (default "-")
-  -c, --continuous                    Run in continuous mode (interactive)
-  -s, --system-prompt string          System prompt to use
-  -I, --history-load string           File to read completion history from
-  -O, --history-save string           File to store completion history in
-      --config string                 Path to the configuration file (default "config.yaml")
-  -v, --verbose                       Verbose output
-      --debug                         Debug output
-  -n, --completions int               Number of completions (when running non-interactively with history)
-  -t, --max-tokens int                Maximum tokens to generate (default 8000)
-      --completion-timeout duration   Maximum time to wait for a response (default 2m0s)
-  -h, --help
-
-Examples:
-	$ echo "how should I interpret the output of nvidia-smi?" | cgpt
-	$ echo "explain plan 9 in one sentence" | cgpt
+```bash
+cgpt --help
 ```
 
-## VIM Integration
+## 🎛 Configuration
 
-`cgpt` can be used as a completion engine in Vim. To do this, you can use the following configuration:
-
-```vim
-    Plug 'tmc/cgpt', { 'rtp': 'vim', 'do': 'go install ./cmd/cgpt' }
-```
-
-### Configuration
-
-To use `cgpt`, you need to provide your OpenAI API key. You can do this by either exporting it as an environment variable or specifying it in a configuration file (`config.yaml`).
+cgpt can be configured using a YAML file. By default, it looks for `config.yaml` in the current directory. You can specify a different config file using the `--config` flag.
 
 Example `config.yaml`:
 
 ```yaml
-# This file is a sample configuration file for cgpt.
-
-# The OpenAI model name to use.
-modelName: "gpt-4o"
-# Whether or not to stream output.
+backend: "anthropic"
+modelName: "claude-3-5-sonnet-20240620"
 stream: true
-# Optional system prompt.
-systemPrompt: "You are PoemGPT. All of your answers should be rhyming in nature."
-# Maximum tokens to return (including input).
-maxTokens: 8000
+maxTokens: 2048
+systemPrompt: "You are a helpful programming assistant."
 ```
 
-## 🎉 Examples
+## 🌟 Features
 
-Below is an example of a session using `cgpt`. Make sure to replace placeholders with your actual values:
-
-```shell
-export OPENAI_API_KEY=your_openai_api_key
-cgpt --config path/to/your/config.yaml
-```
-
-Here's a visual example of using `cgpt`:
-
-![sample session](./sample.svg)
+- 🔄 Supports multiple AI backends (OpenAI, Anthropic, Google AI, Ollama)
+- 🔧 Configurable via YAML file or command-line flags
+- 🖥 Interactive mode for continuous conversations
+- 📜 History saving and loading
+- 🔍 Verbose and debug modes for troubleshooting
 
 ## 🤝 Contributing
 
-We welcome contributions to `cgpt`! If you find any issues or have suggestions for improvements, please feel free to open an issue or submit a pull request.
+Contributions are welcome! Feel free to submit issues or pull requests.
 
-## 📝 License
+## 📄 License
 
-`cgpt` is released under the [MIT License](LICENSE).
-
-## 🛠️ Development
-
-To run `cgpt` locally for development:
-
-1. Clone the repository:
-    ```shell
-    git clone https://github.com/tmc/cgpt.git
-    cd cgpt
-    ```
-
-2. Install dependencies:
-    ```shell
-    go mod tidy
-    ```
-
-3. Build and run:
-    ```shell
-    go install ./cmd/cgpt
-    ```
-
-4. Run tests:
-    ```shell
-    go test ./...
-    ```
-
-Feel free to reach out for any questions or further assistance!
-
-Happy hacking! 🚀
+cgpt is released under the ISC License. See the [LICENSE](LICENSE) file for details.
