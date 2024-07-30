@@ -1,4 +1,4 @@
-# cgpt
+# cgpt: Your Command-Line AI Assistant
 
 cgpt is a command-line tool for interacting with Large Language Models (LLMs) using various backends.
 
