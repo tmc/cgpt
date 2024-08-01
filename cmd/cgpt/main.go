@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -21,13 +22,12 @@ var (
 	flagInput        = flag.StringP("input", "i", "-", "The input file to use. Use - for stdin (default)")
 	flagContinuous   = flag.BoolP("continuous", "c", false, "Run in continuous mode (interactive)")
 	flagSystemPrompt = flag.StringP("system-prompt", "s", "", "System prompt to use")
-	flagHistoryIn    = flag.StringP("history-load", "I", "", "File to read completion history from")
-	flagHistoryOut   = flag.StringP("history-save", "O", "", "File to store completion history in")
+	flagHistoryRepo  = flag.StringP("history-repo", "r", "", "Git repository to use for history")
+	flagHistorySHA   = flag.StringP("history-sha", "", "", "Git SHA to load history from")
 	flagStream       = flag.Bool("stream", true, "Stream results")
 	flagConfig       = flag.String("config", "config.yaml", "Path to the configuration file")
 	flagVerbose      = flag.BoolP("verbose", "v", false, "Verbose output")
 	flagDebug        = flag.BoolP("debug", "", false, "Debug output")
-	flagNCompletions = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
 	flagMaxTokens      = flag.IntP("max-tokens", "t", 8000, "Maximum tokens to generate")
 	flagMaximumTimeout = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
@@ -52,13 +52,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *flagHistoryRepo != "" {
+		if err := s.InitGitRepo(*flagHistoryRepo); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize git repo: %v\n", err)
+			os.Exit(1)
+		}
+		if *flagHistorySHA != "" {
+			if err := s.LoadHistoryBySHA(*flagHistorySHA); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to load history: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
 	if err = s.Run(ctx, cgpt.RunConfig{
 		Input:        *flagInput,
 		Continuous:   *flagContinuous,
 		Stream:       *flagStream,
-		HistoryIn:    *flagHistoryIn,
-		HistoryOut:   *flagHistoryOut,
-		NCompletions: *flagNCompletions,
 		Verbose:      *flagVerbose,
 		DebugMode:    *flagDebug,
 
@@ -81,11 +91,19 @@ func initFlags() {
 		fmt.Println(`
 Examples:
 	$ echo "how should I interpret the output of nvidia-smi?" | cgpt
-	$ echo "explain plan 9 in one sentence" | cgpt`)
+	$ echo "explain plan 9 in one sentence" | cgpt
+	$ cgpt --history-repo /path/to/repo -c  # Run in continuous mode with history`)
 	}
 	flag.Parse()
 	if *flagHelp {
 		flag.Usage()
 		os.Exit(0)
+	}
+}
+
+func checkGitAvailability() {
+	_, err := exec.LookPath("git")
+	if err != nil {
+		fmt.Println("Warning: Git is not installed or not in PATH. History features will be limited.")
 	}
 }
