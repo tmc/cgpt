@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -84,6 +85,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *flagHistoryRepo != "" {
+		if err := s.InitGitRepo(*flagHistoryRepo); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize git repo: %v\n", err)
+			os.Exit(1)
+		}
+		if *flagHistorySHA != "" {
+			if err := s.LoadHistoryBySHA(*flagHistorySHA); err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to load history: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}
+
 	if err = s.Run(ctx, cgpt.RunConfig{
 		InputString:  *flagInputString,
 		InputFile:    *flagInputFile,
@@ -118,11 +132,19 @@ func initFlags() {
 		fmt.Println(`
 Examples:
 	$ echo "how should I interpret the output of nvidia-smi?" | cgpt
-	$ echo "explain plan 9 in one sentence" | cgpt`)
+	$ echo "explain plan 9 in one sentence" | cgpt
+	$ cgpt --history-repo /path/to/repo -c  # Run in continuous mode with history`)
 	}
 	flag.Parse()
 	if *flagHelp {
 		flag.Usage()
 		os.Exit(0)
+	}
+}
+
+func checkGitAvailability() {
+	_, err := exec.LookPath("git")
+	if err != nil {
+		fmt.Println("Warning: Git is not installed or not in PATH. History features will be limited.")
 	}
 }

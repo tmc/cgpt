@@ -135,28 +135,22 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 	return s.runOneShotCompletionStreaming(ctx, runCfg)
 }
 
-func (s *CompletionService) loadedWithHistory() bool {
-	return s.historyIn != nil
+func (s *CompletionService) loadLatestHistory() error {
+    history, err := s.gitRepo.LoadHistory("")
+    if err != nil {
+        return err
+    }
+    s.payload.Messages = history.Messages
+    return nil
 }
 
-func (s *CompletionService) handleHistory(historyIn, historyOut string) error {
-	s.historyOutFile = historyOut
-	if historyIn != "" {
-		f, err := os.Open(historyIn)
-		if err != nil {
-			return fmt.Errorf("issue reading input history file: %w", err)
-		}
-		s.historyIn = f
-		defer f.Close()
-	}
-	err := s.loadHistory()
-	if err != nil {
-		return fmt.Errorf("failed to load history: %w", err)
-	}
-	if err := s.saveHistory(); err != nil {
-		return fmt.Errorf("failed to save history: %w", err)
-	}
-	return nil
+func (s *CompletionService) LoadHistoryBySHA(sha string) error {
+    history, err := s.gitRepo.LoadHistory(sha)
+    if err != nil {
+        return err
+    }
+    s.payload.Messages = history.Messages
+    return nil
 }
 
 func (s *CompletionService) getLastUserMessage() string {
@@ -169,7 +163,26 @@ func (s *CompletionService) getLastUserMessage() string {
 		parts = append(parts, fmt.Sprint(m))
 	}
 
-	return strings.Join(parts, "\n")
+        parts := strings.Fields(cmd)
+        if len(parts) == 0 {
+            continue
+        }
+
+        switch parts[0] {
+        case "q", "quit":
+            return
+        case "history":
+            s.showHistory()
+        case "load":
+            if len(parts) > 1 {
+                s.loadHistoryEntry(parts[1])
+            }
+        case "list":
+            s.listCommits()
+        default:
+            fmt.Println("Unknown command")
+        }
+    }
 }
 
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
