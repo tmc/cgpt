@@ -42,20 +42,16 @@ func (p *ChatCompletionPayload) addAssistantMessage(content string) {
 	p.addMessage(llms.ChatMessageTypeAI, content)
 }
 
-func (s *CompletionService) PerformCompletion(ctx context.Context, payload *ChatCompletionPayload) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.completionTimeout)
-	defer cancel()
-	defer spin()()
-
-	return "", nil
-}
-
 func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, showSpinner bool) (<-chan string, error) {
 	ch := make(chan string)
 	go func() {
 		defer close(ch)
 		if showSpinner {
 			defer spin()()
+		}
+		if s.nextCompletionPrefill != "" {
+			payload.addAssistantMessage(s.nextCompletionPrefill)
+			s.nextCompletionPrefill = ""
 		}
 		_, err := s.model.GenerateContent(ctx, payload.Messages,
 			llms.WithMaxTokens(s.cfg.MaxTokens),
@@ -68,4 +64,8 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		}
 	}()
 	return ch, nil
+}
+
+func (s *CompletionService) SetNextCompletionPrefill(content string) {
+	s.nextCompletionPrefill = content
 }

@@ -15,7 +15,6 @@
 //	-p, --prefill string             Prefill the assistant's response
 //	-I, --history-load string        File to read completion history from
 //	-O, --history-save string        File to store completion history in
-//	    --stream                     Stream results (default true)
 //	    --config string              Path to the configuration file (default "config.yaml")
 //	-v, --verbose                    Verbose output
 //	    --debug                      Debug output
@@ -53,8 +52,6 @@ var (
 	flagHistoryIn  = flag.StringP("history-load", "I", "", "File to read completion history from")
 	flagHistoryOut = flag.StringP("history-save", "O", "", "File to store completion history in")
 
-	flagStream = flag.Bool("stream", true, "Stream results")
-
 	flagConfig  = flag.String("config", "config.yaml", "Path to the configuration file")
 	flagVerbose = flag.BoolP("verbose", "v", false, "Verbose output")
 	flagDebug   = flag.BoolP("debug", "", false, "Debug output")
@@ -87,7 +84,7 @@ func main() {
 		InputString:  *flagInputString,
 		InputFile:    *flagInputFile,
 		Continuous:   *flagContinuous,
-		Stream:       *flagStream,
+		Prefill:      *flagPrefill,
 		HistoryIn:    *flagHistoryIn,
 		HistoryOut:   *flagHistoryOut,
 		NCompletions: *flagNCompletions,
@@ -104,7 +101,6 @@ func main() {
 func initFlags() {
 	flag.CommandLine.SortFlags = false
 	flag.CommandLine.MarkHidden("readline-history-file")
-	flag.CommandLine.MarkHidden("stream")
 	flag.Usage = func() {
 		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
 		fmt.Println()

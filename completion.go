@@ -1,7 +1,6 @@
 package cgpt
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -29,6 +28,9 @@ type CompletionService struct {
 	historyIn           io.Reader
 	historyOutFile      string
 	readlineHistoryFile string
+
+	// nextCompletionPrefill is the message to prefill the assistant with for the next completion.
+	nextCompletionPrefill string
 }
 
 // NewCompletionService creates a new CompletionService with the given configuration.
@@ -108,22 +110,13 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 	if !s.loadedWithHistory() && s.cfg.SystemPrompt != "" {
 		s.payload.addSystemMessage(s.cfg.SystemPrompt)
 	}
-	fmt.Println("prefilll: ", runCfg.Prefill)
-	os.Exit(1)
 	if runCfg.Prefill != "" {
-		s.payload.addAssistantMessage(runCfg.Prefill)
+		s.nextCompletionPrefill = runCfg.Prefill
 	}
 	if runCfg.Continuous {
-		if runCfg.Stream {
-			return s.runContinuousCompletionStreaming(ctx)
-		} else {
-			return s.runContinuousCompletion(ctx)
-		}
+		return s.runContinuousCompletionStreaming(ctx)
 	}
-	if runCfg.Stream {
-		return s.runOneShotCompletionStreaming(ctx, runCfg)
-	}
-	return s.runOneShotCompletion(ctx, runCfg)
+	return s.runOneShotCompletionStreaming(ctx, runCfg)
 }
 
 func (s *CompletionService) loadedWithHistory() bool {
@@ -150,18 +143,6 @@ func (s *CompletionService) handleHistory(historyIn, historyOut string) error {
 	return nil
 }
 
-func (s *CompletionService) runNCompletions(ctx context.Context, n int) error {
-	s.logger.Info("running n completions", "n", n)
-
-	for i := 0; i < n; i++ {
-		in := s.getLastUserMessage()
-		if err := s.runOneCompletion(ctx, strings.NewReader(in)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (s *CompletionService) getLastUserMessage() string {
 	if len(s.payload.Messages) == 0 {
 		return ""
@@ -173,74 +154,6 @@ func (s *CompletionService) getLastUserMessage() string {
 	}
 
 	return strings.Join(parts, "\n")
-}
-
-func (s *CompletionService) runOneCompletion(ctx context.Context, input io.Reader) error {
-	b, err := io.ReadAll(input)
-	if err != nil {
-		return err
-	}
-	contents := string(b)
-
-	// Currently, we don't support streaming for these completions.
-	s.payload.Stream = false
-	s.payload.addUserMessage(contents)
-	r, err := s.PerformCompletion(ctx, s.payload)
-	if err != nil {
-		return err
-	}
-	fmt.Println(r)
-	if err := s.saveHistory(); err != nil {
-		return fmt.Errorf("failed to save history: %w", err)
-	}
-	return nil
-}
-
-func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg RunConfig) error {
-	var (
-		input io.Reader
-		err   error
-	)
-	s.logger.Debug("running one-shot completion without streaming")
-	inputString := runCfg.InputString
-	inputFile := runCfg.InputFile
-
-	var contents string
-	if inputString != "" {
-		contents = inputString
-	} else {
-		if inputFile == "-" {
-			fmt.Printf("> ")
-			reader := bufio.NewReader(os.Stdin)
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return fmt.Errorf("failed to read input: %w", err)
-			}
-			input = strings.NewReader(line)
-		} else {
-			input, err = os.Open(inputFile)
-			if err != nil {
-				return fmt.Errorf("failed to open input file %q: %w", inputFile, err)
-			}
-		}
-		b, err := io.ReadAll(input)
-		if err != nil {
-			return fmt.Errorf("failed to read input: %w", err)
-		}
-		contents = string(b)
-	}
-
-	s.payload.Stream = false
-	s.payload.addUserMessage(contents)
-	response, err := s.PerformCompletion(ctx, s.payload)
-	if err != nil {
-		return fmt.Errorf("failed to perform completion: %w", err)
-	}
-	fmt.Println(response)
-	if err := s.saveHistory(); err != nil {
-		return fmt.Errorf("failed to save history: %w", err)
-	}
-	return nil
 }
 
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
@@ -287,43 +200,9 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 	return nil
 }
 
-// Enhanced function to run continuous completion mode.
-func (s *CompletionService) runContinuousCompletion(ctx context.Context) error {
-	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
-	processFn := func(input string) error {
-		s.payload.addUserMessage(input)
-		response, err := s.PerformCompletion(ctx, s.payload)
-		if err != nil {
-			return err
-		}
-		s.payload.addAssistantMessage(response)
-		fmt.Println(response)
-		fmt.Println()
-		if err := s.saveHistory(); err != nil {
-			return fmt.Errorf("failed to save history: %w", err)
-		}
-		return nil
-	}
-
-	sessionConfig := interactive.Config{
-		Prompt:      ">>> ",
-		AltPrompt:   "... ",
-		HistoryFile: expandTilde(s.readlineHistoryFile),
-		ProcessFn:   processFn,
-	}
-
-	session, err := interactive.NewInteractiveSession(sessionConfig)
-	if err != nil {
-		return err
-	}
-
-	return session.Run()
-}
-
 // Enhanced function to run continuous streaming completion mode.
 func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
-
 	processFn := func(input string) error {
 		s.payload.addUserMessage(input)
 		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, true)
