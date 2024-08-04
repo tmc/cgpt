@@ -36,6 +36,7 @@ brews:
     repository:
       owner: tmc
       name: tap
+      branch: "{{.ProjectName}}-{{.Version}}"
     commit_author:
       name: github-actions
       email: 41898282+github-actions[bot]@users.noreply.github.com
