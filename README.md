@@ -1,128 +1,114 @@
 # cgpt
 
-`cgpt` is a simple command line interface (CLI) for interacting with OpenAI's chat completion APIs. It can be thought of as a command line ChatGPT clone.
+cgpt is a command-line tool for interacting with Large Language Models (LLMs) using various backends.
 
-## ✨ Features
+## Features
 
-- **Streaming Output**: Real-time responses as you type.
-- **History Management**: Save and load conversation history.
-- **Customizable Prompts**: Set system and assistant prompts.
-- **VIM Integration**: Use `cgpt` as a tool from within vim.
+- Supports multiple backends: Anthropic, OpenAI, Ollama, and Google AI
+- Interactive mode for continuous conversations
+- Streaming output
+- History management
+- Configurable via YAML file and environment variables
+- Vim plugin for easy integration
 
-## 🚀 Installation
+## Installation
 
-To install `cgpt`, you'll need Go installed on your machine. Then, run:
+### Using Homebrew
 
-```shell
+```bash
+brew tap tmc/tap
+brew install cgpt
+```
+
+### From Source
+
+```bash
 go install github.com/tmc/cgpt/cmd/cgpt@latest
 ```
 
-## 📖 Usage
+## Usage
 
-Run `cgpt` with the `-h` flag to see available commands and options:
-
-```shell
-cgpt -h
+```
+cgpt [flags]
 ```
 
-Example output:
-```shell
-cgpt is a command line tool for interacting with generative AI models.
+### Flags
 
-Usage of cgpt:
-  -b, --backend string                The backend to use (default "anthropic")
-  -m, --model string                  The model to use (default "claude-3-5-sonnet-20240620")
-  -i, --input string                  The input file to use. Use - for stdin (default) (default "-")
-  -c, --continuous                    Run in continuous mode (interactive)
-  -s, --system-prompt string          System prompt to use
-  -I, --history-load string           File to read completion history from
-  -O, --history-save string           File to store completion history in
-      --config string                 Path to the configuration file (default "config.yaml")
-  -v, --verbose                       Verbose output
-      --debug                         Debug output
-  -n, --completions int               Number of completions (when running non-interactively with history)
-  -t, --max-tokens int                Maximum tokens to generate (default 8000)
-      --completion-timeout duration   Maximum time to wait for a response (default 2m0s)
-  -h, --help
+- `-b, --backend string`: The backend to use (default "anthropic")
+- `-m, --model string`: The model to use (default "claude-3-5-sonnet-20240620")
+- `-i, --input string`: Direct string input (overrides -f)
+- `-f, --file string`: Input file path. Use '-' for stdin (default "-")
+- `-c, --continuous`: Run in continuous mode (interactive)
+- `-s, --system-prompt string`: System prompt to use
+- `-p, --prefill string`: Prefill the assistant's response
+- `-I, --history-load string`: File to read completion history from
+- `-O, --history-save string`: File to store completion history in
+- `--config string`: Path to the configuration file (default "config.yaml")
+- `-v, --verbose`: Verbose output
+- `--debug`: Debug output
+- `-n, --completions int`: Number of completions (when running non-interactively with history)
+- `-t, --max-tokens int`: Maximum tokens to generate (default 8000)
+- `--completion-timeout duration`: Maximum time to wait for a response (default 2m0s)
 
-Examples:
-	$ echo "how should I interpret the output of nvidia-smi?" | cgpt
-	$ echo "explain plan 9 in one sentence" | cgpt
-```
+## Configuration
 
-## VIM Integration
-
-`cgpt` can be used as a completion engine in Vim. To do this, you can use the following configuration:
-
-```vim
-    Plug 'tmc/cgpt', { 'rtp': 'vim', 'do': 'go install ./cmd/cgpt' }
-```
-
-### Configuration
-
-To use `cgpt`, you need to provide your OpenAI API key. You can do this by either exporting it as an environment variable or specifying it in a configuration file (`config.yaml`).
+cgpt can be configured using a YAML file. By default, it looks for `config.yaml` in the current directory. You can specify a different configuration file using the `--config` flag.
 
 Example `config.yaml`:
 
 ```yaml
-# This file is a sample configuration file for cgpt.
-
-# The OpenAI model name to use.
-modelName: "gpt-4o"
-# Whether or not to stream output.
+backend: "anthropic"
+modelName: "claude-3-5-sonnet-20240620"
 stream: true
-# Optional system prompt.
-systemPrompt: "You are PoemGPT. All of your answers should be rhyming in nature."
-# Maximum tokens to return (including input).
-maxTokens: 8000
+maxTokens: 2048
+systemPrompt: "You are a helpful assistant."
 ```
 
-## 🎉 Examples
+## Environment Variables
 
-Below is an example of a session using `cgpt`. Make sure to replace placeholders with your actual values:
+- `CGPT_OPENAI_API_KEY`: OpenAI API key
+- `CGPT_ANTHROPIC_API_KEY`: Anthropic API key
+- `CGPT_GOOGLE_API_KEY`: Google AI API key
 
-```shell
-export OPENAI_API_KEY=your_openai_api_key
-cgpt --config path/to/your/config.yaml
+## Vim Plugin
+
+cgpt includes a Vim plugin for easy integration. To use it, copy the `vim/plugin/cgpt.vim` file to your Vim plugin directory.
+
+### Vim Plugin Usage
+
+1. Visually select the text you want to process with cgpt.
+2. Press `cg` or use the `:CgptRun` command to run cgpt on the selected text.
+3. The output will be appended after the visual selection.
+
+### Vim Plugin Configuration
+
+- `g:cgpt_backend`: Set the backend for cgpt (default: 'anthropic')
+- `g:cgpt_model`: Set the model for cgpt (default: 'claude-3-5-sonnet-20240620')
+- `g:cgpt_system_prompt`: Set the system prompt for cgpt
+- `g:cgpt_config_file`: Set the path to the cgpt configuration file
+- `g:cgpt_include_filetype`: Include the current filetype in the prompt (default: 0)
+
+## Examples
+
+```bash
+# Simple query
+echo "Explain quantum computing" | cgpt
+
+# Interactive mode
+cgpt -c
+
+# Use a specific backend and model
+cgpt -b openai -m gpt-4 -i "Translate 'Hello, world!' to French"
+
+# Load and save history
+cgpt -I input_history.yaml -O output_history.yaml -i "Continue the conversation"
 ```
 
-Here's a visual example of using `cgpt`:
+## License
 
-![sample session](./sample.svg)
+This project is licensed under the ISC License. See the [LICENSE](LICENSE) file for details.
+```
 
-## 🤝 Contributing
-
-We welcome contributions to `cgpt`! If you find any issues or have suggestions for improvements, please feel free to open an issue or submit a pull request.
-
-## 📝 License
-
-`cgpt` is released under the [MIT License](LICENSE).
-
-## 🛠️ Development
-
-To run `cgpt` locally for development:
-
-1. Clone the repository:
-    ```shell
-    git clone https://github.com/tmc/cgpt.git
-    cd cgpt
-    ```
-
-2. Install dependencies:
-    ```shell
-    go mod tidy
-    ```
-
-3. Build and run:
-    ```shell
-    go install ./cmd/cgpt
-    ```
-
-4. Run tests:
-    ```shell
-    go test ./...
-    ```
-
-Feel free to reach out for any questions or further assistance!
+This README provides an overview of the cgpt tool, including its features, installation instructions, usage examples, configuration options, and information about the Vim plugin. It also includes details about the supported backends and environment variables for API keys.
 
 Happy hacking! 🚀

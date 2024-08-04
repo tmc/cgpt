@@ -1,4 +1,4 @@
-version: 1
+version: 2
 
 before:
   hooks:
@@ -35,7 +35,15 @@ brews:
     description: A simple command line tool for working with LLMs.
     repository:
       owner: tmc
-      name: cgpt
+      name: tap
+    commit_author:
+      name: github-actions
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    custom_block: |
+      head do
+        url "https://github.com/tmc/cgpt.git"
+        depends_on "pkg-config" => :build
+      end
 
 changelog:
   sort: asc
