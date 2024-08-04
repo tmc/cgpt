@@ -1,7 +1,31 @@
-// Command cgpt is a command line tool for interacting with LLMs.
+// Command cgpt is a command line tool for interacting with Large Language Models (LLMs).
 //
-// The -c/-continuous flag will run the completion API in a loop, using the previous output as the
-// input for the next request. It will run inference after two newlines are entered.
+// Usage:
+//
+//	cgpt [flags]
+//
+// Flags:
+//
+//	-b, --backend string             The backend to use (default "anthropic")
+//	-m, --model string               The model to use (default "claude-3-5-sonnet-20240620")
+//	-i, --input string               Direct string input (overrides -f)
+//	-f, --file string                Input file path. Use '-' for stdin (default), mutually exclusive with -i (default "-")
+//	-c, --continuous                 Run in continuous mode (interactive)
+//	-s, --system-prompt string       System prompt to use
+//	-p, --prefill string             Prefill the assistant's response
+//	-I, --history-load string        File to read completion history from
+//	-O, --history-save string        File to store completion history in
+//	    --stream                     Stream results (default true)
+//	    --config string              Path to the configuration file (default "config.yaml")
+//	-v, --verbose                    Verbose output
+//	    --debug                      Debug output
+//	-n, --completions int            Number of completions (when running non-interactively with history)
+//	-t, --max-tokens int             Maximum tokens to generate (default 8000)
+//	    --completion-timeout duration Maximum time to wait for a response (default 2m0s)
+//	-h, --help                       Display help information
+//
+// The -c/--continuous flag enables interactive mode, where the program runs in a loop,
+// using the previous output as input for the next request. In this mode, inference
 package main
 
 import (
@@ -16,22 +40,29 @@ import (
 )
 
 var (
-	flagBackend      = flag.StringP("backend", "b", "anthropic", "The backend to use")
-	flagModel        = flag.StringP("model", "m", "claude-3-5-sonnet-20240620", "The model to use")
-	flagInput        = flag.StringP("input", "i", "-", "The input file to use. Use - for stdin (default)")
+	flagBackend = flag.StringP("backend", "b", "anthropic", "The backend to use")
+	flagModel   = flag.StringP("model", "m", "claude-3-5-sonnet-20240620", "The model to use")
+
+	flagInputString = flag.StringP("input", "i", "", "Direct string input (overrides -f)")
+	flagInputFile   = flag.StringP("file", "f", "-", "Input file path. Use '-' for stdin (default), mutually exclusive with -i")
+
 	flagContinuous   = flag.BoolP("continuous", "c", false, "Run in continuous mode (interactive)")
 	flagSystemPrompt = flag.StringP("system-prompt", "s", "", "System prompt to use")
-	flagHistoryIn    = flag.StringP("history-load", "I", "", "File to read completion history from")
-	flagHistoryOut   = flag.StringP("history-save", "O", "", "File to store completion history in")
-	flagStream       = flag.Bool("stream", true, "Stream results")
-	flagConfig       = flag.String("config", "config.yaml", "Path to the configuration file")
-	flagVerbose      = flag.BoolP("verbose", "v", false, "Verbose output")
-	flagDebug        = flag.BoolP("debug", "", false, "Debug output")
+	flagPrefill      = flag.StringP("prefill", "p", "", "Prefill the assistant's response")
+
+	flagHistoryIn  = flag.StringP("history-load", "I", "", "File to read completion history from")
+	flagHistoryOut = flag.StringP("history-save", "O", "", "File to store completion history in")
+
+	flagStream = flag.Bool("stream", true, "Stream results")
+
+	flagConfig  = flag.String("config", "config.yaml", "Path to the configuration file")
+	flagVerbose = flag.BoolP("verbose", "v", false, "Verbose output")
+	flagDebug   = flag.BoolP("debug", "", false, "Debug output")
+
 	flagNCompletions = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
-	flagMaxTokens      = flag.IntP("max-tokens", "t", 8000, "Maximum tokens to generate")
-	flagMaximumTimeout = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
-
+	flagMaxTokens           = flag.IntP("max-tokens", "t", 8000, "Maximum tokens to generate")
+	flagMaximumTimeout      = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
 	flagReadlineHistoryFile = flag.String("readline-history-file", "~/.cgpt_history", "File to store readline history in")
 	flagHelp                = flag.BoolP("help", "h", false, "")
 )
@@ -53,7 +84,8 @@ func main() {
 	}
 
 	if err = s.Run(ctx, cgpt.RunConfig{
-		Input:        *flagInput,
+		InputString:  *flagInputString,
+		InputFile:    *flagInputFile,
 		Continuous:   *flagContinuous,
 		Stream:       *flagStream,
 		HistoryIn:    *flagHistoryIn,

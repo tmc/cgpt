@@ -54,12 +54,22 @@ func NewCompletionService(cfg *Config) (*CompletionService, error) {
 
 // RunConfig is the configuration for the Run method.
 type RunConfig struct {
-	// Input is the input text to complete. If "-", read from stdin.
-	Input string
+	// InputString is the input text to complete. If present, this will be used instead of reading from a file.
+	// This will only be used for the first completion when either running in continuous mode or when running multiple completions.
+	InputString string
+
+	// InputFile is the file to read input from. Use "-" for stdin.
+	InputFile string
+
 	// Continuous will run the completion API in a loop, using the previous output as the input for the next request.
 	Continuous bool
+
 	// Stream will stream results as they come in.
 	Stream bool
+
+	// Prefill is the message to prefill the assistant with.
+	// This will only be used for the first completion if more than one completion is run.
+	Prefill string
 
 	// HistoryIn is the file to read cgpt history from.
 	HistoryIn string
@@ -98,15 +108,17 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 	if !s.loadedWithHistory() && s.cfg.SystemPrompt != "" {
 		s.payload.addSystemMessage(s.cfg.SystemPrompt)
 	}
+	fmt.Println("prefilll: ", runCfg.Prefill)
+	os.Exit(1)
+	if runCfg.Prefill != "" {
+		s.payload.addAssistantMessage(runCfg.Prefill)
+	}
 	if runCfg.Continuous {
 		if runCfg.Stream {
 			return s.runContinuousCompletionStreaming(ctx)
 		} else {
 			return s.runContinuousCompletion(ctx)
 		}
-	}
-	if runCfg.NCompletions > 0 && s.loadedWithHistory() {
-		return s.runNCompletions(ctx, runCfg.NCompletions)
 	}
 	if runCfg.Stream {
 		return s.runOneShotCompletionStreaming(ctx, runCfg)
@@ -190,26 +202,33 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 		err   error
 	)
 	s.logger.Debug("running one-shot completion without streaming")
-	inputFile := runCfg.Input
-	if inputFile == "-" {
-		fmt.Printf("> ")
-		reader := bufio.NewReader(os.Stdin)
-		line, err := reader.ReadString('\n')
+	inputString := runCfg.InputString
+	inputFile := runCfg.InputFile
+
+	var contents string
+	if inputString != "" {
+		contents = inputString
+	} else {
+		if inputFile == "-" {
+			fmt.Printf("> ")
+			reader := bufio.NewReader(os.Stdin)
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read input: %w", err)
+			}
+			input = strings.NewReader(line)
+		} else {
+			input, err = os.Open(inputFile)
+			if err != nil {
+				return fmt.Errorf("failed to open input file %q: %w", inputFile, err)
+			}
+		}
+		b, err := io.ReadAll(input)
 		if err != nil {
 			return fmt.Errorf("failed to read input: %w", err)
 		}
-		input = strings.NewReader(line)
-	} else {
-		input, err = os.Open(inputFile)
-		if err != nil {
-			return fmt.Errorf("failed to open input file %q: %w", inputFile, err)
-		}
+		contents = string(b)
 	}
-	b, err := io.ReadAll(input)
-	if err != nil {
-		return fmt.Errorf("failed to read input: %w", err)
-	}
-	contents := string(b)
 
 	s.payload.Stream = false
 	s.payload.addUserMessage(contents)
@@ -230,18 +249,25 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 		err   error
 	)
 	s.logger.Debug("running one-shot completion with streaming")
-	inputFile := runCfg.Input
-	if inputFile != "-" {
-		input, err = os.Open(inputFile)
-		if err != nil {
-			return fmt.Errorf("failed to open input file %q: %w", inputFile, err)
+	inputString := runCfg.InputString
+	inputFile := runCfg.InputFile
+
+	var contents string
+	if inputString != "" {
+		contents = inputString
+	} else {
+		if inputFile != "-" {
+			input, err = os.Open(inputFile)
+			if err != nil {
+				return fmt.Errorf("failed to open input file %q: %w", inputFile, err)
+			}
 		}
+		b, err := io.ReadAll(input)
+		if err != nil {
+			return fmt.Errorf("failed to read input: %w", err)
+		}
+		contents = string(b)
 	}
-	b, err := io.ReadAll(input)
-	if err != nil {
-		return fmt.Errorf("failed to read input: %w", err)
-	}
-	contents := string(b)
 
 	s.payload.Stream = true
 	s.payload.addUserMessage(contents)
