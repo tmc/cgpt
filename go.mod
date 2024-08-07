@@ -1,14 +1,13 @@
 module github.com/tmc/cgpt
 
-go 1.22.0
-
-toolchain go1.22.2
+go 1.22.4
 
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.18.2
 	github.com/tmc/langchaingo v0.1.13-0.20240725041451-1975058648b5
+	github.com/tmc/spinner v0.1.1
 	go.uber.org/zap v1.21.0
 	sigs.k8s.io/yaml v1.3.0
 )

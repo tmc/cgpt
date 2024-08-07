@@ -44,10 +44,11 @@ func (p *ChatCompletionPayload) addAssistantMessage(content string) {
 
 func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
 	ch := make(chan string)
+	chunkSeen := func() {}
 	go func() {
 		defer close(ch)
 		if cfg.ShowSpinner {
-			defer spin()()
+			chunkSeen = spin()
 		}
 		if s.nextCompletionPrefill != "" {
 			// If the user has provided a prefill message, and hasn't opted out, then send it.
@@ -60,6 +61,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		_, err := s.model.GenerateContent(ctx, payload.Messages,
 			llms.WithMaxTokens(s.cfg.MaxTokens),
 			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+				chunkSeen()
 				ch <- string(chunk)
 				return nil
 			}))

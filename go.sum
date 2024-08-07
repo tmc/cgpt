@@ -147,6 +147,10 @@ github.com/subosito/gotenv v1.6.0 h1:9NlTDc1FTs4qu0DDq7AEtTPNw6SVm7uBMsUCUjABIf8
 github.com/subosito/gotenv v1.6.0/go.mod h1:Dk4QP5c2W3ibzajGcXpNraDfq2IrhjMIvMSWPKKo0FU=
 github.com/tmc/langchaingo v0.1.13-0.20240725041451-1975058648b5 h1:sm/byUjE0HYMSB9ihZqOJng/3tepwGkiNo52kmclMoA=
 github.com/tmc/langchaingo v0.1.13-0.20240725041451-1975058648b5/go.mod h1:vjzUeUsmulZ7Hwq0Ju3Ez+ZmM5aw0dA7K7K2u7wooIw=
+github.com/tmc/spinner v0.1.0 h1:Yd493ikDDmbmIQGGg4F5erscvEU9vbx7D6uwqEo+D/w=
+github.com/tmc/spinner v0.1.0/go.mod h1:2BSgX747MqQfTrwzzKJMj4dru08f+Z/1g5m/VbpXoT4=
+github.com/tmc/spinner v0.1.1 h1:O0NKjI4JdlIXoS2TwCaOslHtRscu7h9foP+nW+XtlPo=
+github.com/tmc/spinner v0.1.1/go.mod h1:2BSgX747MqQfTrwzzKJMj4dru08f+Z/1g5m/VbpXoT4=
 github.com/yuin/goldmark v1.3.5/go.mod h1:mwnBkeHKe2W/ZEtQ+71ViKU8L12m81fl3OWwC1Zlc8k=
 go.opencensus.io v0.24.0 h1:y73uSU6J157QMP2kn2r30vwW1A2W2WFwSCGnAVxeaD0=
 go.opencensus.io v0.24.0/go.mod h1:vNK8G9p7aAivkbmorf4v+7Hgx+Zs0yY+0fOtgBfjQKo=
