@@ -58,10 +58,14 @@ var (
 
 	flagNCompletions = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
-	flagMaxTokens           = flag.IntP("max-tokens", "t", 8000, "Maximum tokens to generate")
-	flagMaximumTimeout      = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
+	flagMaxTokens      = flag.IntP("max-tokens", "t", 8000, "Maximum tokens to generate")
+	flagMaximumTimeout = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
+	flagHelp           = flag.BoolP("help", "h", false, "")
+
+	// hidden flags
 	flagReadlineHistoryFile = flag.String("readline-history-file", "~/.cgpt_history", "File to store readline history in")
-	flagHelp                = flag.BoolP("help", "h", false, "")
+	flagEchoPrefill         = flag.Bool("prefill-echo", true, "Print the prefill message")
+	flagShowSpinner         = flag.Bool("show-spinner", true, "Show spinner while waiting for completion (default true, auto-disabled when in continuous mode)")
 )
 
 func main() {
@@ -91,6 +95,9 @@ func main() {
 		Verbose:      *flagVerbose,
 		DebugMode:    *flagDebug,
 
+		EchoPrefill: *flagEchoPrefill,
+		ShowSpinner: *flagShowSpinner,
+
 		ReadlineHistoryFile: *flagReadlineHistoryFile,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -101,6 +108,8 @@ func main() {
 func initFlags() {
 	flag.CommandLine.SortFlags = false
 	flag.CommandLine.MarkHidden("readline-history-file")
+	flag.CommandLine.MarkHidden("prefill-echo")
+	flag.CommandLine.MarkHidden("show-spinner")
 	flag.Usage = func() {
 		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
 		fmt.Println()

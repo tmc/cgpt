@@ -42,14 +42,18 @@ func (p *ChatCompletionPayload) addAssistantMessage(content string) {
 	p.addMessage(llms.ChatMessageTypeAI, content)
 }
 
-func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, showSpinner bool) (<-chan string, error) {
+func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
 	ch := make(chan string)
 	go func() {
 		defer close(ch)
-		if showSpinner {
+		if cfg.ShowSpinner {
 			defer spin()()
 		}
 		if s.nextCompletionPrefill != "" {
+			// If the user has provided a prefill message, and hasn't opted out, then send it.
+			if !cfg.EchoPrefill {
+				ch <- s.nextCompletionPrefill
+			}
 			payload.addAssistantMessage(s.nextCompletionPrefill)
 			s.nextCompletionPrefill = ""
 		}

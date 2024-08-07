@@ -29,6 +29,8 @@ type CompletionService struct {
 	historyOutFile      string
 	readlineHistoryFile string
 
+	performCompletionConfig PerformCompletionConfig
+
 	// nextCompletionPrefill is the message to prefill the assistant with for the next completion.
 	nextCompletionPrefill string
 }
@@ -71,7 +73,10 @@ type RunConfig struct {
 
 	// Prefill is the message to prefill the assistant with.
 	// This will only be used for the first completion if more than one completion is run.
+	// By default, it will be printed before the assistant's response.
 	Prefill string
+	// EchoPrefill is a flag that, when set to true, will echo the prefill message to the user.
+	EchoPrefill bool
 
 	// HistoryIn is the file to read cgpt history from.
 	HistoryIn string
@@ -92,6 +97,17 @@ type RunConfig struct {
 
 	// MaximumTimeout is the maximum time to wait for a response.
 	MaximumTimeout time.Duration
+
+	// ShowSpinner is a flag that, when set to true, shows a spinner while waiting for the completion.
+	ShowSpinner bool
+}
+
+// PerformCompletionConfig is the configuration for the PerformCompletion method, it controls the behavior of the completion with regard to user interaction.
+type PerformCompletionConfig struct {
+	// EchoPrefill is a flag that, when set to true, will echo the prefill message to the user.
+	EchoPrefill bool
+	// ShowSpinner is a flag that, when set to true, shows a spinner while waiting for the completion.
+	ShowSpinner bool
 }
 
 // Run runs the completion service with the given configuration.
@@ -114,7 +130,7 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 		s.nextCompletionPrefill = runCfg.Prefill
 	}
 	if runCfg.Continuous {
-		return s.runContinuousCompletionStreaming(ctx)
+		return s.runContinuousCompletionStreaming(ctx, runCfg)
 	}
 	return s.runOneShotCompletionStreaming(ctx, runCfg)
 }
@@ -184,7 +200,10 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 
 	s.payload.Stream = true
 	s.payload.addUserMessage(contents)
-	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, true)
+	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
+		ShowSpinner: runCfg.ShowSpinner,
+		EchoPrefill: !runCfg.EchoPrefill,
+	})
 	if err != nil {
 		return err
 	}
@@ -201,11 +220,14 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 }
 
 // Enhanced function to run continuous streaming completion mode.
-func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context) error {
+func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
 	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
 	processFn := func(input string) error {
 		s.payload.addUserMessage(input)
-		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, true)
+		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
+			ShowSpinner: runCfg.ShowSpinner,
+			EchoPrefill: !runCfg.EchoPrefill,
+		})
 		if err != nil {
 			return err
 		}
