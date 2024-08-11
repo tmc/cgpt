@@ -66,9 +66,9 @@ systemPrompt: "You are a helpful assistant."
 
 ## Environment Variables
 
-- `CGPT_OPENAI_API_KEY`: OpenAI API key
-- `CGPT_ANTHROPIC_API_KEY`: Anthropic API key
-- `CGPT_GOOGLE_API_KEY`: Google AI API key
+- `OPENAI_API_KEY`: OpenAI API key
+- `ANTHROPIC_API_KEY`: Anthropic API key
+- `GOOGLE_API_KEY`: Google AI API key
 
 ## Vim Plugin
 
