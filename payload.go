@@ -60,6 +60,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		}
 		_, err := s.model.GenerateContent(ctx, payload.Messages,
 			llms.WithMaxTokens(s.cfg.MaxTokens),
+			llms.WithTemperature(s.cfg.Temperature),
 			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 				chunkSeen()
 				ch <- string(chunk)

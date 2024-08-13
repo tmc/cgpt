@@ -59,6 +59,7 @@ var (
 	flagNCompletions = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
 	flagMaxTokens      = flag.IntP("max-tokens", "t", 8000, "Maximum tokens to generate")
+	flagTemp           = flag.Float64P("temperature", "T", 0.05, "Temperature for sampling")
 	flagMaximumTimeout = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
 	flagHelp           = flag.BoolP("help", "h", false, "")
 
