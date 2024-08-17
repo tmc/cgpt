@@ -5,7 +5,14 @@
 # Usage: exec-analyze -- docker run -it --rm alpine /bin/sh -c 'echo hello'
 # put the current directory in the path
 
-EXEC_ANALYZE_PROMPT="Analyze the result of the given exec command, given the current goals, and the current context."
+EXEC_ANALYZE_PROMPT="Analyze the result of the given exec command, given the current goals, and the current context.
+Give a high level <summary> of what the exec did, and what the expected result is.
+If the exec is correct, and the goals are met, then the exec is good.
+
+Then, list the <suggesions> for how to improve the exec, if any.
+Include <tools> that could be used to help analyze the exec, if any.
+Finally, give a <conclusion> about the exec.
+"
 EXEC_ANALYZE_PREFILL=""
 (
 export PATH=$PATH:.
