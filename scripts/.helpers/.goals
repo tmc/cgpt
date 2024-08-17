@@ -4,5 +4,9 @@ simplify create-script {{{
 	observation: simplify-script came out with <antthinking> tags which breaks it
   }}}
 }}}
-get working goal system in place
+get working goal system in place {{{
+get working goals file in place
+get a file to check on, and carry out things, about goals
+}}}
+get ./plan script in place that emits a plan
 
