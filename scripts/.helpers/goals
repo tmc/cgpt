@@ -1,0 +1,8 @@
+meta-goal: delete this file after completing everything.
+simplify create-script {{{
+  write simplify-script {{{
+	observation: simplify-script came out with <antthinking> tags which breaks it
+  }}}
+}}}
+get working goal system in place
+
