@@ -1,4 +1,5 @@
 meta-goal: delete this file after completing everything.
+goal: write tool that prevents <antthinking> (and other?) tags from breaking things
 goal: simplify create-script {{{
   write simplify-script {{{
 	observation: simplify-script came out with <antthinking> tags which breaks it
@@ -17,3 +18,5 @@ possible goal: get ./plan script in place that emits a plan
 goal: add exec-analyze which runs an exec and some analysis {{{
 sub-goal: add exec-rec which runs an exec and records results in a git note
 }}}
+meta-goal: keep the repository clean
+meta-goal: keep changes small and managable
