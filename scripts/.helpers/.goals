@@ -4,13 +4,16 @@ goal: simplify create-script {{{
 	observation: simplify-script came out with <antthinking> tags which breaks it
   }}}
 }}}
+goal: get basic agentic loop in place {{{
+  goal: consider standard approaches and simple POCs
+}}}
 goal: get working goal system in place {{{
   get working goals file in place
   get a file to check on, and carry out things, about goals {{{ 
 	related-goal: add exec-analyze
   }}}
 }}}
-goal: get ./plan script in place that emits a plan
+possible goal: get ./plan script in place that emits a plan
 goal: add exec-analyze which runs an exec and some analysis {{{
 sub-goal: add exec-rec which runs an exec and records results in a git note
 }}}
