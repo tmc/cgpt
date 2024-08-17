@@ -9,9 +9,11 @@ let g:loaded_cgpt = 1
 
 let g:cgpt_backend = get(g:, 'cgpt_backend', 'anthropic')
 let g:cgpt_model = get(g:, 'cgpt_model', 'claude-3-5-sonnet-20240620')
-let g:cgpt_system_prompt = get(g:, 'cgpt_system_prompt', 'The user is submitting a visual selection in the vim editor to you to help them with a programming task. Prefer to output code directly without surrounding commentary.')
+let g:cgpt_system_prompt = get(g:, 'cgpt_system_prompt', 'The user is submitting a visual selection in the vim editor to you to help them with a programming task. Prefer to output code directly without surrounding commentary. If you do emit commentary please place it into comments.')
+let g:cgpt_prefill = get(g:, 'cgpt_prefill', '')
 let g:cgpt_config_file = get(g:, 'cgpt_config_file', '')
-let g:cgpt_include_filetype = get(g:, 'cgpt_include_filetype', 0)
+let g:cgpt_include_filetype = get(g:, 'cgpt_include_filename', 1)
+let g:cgpt_include_filetype = get(g:, 'cgpt_include_filetype', 1)
 
 function! s:handle_output(channel, msg)
   let l:lines = split(a:msg, "\n")
@@ -57,6 +59,12 @@ function! RunCgpt() range
   " Include filetype in the prompt if enabled
   if g:cgpt_include_filetype && !empty(&filetype)
     let l:input = "filetype: " . &filetype . "\n\n" . l:input
+  endif
+
+  " Include filename
+  let l:filename = expand('%:t')
+  if !empty(l:filename)
+    let l:input = "filename: " . l:filename . "\n\n" . l:input
   endif
 
   " Build the command with system prompt and config file options
