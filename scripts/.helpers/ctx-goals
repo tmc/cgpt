@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# ctx-goals
+# Display the current goals from the .goals file
+
+if [ -f .goals ]; then
+    cat .goals
+else
+    echo "No .goals file found in the current directory."
+fi
