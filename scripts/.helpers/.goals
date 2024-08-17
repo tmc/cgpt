@@ -20,3 +20,4 @@ sub-goal: add exec-rec which runs an exec and records results in a git note
 }}}
 meta-goal: keep the repository clean
 meta-goal: keep changes small and managable
+meta-goal: keep track of new goals in this file
