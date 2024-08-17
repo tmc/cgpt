@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# <create-file> <file-name>
+args=("$@")
+
+prefill=$(echo -e "#!/usr/bin/env bash\n# ${args[0]} -")
+system_prompt="you will create the file that the user specifies"
+(echo "create file: ${args[*]}"; ./ctx-exec ./ctx-src) \
+  | cgpt --system-prompt "${system_prompt}" --prefill "${prefill}" | tee "${args[0]}"
+chmod +x "${args[0]}"
