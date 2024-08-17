@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# ./ctx-exec -  wraps an arbitrary exec and returns XML tagged content for LLMs
+
+# Function to print usage
+print_usage() {
+    echo "Usage: $0 <command>"
+    echo "Executes the given command and returns XML tagged content including the command, exit code, stdout, and stderr."
+}
+
+# Check if a command is provided
+if [ $# -eq 0 ]; then
+    print_usage
+    exit 1
+fi
+
+# Capture the command
+cmd="$*"
+
+# Execute the command and capture stdout, stderr, and exit code
+output=$(mktemp)
+error=$(mktemp)
+set +e
+eval "$cmd" > "$output" 2> "$error"
+exit_code=$?
+set -e
+
+# Read stdout and stderr
+stdout=$(cat "$output")
+stderr=$(cat "$error")
+
+# Clean up temporary files
+rm "$output" "$error"
+
+# Output XML tagged content
+cat << EOF
+<ctx-exec>
+  <command>$cmd</command>
+  <exit-code>$exit_code</exit-code>
+  <stdout>
+$stdout
+  </stdout>
+  <stderr>
+$stderr
+  </stderr>
+</ctx-exec>
+EOF
