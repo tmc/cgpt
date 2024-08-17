@@ -1,12 +1,16 @@
 meta-goal: delete this file after completing everything.
-simplify create-script {{{
+goal: simplify create-script {{{
   write simplify-script {{{
 	observation: simplify-script came out with <antthinking> tags which breaks it
   }}}
 }}}
-get working goal system in place {{{
-get working goals file in place
-get a file to check on, and carry out things, about goals
+goal: get working goal system in place {{{
+  get working goals file in place
+  get a file to check on, and carry out things, about goals {{{ 
+	related-goal: add exec-analyze
+  }}}
 }}}
-get ./plan script in place that emits a plan
-
+goal: get ./plan script in place that emits a plan
+goal: add exec-analyze which runs an exec and some analysis {{{
+sub-goal: add exec-rec which runs an exec and records results in a git note
+}}}
