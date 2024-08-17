@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# exec-analyze
+# Analyze the given exec command
+# Usage: exec-analyze ls
+# Usage: exec-analyze -- docker run -it --rm alpine /bin/sh -c 'echo hello'
+# put the current directory in the path
+
+EXEC_ANALYZE_PROMPT="Analyze the result of the given exec command, given the current goals, and the current context."
+EXEC_ANALYZE_PREFILL=""
+(
+export PATH=$PATH:.
+echo 'please analyze this exec:'
+ctx-exec "$@"
+ctx-goals
+) | cgpt -s "${EXEC_ANALYZE_PROMPT}" -p "${EXEC_ANALYZE_PREFILL}"

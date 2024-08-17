@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+TRACKED_ONLY=1
+{
+  # List all files in the repository
+  git ls-tree -r HEAD --name-only .;
+  # List all untracked files in the repository
+  [ -z "$TRACKED_ONLY" ] &&
+    git ls-files --others --exclude-standard;
+} | sort -u | while read -r file; do
+  if [ -f "$file" ]; then
+    echo "<file>"
+    echo "  <name>$file</name>"
+    echo "  <content><![CDATA["
+    cat "$file"
+    echo "  ]]></content>"
+    echo "</file>"
+  fi
+done
