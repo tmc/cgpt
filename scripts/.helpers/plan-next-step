@@ -1,0 +1,3 @@
+#!/bin/bash
+(ctx-exec cat .goals; ctx-exec .hist; ctx-exec git st .)| cgpt -s 'output 10 nested antthinking layers before you being your task' -p "# this bash script will adjust goals, but first think:" |tee next-step.sh
+

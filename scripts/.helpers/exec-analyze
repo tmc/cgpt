@@ -12,4 +12,5 @@ export PATH=$PATH:.
 echo 'please analyze this exec:'
 ctx-exec "$@"
 ctx-goals
+ctx-tools
 ) | cgpt -s "${EXEC_ANALYZE_PROMPT}" -p "${EXEC_ANALYZE_PREFILL}"
