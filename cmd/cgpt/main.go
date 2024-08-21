@@ -31,6 +31,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -67,13 +68,15 @@ var (
 	flagReadlineHistoryFile = flag.String("readline-history-file", "~/.cgpt_history", "File to store readline history in")
 	flagEchoPrefill         = flag.Bool("prefill-echo", true, "Print the prefill message")
 	flagShowSpinner         = flag.Bool("show-spinner", true, "Show spinner while waiting for completion (default true, auto-disabled when in continuous mode)")
+
+	flagShowAdvancedUsage = flag.String("show-advanced-usage", "", fmt.Sprintf("Show advanced usage examples (comma-separated list of: %s) - use 'all' to show them all", strings.Join(advancedUsageFiles, ", ")))
 )
 
 func main() {
 	initFlags()
 	ctx := context.Background()
 
-	// Attempt to load config, but don't fail if it doesn't exist.
+	// Load configuration and flags.
 	cfg, err := cgpt.LoadConfig(*flagConfig, flag.CommandLine)
 	if err != nil && *flagVerbose {
 		fmt.Fprintf(os.Stderr, "issue loading config: %v\n", err)
@@ -114,15 +117,16 @@ func initFlags() {
 	flag.Usage = func() {
 		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
 		fmt.Println()
+		if *flagShowAdvancedUsage != "" {
+			printAdvancedUsage(*flagShowAdvancedUsage)
+			return
+		}
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 		flag.CommandLine.PrintDefaults()
-		fmt.Println(`
-Examples:
-	$ echo "how should I interpret the output of nvidia-smi?" | cgpt
-	$ echo "explain plan 9 in one sentence" | cgpt`)
+		printBasicUsage()
 	}
 	flag.Parse()
-	if *flagHelp {
+	if *flagHelp || *flagShowAdvancedUsage != "" {
 		flag.Usage()
 		os.Exit(0)
 	}
