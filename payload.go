@@ -3,6 +3,7 @@ package cgpt
 import (
 	"context"
 	"log"
+	"strings"
 
 	"github.com/tmc/langchaingo/llms"
 )
@@ -73,6 +74,9 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 	return ch, nil
 }
 
+// SetNextCompletionPrefill sets the next completion prefill message.
+// Note that not all inference engines support prefill messages.
+// Whitespace is trimmed from the end of the message.
 func (s *CompletionService) SetNextCompletionPrefill(content string) {
-	s.nextCompletionPrefill = content
+	s.nextCompletionPrefill = strings.TrimRight(content, " \t\n")
 }

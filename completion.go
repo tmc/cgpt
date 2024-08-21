@@ -127,7 +127,7 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 		s.payload.addSystemMessage(s.cfg.SystemPrompt)
 	}
 	if runCfg.Prefill != "" {
-		s.nextCompletionPrefill = runCfg.Prefill
+		s.SetNextCompletionPrefill(runCfg.Prefill)
 	}
 	if runCfg.Continuous {
 		return s.runContinuousCompletionStreaming(ctx, runCfg)
