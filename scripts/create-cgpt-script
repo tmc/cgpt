@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+# Usage: ./create-cgpt-script <script_name> <script_description>
+
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <script_name> <script_description>"
+    exit 1
+fi
+
+script_name="$1"
+shift
+script_description="$*"
+
+cgpt -s "You are an expert bash script generator. Your task is to create a bash script named '$script_name' that does the following: $script_description
+
+Please adhere to these guidelines:
+1. Start the script with a shebang and a brief description of its purpose.
+2. Include proper error handling and input validation.
+3. Use shellcheck-compliant code.
+4. Include helpful comments where necessary.
+5. If the script uses cgpt, include the relevant usage information from the following:
+<cgpt-usage>
+$(cgpt -h 2>&1)
+</cgpt-usage>
+
+Output only the bash script content, with no additional explanation." \
+    -m "claude-3-5-sonnet-20240620" \
+    -t 2000 \
+    -T 0.7 \
+    -i "Generate the bash script for $script_name" > "$script_name"
+
+chmod +x "$script_name"
+echo "Script '$script_name' has been created and made executable."
