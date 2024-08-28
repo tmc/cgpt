@@ -1,33 +1,35 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-# Usage: ./create-cgpt-script <script_name> <script_description>
-
-if [ $# -lt 2 ]; then
-    echo "Usage: $0 <script_name> <script_description>"
+# Function to display usage information
+usage() {
+    echo "Usage: $0 <script_name> <description>"
+    echo "Example: $0 git-auto-commit 'a program to automatically format a git commit from what is currently staged'"
     exit 1
+}
+
+# Check if we have the correct number of arguments
+if [ $# -lt 2 ]; then
+    usage
 fi
 
+# Assign arguments to variables
 script_name="$1"
 shift
-script_description="$*"
+description="$@"
 
-cgpt -s "You are an expert bash script generator. Your task is to create a bash script named '$script_name' that does the following: $script_description
+# Create the prompt for cgpt
+prompt="Create a bash script named '$script_name' that $description. The script should be well-commented, efficient, and follow best practices. If the script could benefit from using cgpt, include the following usage information:
 
-Please adhere to these guidelines:
-1. Start the script with a shebang and a brief description of its purpose.
-2. Include proper error handling and input validation.
-3. Use shellcheck-compliant code.
-4. Include helpful comments where necessary.
-5. If the script uses cgpt, include the relevant usage information from the following:
 <cgpt-usage>
 $(cgpt -h 2>&1)
 </cgpt-usage>
 
-Output only the bash script content, with no additional explanation." \
-    -m "claude-3-5-sonnet-20240620" \
-    -t 2000 \
-    -T 0.7 \
-    -i "Generate the bash script for $script_name" > "$script_name"
+Output only the bash script content, starting with a shebang line and including appropriate comments."
 
+# Use cgpt to generate the script
+echo "$prompt" | cgpt -s "You are an expert bash programmer and AI assistant. Your task is to create high-quality, well-documented bash scripts based on the given descriptions. Ensure the scripts are efficient, follow best practices, and include error handling where appropriate." -m "claude-3-5-sonnet-20240620" -t 2000 -T 0.7 > "$script_name"
+
+# Make the generated script executable
 chmod +x "$script_name"
+
 echo "Script '$script_name' has been created and made executable."
