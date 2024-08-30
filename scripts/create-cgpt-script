@@ -2,16 +2,20 @@
 
 set -e
 
-trap 'echo "Error: Script execution failed" >&2; exit 1' ERR
+# Error handling
+trap 'echo "Error: Script execution failed on line $LINENO" >&2; exit 1' ERR
 
+# Function to fetch current cgpt usage information
 get_cgpt_usage() {
     cgpt -h 2>&1
 }
 
+# Function to fetch advanced cgpt usage examples
 get_cgpt_advanced_examples() {
     cgpt --show-advanced-usage all 2>&1
 }
 
+# Function to read usage examples from a file or generate them using cgpt
 read_or_generate_usage_examples() {
     local script_name="$1"
     local examples_file="${script_name}-usage-examples.txt"
@@ -19,41 +23,56 @@ read_or_generate_usage_examples() {
     if [[ -f "$examples_file" ]]; then
         cat "$examples_file"
     else
-        cgpt -i "Generate 3-5 usage examples for a script named $script_name" \
-             -s "You are an expert in creating clear and concise usage examples for command-line tools. Provide 3-5 practical examples of how to use the $script_name script. Each example should be on a new line and start with a # comment explaining its purpose."
+        echo "Generating usage examples for $script_name..." >&2
+        cgpt -i "Generate 3-5 usage examples for a bash script named $script_name" \
+             -s "You are an expert in creating clear and concise usage examples for bash scripts. Provide 3-5 examples that demonstrate different use cases and options for the script. Each example should be on a new line and start with a '#' comment explaining its purpose, followed by the command itself." \
+             -t 1000
     fi
 }
 
+# Function to handle extra context
 handle_extra_context() {
-    local context=""
+    local extra_context=""
     for arg in "$@"; do
         if [[ -f "$arg" ]]; then
-            context+="File contents of $arg:\n$(cat "$arg")\n\n"
+            extra_context+="File content of $arg:\n$(cat "$arg")\n\n"
         else
-            context+="Additional context: $arg\n\n"
+            extra_context+="Additional context: $arg\n\n"
         fi
     done
-    echo "$context"
+    echo "$extra_context"
 }
 
+# Function to allow generated scripts to fetch additional context during runtime
 fetch_dynamic_context() {
-    local context="$1"
-    echo "$(eval "$context")"
+    local context_source="$1"
+    if [[ -f "$context_source" ]]; then
+        cat "$context_source"
+    elif [[ "$context_source" =~ ^https?:// ]]; then
+        curl -s "$context_source"
+    else
+        echo "$context_source"
+    fi
 }
 
+# Function to allow generated scripts to call other programs and capture their output
 call_external_program() {
-    local command="$1"
-    echo "$(eval "$command")"
+    "$@"
 }
 
+# Function to generate the script
 generate_script() {
     local script_name="$1"
     local description="$2"
     local extra_context="$3"
-    local cgpt_usage="$(get_cgpt_usage)"
-    local cgpt_advanced_examples="$(get_cgpt_advanced_examples)"
-    local usage_examples="$(read_or_generate_usage_examples "$script_name")"
-
+    local cgpt_usage
+    local cgpt_advanced_examples
+    local usage_examples
+    
+    cgpt_usage=$(get_cgpt_usage)
+    cgpt_advanced_examples=$(get_cgpt_advanced_examples)
+    usage_examples=$(read_or_generate_usage_examples "$script_name")
+    
     local prompt="Create a bash script named '$script_name' that does the following:
 
 $description
@@ -67,8 +86,10 @@ Requirements:
 6. Include functions to fetch cgpt usage information and advanced examples
 7. Include a function to read usage examples from a file, or generate them if the file doesn't exist
 8. Ensure these features (cgpt usage, advanced examples, usage examples, tags) are propagated to any scripts it might generate
-9. If applicable, read its own usage examples from a file named '${script_name}-usage-examples.txt'
-10. Include functions for fetch_dynamic_context and call_external_program to allow runtime context fetching and external program execution
+9. If applicable, read its own usage examples from a file named '<script_name>-usage-examples.txt'
+10. Implement functions for fetch_dynamic_context and call_external_program as defined in the create-cgpt-script
+11. Preserve all indentation and formatting in your output
+12. Output only the script content within <generated_script> tags, without any surrounding text or markdown
 
 Current cgpt usage:
 <cgpt_usage>
@@ -81,51 +102,69 @@ $cgpt_advanced_examples
 </cgpt_advanced_examples>
 
 Usage examples:
-<usage_examples>
 $usage_examples
-</usage_examples>
 
 Extra context:
 $extra_context
 
-Output only the script content within <generated_script> tags, without any surrounding text or markdown.
-Preserve all indentation and formatting in your output."
+CRITICAL: Ensure that the generated script includes mechanisms to propagate all key features (cgpt usage fetching, advanced examples fetching, usage example reading or generation, thinking tags, extra context handling, dynamic context fetching, and external program calling) to all scripts it generates, maintaining these capabilities across generations of scripts."
 
-    local raw_output_file=$(mktemp)
-    cgpt -i "$prompt" -t 4000 > "$raw_output_file"
-
-    local extracted_script=$(sed -n "/<generated_script>/,/<\/generated_script>/p" "$raw_output_file" | sed "s/.*<generated_script>//;s/<\/generated_script>.*//;/^$/d")
-
+    local raw_output
+    raw_output=$(cgpt -i "$prompt" -t 4000)
+    
+    local extracted_script
+    extracted_script=$(echo "$raw_output" | sed -n "/<generated_script>/,/<\/generated_script>/p" | sed "s/.*<generated_script>//;s/<\/generated_script>.*//;/^$/d")
+    
     if [[ -z "$extracted_script" ]]; then
         echo "Error: Failed to extract script content from cgpt output" >&2
         exit 1
     fi
-
+    
     echo "$extracted_script"
-    rm "$raw_output_file"
 }
 
+# Function to validate the generated script
+validate_script() {
+    local script_file="$1"
+    
+    # Check for syntax errors
+    if ! bash -n "$script_file"; then
+        echo "Error: Syntax check failed for $script_file" >&2
+        exit 1
+    fi
+    
+    # Use shellcheck if available
+    if command -v shellcheck &> /dev/null; then
+        if ! shellcheck "$script_file"; then
+            echo "Warning: shellcheck found issues in $script_file" >&2
+        fi
+    fi
+}
+
+# Main function
 main() {
     if [[ $# -lt 1 ]]; then
         echo "Usage: $0 <script_name> [<script_description>] [extra context...]" >&2
         exit 1
     fi
-
+    
     local script_name="$1"
     local description="${2:-}"
     shift 2
-
-    local extra_context=""
-    if [[ $# -gt 0 ]]; then
-        extra_context=$(handle_extra_context "$@")
-    fi
-
+    local extra_context
+    extra_context=$(handle_extra_context "$@")
+    
     echo "• Generating script: $script_name..." >&2
-
-    local script_content=$(generate_script "$script_name" "$description" "$extra_context")
-    echo "$script_content" > "$script_name"
+    
+    local generated_script
+    generated_script=$(generate_script "$script_name" "$description" "$extra_context")
+    
+    echo "$generated_script" > "$script_name"
+    
+    validate_script "$script_name"
+    
     chmod +x "$script_name"
-
+    
     echo "• Script $script_name has been created and made executable." >&2
 }
 

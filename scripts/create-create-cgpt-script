@@ -15,6 +15,7 @@ system_prompt="You are an expert bash programmer. Create bash scripts that meet 
 6. Output only the script content within <generated_script> tags, without any surrounding text or markdown
 7. Use XML-style tags with command attributes to wrap cgpt usage and advanced examples output
 8. Print only two lines of progress information to stderr: one at the start and one at the end of script generation
+9. Implement robust error checking and debugging capabilities
 
 Current cgpt usage:
 <cgpt_usage command=\"cgpt -h 2>&1\">
@@ -52,6 +53,7 @@ user_prompt="Create a bash script called 'create-cgpt-script' that does the foll
    - fetch_dynamic_context(): to allow generated scripts to fetch additional context during runtime
    - call_external_program(): to allow generated scripts to call other programs and capture their output
    - generate_script(): to create the prompt, call cgpt, and process the output
+   - validate_script(): to check the generated script for syntax errors and other issues
 
 4. In the generate_script function:
    - Create a prompt that includes all requirements for the script to be generated
@@ -64,26 +66,34 @@ user_prompt="Create a bash script called 'create-cgpt-script' that does the foll
      sed -n \"/<generated_script>/,/<\\/generated_script>/p\" | sed \"s/.*<generated_script>//;s/<\\/generated_script>.*//;/^$/d\"
    - Include an error check to ensure content was actually extracted
 
-5. In the main function:
+5. In the validate_script function:
+   - Use 'bash -n' to check for syntax errors
+   - If errors are found, print them to stderr and exit with an error code
+   - Optionally, use shellcheck for more comprehensive checking if available
+
+6. In the main function:
    - Check for correct number of arguments (at least 1 for script name, optionally more for description and extra context)
    - Handle extra context if provided
    - Call generate_script and save its output to a file
-   - Make the new script executable
+   - Call validate_script to check the generated script
+   - Make the new script executable only if validation passes
 
-6. Include error handling using set -e and a trap
+7. Include error handling using set -e and a trap
 
-7. Ensure that create-cgpt-script can generate scripts that have the same capabilities, creating a self-replicating system
+8. Ensure that create-cgpt-script can generate scripts that have the same capabilities, creating a self-replicating system
 
-8. Implement the fetch_dynamic_context and call_external_program functions to allow generated scripts to:
+9. Implement the fetch_dynamic_context and call_external_program functions to allow generated scripts to:
    - Dynamically fetch additional context during runtime
    - Call other programs and capture their output for use in the script
 
-9. Provide a usage message that clearly indicates the script description is optional:
+10. Provide a usage message that clearly indicates the script description is optional:
     echo \"Usage: $0 <script_name> [<script_description>] [extra context...]\" >&2
 
-10. CRITICAL: Ensure only two lines of progress information are printed to stderr:
+11. CRITICAL: Ensure only two lines of progress information are printed to stderr under normal operation:
     - At the start: echo \"• Generating script: <script_name>...\" >&2
     - At the end: echo \"• Script <script_name> has been created and made executable.\" >&2
+
+12. If an error occurs during script generation or validation, print detailed error information to stderr to aid in debugging.
 
 CRITICAL: Ensure that the generated create-cgpt-script includes mechanisms to propagate all key features (cgpt usage fetching, advanced examples fetching, usage example reading or generation, thinking tags, extra context handling, dynamic context fetching, and external program calling) to all scripts it generates, maintaining these capabilities across generations of scripts."
 
@@ -95,6 +105,15 @@ EOF
 if [ -s create-cgpt-script ]; then
     echo "• create-cgpt-script has been generated successfully" >&2
     chmod +x create-cgpt-script
+
+    # Validate the generated script
+    if bash -n create-cgpt-script; then
+        echo "• create-cgpt-script passes syntax check" >&2
+    else
+        echo "• Error: create-cgpt-script contains syntax errors:" >&2
+        bash -n create-cgpt-script 2>&2
+        exit 1
+    fi
 else
     echo "• Error: Failed to generate create-cgpt-script or the file is empty." >&2
     exit 1
