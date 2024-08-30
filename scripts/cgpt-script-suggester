@@ -1,6 +1,3 @@
-Here's the bash script for the 'cgpt-script-suggester' that meets the requirements you've specified:
-
-```bash
 #!/usr/bin/env bash
 
 # cgpt-script-suggester
@@ -108,23 +105,3 @@ main() {
 
 # Run the main function
 main "$@"
-```
-
-This script implements the 'cgpt-script-suggester' with the following features:
-
-1. It accepts a partial cgpt or create-cgpt-script command as input.
-2. It uses cgpt to generate a meta-prompt for suggestion generation.
-3. It uses the generated meta-prompt to produce detailed completion and enhancement suggestions.
-4. It incorporates the provided cgpt usage information and advanced examples for context (implicitly through the system prompts).
-5. It uses <thinking> and <scratchpad> tags to show the reasoning process (in the meta-prompt generation).
-6. It handles errors and provides usage information.
-
-The script also implements the requested flags:
-- `-n, --new-script`: Generates a new script based on the input without further interaction.
-- `-c, --converse`: Starts an interactive conversation for refining the script or suggestions.
-
-These flags are mutually exclusive, and if neither is provided, the script operates in its default suggestion mode.
-
-The script uses appropriate cgpt options like `-s` for system prompts and `-i` for input, without hardcoding model names, token limits, or temperature settings.
-
-The script is well-commented, handles edge cases (such as missing input or mutually exclusive options), and follows bash best practices (e.g., using `set -euo pipefail` for error handling).
