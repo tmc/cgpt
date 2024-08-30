@@ -1,0 +1,32 @@
+./create-cgpt-script cgpt-script-suggester 'Create a script that suggests completions and enhancements for cgpt-related commands, particularly create-cgpt-script, using advanced meta-prompting techniques. The script should:
+
+1. Accept a partial cgpt or create-cgpt-script command as input
+2. Use cgpt to generate a meta-prompt for suggestion generation
+3. Use the generated meta-prompt to produce detailed completion and enhancement suggestions
+4. Incorporate the provided cgpt usage information and advanced examples for context
+5. Use <thinking> and <scratchpad> tags to show reasoning process
+6. Handle errors and provide usage information
+
+Additionally, implement the following flags:
+-n, --new-script: Generate a new script based on the input without further interaction
+-c, --converse: Start an interactive conversation for refining the script or suggestions
+
+These flags should be mutually exclusive. If neither flag is provided, the script should operate in its default suggestion mode.
+
+The script should use appropriate cgpt options like -s for system prompts and -i for input, but should not hardcode model names, token limits, or temperature settings unless absolutely necessary.
+
+Ensure the script is well-commented, handles edge cases, and follows bash best practices.
+
+Use the following cgpt usage information and advanced examples in the generated script:
+<cgpt_usage>
+'"$(cgpt -h 2>&1)"'
+</cgpt_usage>
+
+<cgpt_advanced_usage>
+'"$(cgpt --show-advanced-usage all 2>&1)"'
+</cgpt_advanced_usage>
+
+The script should dynamically incorporate this cgpt usage information and advanced examples to provide context, guide the suggestion process, and leverage advanced cgpt features and techniques.' \
+-s "You are an expert in creating advanced shell scripts that leverage AI capabilities. Focus on creating a script that demonstrates sophisticated use of cgpt and meta-prompting techniques, while maintaining flexibility and respecting user configurations. Incorporate the provided cgpt usage information and advanced examples to enhance the script's functionality, accuracy, and ability to leverage advanced cgpt features.
+
+The script should be adaptable to suggest improvements for various cgpt-related commands, with a primary focus on create-cgpt-script commands. Implement the new-script and converse flags to allow for different modes of operation, ensuring they are mutually exclusive and that the script provides clear usage instructions for these new features."
