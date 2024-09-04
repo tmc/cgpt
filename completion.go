@@ -111,11 +111,9 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 	if runCfg.DebugMode {
 		s.loggerCfg.Level.SetLevel(zap.DebugLevel)
 	}
-
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
-		return fmt.Errorf("failed to handle history: %w", err)
+		fmt.Fprintln(os.Stderr, err)
 	}
-
 	if !s.loadedWithHistory() && s.cfg.SystemPrompt != "" {
 		s.payload.addSystemMessage(s.cfg.SystemPrompt)
 	}
@@ -208,16 +206,23 @@ func (s *CompletionService) processInputs(ctx context.Context, cfg RunConfig) er
 	inputs = append(inputs, cfg.InputFiles...)
 	inputs = append(inputs, cfg.PositionalArgs...)
 
+	var combinedInput strings.Builder
+
 	for _, input := range inputs {
 		processor, err := createInputProcessor(input)
 		if err != nil {
-			return fmt.Errorf("failed to create input processor: %w", err)
+			return err
 		}
 		content, err := processor()
 		if err != nil {
 			return fmt.Errorf("failed to process input %s: %w", input, err)
 		}
-		s.payload.addUserMessage(content)
+		combinedInput.WriteString(content)
+		combinedInput.WriteString("\n")
+	}
+
+	if combinedInput.Len() > 0 {
+		s.payload.addUserMessage(combinedInput.String())
 	}
 
 	return nil
@@ -300,27 +305,18 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 
 // Enhanced function to run continuous streaming completion mode.
 func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
-	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
+	fmt.Fprintf(os.Stderr, "\033[38;5;240mcgpt: Running in continuous mode. Press ctrl+c to exit.\033[0m\n")
+
+	// If we have processed inputs, generate an initial response
+	if len(s.payload.Messages) > 0 && s.payload.Messages[len(s.payload.Messages)-1].Role == llms.ChatMessageTypeHuman {
+		if err := s.generateResponse(ctx, runCfg); err != nil {
+			return fmt.Errorf("failed to generate initial response: %w", err)
+		}
+	}
+
 	processFn := func(input string) error {
 		s.payload.addUserMessage(input)
-		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
-			ShowSpinner: runCfg.ShowSpinner,
-			EchoPrefill: !runCfg.EchoPrefill,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to perform completion streaming: %w", err)
-		}
-		content := strings.Builder{}
-		for r := range streamPayloads {
-			content.WriteString(r)
-			fmt.Print(r)
-		}
-		s.payload.addAssistantMessage(content.String())
-		fmt.Println()
-		if err := s.saveHistory(); err != nil {
-			return fmt.Errorf("failed to save history: %w", err)
-		}
-		return nil
+		return s.generateResponse(ctx, runCfg)
 	}
 
 	sessionConfig := interactive.Config{
@@ -332,7 +328,7 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 
 	session, err := interactive.NewInteractiveSession(sessionConfig)
 	if err != nil {
-		return fmt.Errorf("failed to create interactive session: %w", err)
+		return err
 	}
 
 	return session.Run()
@@ -383,31 +379,62 @@ func expandTilde(path string) string {
 
 func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
 	ch := make(chan string)
-	chunkSeen := func() {}
 	go func() {
 		defer close(ch)
-		if cfg.ShowSpinner {
-			chunkSeen = spin()
-		}
+
+		fullResponse := strings.Builder{}
+		firstChunk := true
+
+		// Send prefill immediately if it exists
 		if s.nextCompletionPrefill != "" {
-			// If the user has provided a prefill message, and hasn't opted out, then send it.
-			if !cfg.EchoPrefill {
-				ch <- s.nextCompletionPrefill
-			}
-			payload.addAssistantMessage(s.nextCompletionPrefill)
-			s.nextCompletionPrefill = ""
+			ch <- s.nextCompletionPrefill + " "
+			fullResponse.WriteString(s.nextCompletionPrefill)
+			payload.Messages = append(payload.Messages, llms.TextParts(llms.ChatMessageTypeAI, s.nextCompletionPrefill))
 		}
+
+		// Start spinner on the last character
+		var spinnerStop func()
+		if cfg.ShowSpinner {
+			// Start spinner on the last character
+			spinnerStop = spin(len(s.nextCompletionPrefill) + 1)
+		}
+
 		_, err := s.model.GenerateContent(ctx, payload.Messages,
 			llms.WithMaxTokens(s.cfg.MaxTokens),
 			llms.WithTemperature(s.cfg.Temperature),
 			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-				chunkSeen()
+				if firstChunk {
+					if spinnerStop != nil {
+						spinnerStop()
+						spinnerStop = nil
+					}
+					firstChunk = false
+				}
+
 				ch <- string(chunk)
+				fullResponse.Write(chunk)
 				return nil
 			}))
+
 		if err != nil {
 			s.logger.Errorf("failed to generate content: %v", err)
 		}
+
+		// Clean up spinner if it's still running
+		if spinnerStop != nil {
+			spinnerStop()
+		}
+
+		// Replace the last message with the full response
+		if len(payload.Messages) > 0 && payload.Messages[len(payload.Messages)-1].Role == llms.ChatMessageTypeAI {
+			fmt.Println("updating last message")
+			payload.Messages[len(payload.Messages)-1] = llms.TextParts(llms.ChatMessageTypeAI, fullResponse.String())
+		} else {
+			fmt.Println("adding new message")
+			payload.addAssistantMessage(fullResponse.String())
+		}
+
+		s.nextCompletionPrefill = ""
 	}()
 	return ch, nil
 }

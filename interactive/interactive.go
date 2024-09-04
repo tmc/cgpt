@@ -2,8 +2,10 @@ package interactive
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -71,6 +73,7 @@ func (s *InteractiveSession) changePrompt(toAlt bool) {
 
 func (s *InteractiveSession) Run() error {
 	defer s.reader.Close()
+
 	for {
 		var line string
 		var err error
@@ -93,6 +96,20 @@ func (s *InteractiveSession) Run() error {
 			return err
 		}
 
+		// Check for Ctrl-X Ctrl-E sequence
+		if line == "\x18\x05" {
+			currentLine := s.buffer.String()
+			editedLine, err := s.editInEditor(currentLine)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error editing in external editor: %v\n", err)
+				continue
+			}
+			s.buffer.Reset()
+			s.buffer.WriteString(editedLine)
+			fmt.Print(editedLine) // Print the edited line to the console
+			continue
+		}
+
 		s.buffer.WriteString(line)
 		s.buffer.WriteString("\n")
 
@@ -110,7 +127,7 @@ func (s *InteractiveSession) Run() error {
 			}
 		}
 
-		if timeDelta > pasteThreshold && s.isInputComplete() {
+		if timeDelta > s.config.PasteThreshold && s.isInputComplete() {
 			input := s.buffer.String()
 			if err := s.config.ProcessFn(input); err != nil {
 				return err
@@ -187,4 +204,44 @@ func (s *InteractiveSession) loadHistory() error {
 		return err
 	}
 	return nil
+}
+
+func (s *InteractiveSession) editInEditor(content string) (string, error) {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = "vim" // Default to vim if $EDITOR is not set
+	}
+
+	// Create a temporary file
+	tmpfile, err := os.CreateTemp("", "cgpt_input_*.txt")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(tmpfile.Name())
+
+	// Write current content to the file
+	if _, err := tmpfile.Write([]byte(content)); err != nil {
+		return "", err
+	}
+	if err := tmpfile.Close(); err != nil {
+		return "", err
+	}
+
+	// Open the editor
+	cmd := exec.Command(editor, tmpfile.Name())
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+
+	// Read the edited content
+	editedContent, err := os.ReadFile(tmpfile.Name())
+	if err != nil {
+		return "", err
+	}
+
+	return string(editedContent), nil
 }
