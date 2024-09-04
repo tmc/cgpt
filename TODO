@@ -1,0 +1,3 @@
+fix ai role being written twice
+allow ctrl-c to stop mid-generation
+add modes -> esc to get to a vim-like : experience
