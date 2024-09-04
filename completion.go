@@ -58,13 +58,13 @@ func NewCompletionService(cfg *Config) (*CompletionService, error) {
 
 // RunConfig is the configuration for the Run method.
 type RunConfig struct {
-	// InputString is the input text to complete. If present, this will be used instead of reading from a file.
-	// This will only be used for the first completion when either running in continuous mode or when running multiple completions.
-	InputString string
-
-	// InputFile is the file to read input from. Use "-" for stdin.
-	InputFile string
-
+	// InputStrings are the input texts to complete. If present, these will be used instead of reading from files.
+	// These will be used for completions when either running in continuous mode or when running multiple completions.
+	InputStrings []string
+	// InputFiles are the files to read input from. Use "-" for stdin.
+	InputFiles []string
+	// PositionalArgs are additional arguments passed to the command.
+	PositionalArgs []string
 	// Continuous will run the completion API in a loop, using the previous output as the input for the next request.
 	Continuous bool
 
@@ -77,36 +77,27 @@ type RunConfig struct {
 	Prefill string
 	// EchoPrefill is a flag that, when set to true, will echo the prefill message to the user.
 	EchoPrefill bool
-
 	// HistoryIn is the file to read cgpt history from.
 	HistoryIn string
 	// HistoryOut is the file to store cgpt history in.
 	HistoryOut string
-
 	// NCompletions is the number of completions to complete in a history-enabled context.
 	NCompletions int
-
 	// Verbose will enable verbose output.
 	Verbose bool
-
 	// DebugMode will enable debug output.
 	DebugMode bool
-
 	// ReadlineHistoryFile is the file to store readline history in.
 	ReadlineHistoryFile string
-
 	// MaximumTimeout is the maximum time to wait for a response.
 	MaximumTimeout time.Duration
-
 	// ShowSpinner is a flag that, when set to true, shows a spinner while waiting for the completion.
 	ShowSpinner bool
 }
 
 // PerformCompletionConfig is the configuration for the PerformCompletion method, it controls the behavior of the completion with regard to user interaction.
 type PerformCompletionConfig struct {
-	// EchoPrefill is a flag that, when set to true, will echo the prefill message to the user.
 	EchoPrefill bool
-	// ShowSpinner is a flag that, when set to true, shows a spinner while waiting for the completion.
 	ShowSpinner bool
 }
 
@@ -120,15 +111,22 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 	if runCfg.DebugMode {
 		s.loggerCfg.Level.SetLevel(zap.DebugLevel)
 	}
+
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		return fmt.Errorf("failed to handle history: %w", err)
 	}
+
 	if !s.loadedWithHistory() && s.cfg.SystemPrompt != "" {
 		s.payload.addSystemMessage(s.cfg.SystemPrompt)
 	}
 	if runCfg.Prefill != "" {
 		s.SetNextCompletionPrefill(runCfg.Prefill)
 	}
+
+	if err := s.processInputs(ctx, runCfg); err != nil {
+		return fmt.Errorf("failed to process inputs: %w", err)
+	}
+
 	if runCfg.Continuous {
 		if runCfg.StreamOutput {
 			return s.runContinuousCompletionStreaming(ctx, runCfg)
@@ -180,40 +178,69 @@ func (s *CompletionService) getLastUserMessage() string {
 	return strings.Join(parts, "\n")
 }
 
-func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
-	var (
-		input io.Reader = os.Stdin
-		err   error
-	)
-	s.logger.Debug("running one-shot completion with streaming")
-	inputString := runCfg.InputString
-	inputFile := runCfg.InputFile
-
-	var contents string
-	if inputString != "" {
-		contents = inputString
-	} else {
-		if inputFile != "-" {
-			input, err = os.Open(inputFile)
-			if err != nil {
-				return fmt.Errorf("failed to open input file %q: %w", inputFile, err)
-			}
-		}
-		b, err := io.ReadAll(input)
-		if err != nil {
-			return fmt.Errorf("failed to read input: %w", err)
-		}
-		contents = string(b)
+func createInputProcessor(input string) (func() (string, error), error) {
+	if input == "-" {
+		return func() (string, error) {
+			return readStdin()
+		}, nil
 	}
 
+	if _, err := os.Stat(input); err == nil {
+		file, err := os.Open(input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open file %s: %w", input, err)
+		}
+		return func() (string, error) {
+			defer file.Close()
+			content, err := io.ReadAll(file)
+			return string(content), err
+		}, nil
+	}
+
+	return func() (string, error) {
+		return input, nil
+	}, nil
+}
+
+func (s *CompletionService) processInputs(ctx context.Context, cfg RunConfig) error {
+	inputs := make([]string, 0, len(cfg.InputStrings)+len(cfg.InputFiles)+len(cfg.PositionalArgs))
+	inputs = append(inputs, cfg.InputStrings...)
+	inputs = append(inputs, cfg.InputFiles...)
+	inputs = append(inputs, cfg.PositionalArgs...)
+
+	for _, input := range inputs {
+		processor, err := createInputProcessor(input)
+		if err != nil {
+			return fmt.Errorf("failed to create input processor: %w", err)
+		}
+		content, err := processor()
+		if err != nil {
+			return fmt.Errorf("failed to process input %s: %w", input, err)
+		}
+		s.payload.addUserMessage(content)
+	}
+
+	return nil
+}
+
+func readStdin() (string, error) {
+	content, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return "", fmt.Errorf("failed to read from stdin: %w", err)
+	}
+	return string(content), nil
+}
+
+func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
+	s.logger.Debug("running one-shot completion with streaming")
+
 	s.payload.Stream = true
-	s.payload.addUserMessage(contents)
 	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
 		ShowSpinner: runCfg.ShowSpinner,
 		EchoPrefill: !runCfg.EchoPrefill,
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to perform completion streaming: %w", err)
 	}
 	content := strings.Builder{}
 	for r := range streamPayloads {
@@ -281,7 +308,7 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 			EchoPrefill: !runCfg.EchoPrefill,
 		})
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to perform completion streaming: %w", err)
 		}
 		content := strings.Builder{}
 		for r := range streamPayloads {
@@ -305,7 +332,7 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 
 	session, err := interactive.NewInteractiveSession(sessionConfig)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create interactive session: %w", err)
 	}
 
 	return session.Run()
@@ -352,4 +379,42 @@ func expandTilde(path string) string {
 		return strings.Replace(path, "~", os.Getenv("HOME"), 1)
 	}
 	return path
+}
+
+func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
+	ch := make(chan string)
+	chunkSeen := func() {}
+	go func() {
+		defer close(ch)
+		if cfg.ShowSpinner {
+			chunkSeen = spin()
+		}
+		if s.nextCompletionPrefill != "" {
+			// If the user has provided a prefill message, and hasn't opted out, then send it.
+			if !cfg.EchoPrefill {
+				ch <- s.nextCompletionPrefill
+			}
+			payload.addAssistantMessage(s.nextCompletionPrefill)
+			s.nextCompletionPrefill = ""
+		}
+		_, err := s.model.GenerateContent(ctx, payload.Messages,
+			llms.WithMaxTokens(s.cfg.MaxTokens),
+			llms.WithTemperature(s.cfg.Temperature),
+			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+				chunkSeen()
+				ch <- string(chunk)
+				return nil
+			}))
+		if err != nil {
+			s.logger.Errorf("failed to generate content: %v", err)
+		}
+	}()
+	return ch, nil
+}
+
+// SetNextCompletionPrefill sets the next completion prefill message.
+// Note that not all inference engines support prefill messages.
+// Whitespace is trimmed from the end of the message.
+func (s *CompletionService) SetNextCompletionPrefill(content string) {
+	s.nextCompletionPrefill = strings.TrimRight(content, " \t\n")
 }

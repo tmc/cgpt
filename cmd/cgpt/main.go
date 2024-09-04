@@ -8,8 +8,8 @@
 //
 //	-b, --backend string             The backend to use (default "anthropic")
 //	-m, --model string               The model to use (default "claude-3-5-sonnet-20240620")
-//	-i, --input string               Direct string input (overrides -f)
-//	-f, --file string                Input file path. Use '-' for stdin (default), mutually exclusive with -i (default "-")
+//	-i, --input string               Direct string input (can be used multiple times)
+//	-f, --file string                Input file path. Use '-' for stdin (can be used multiple times)
 //	-c, --continuous                 Run in continuous mode (interactive)
 //	-s, --system-prompt string       System prompt to use
 //	-p, --prefill string             Prefill the assistant's response
@@ -30,6 +30,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -43,8 +44,8 @@ var (
 	flagBackend = flag.StringP("backend", "b", "anthropic", "The backend to use")
 	flagModel   = flag.StringP("model", "m", "claude-3-5-sonnet-20240620", "The model to use")
 
-	flagInputString = flag.StringP("input", "i", "", "Direct string input (overrides -f)")
-	flagInputFile   = flag.StringP("file", "f", "-", "Input file path. Use '-' for stdin (default), mutually exclusive with -i")
+	flagInputStrings stringSliceFlag
+	flagInputFiles   stringSliceFlag
 
 	flagContinuous   = flag.BoolP("continuous", "c", false, "Run in continuous mode (interactive)")
 	flagSystemPrompt = flag.StringP("system-prompt", "s", "", "System prompt to use")
@@ -110,6 +111,41 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+
+	runConfig := cgpt.RunConfig{
+		InputStrings:        inputs,
+		PositionalArgs:      flag.Args(),
+		Continuous:          *flagContinuous,
+		Prefill:             *flagPrefill,
+		HistoryIn:           *flagHistoryIn,
+		HistoryOut:          *flagHistoryOut,
+		NCompletions:        *flagNCompletions,
+		Verbose:             *flagVerbose,
+		DebugMode:           *flagDebug,
+		EchoPrefill:         *flagEchoPrefill,
+		ShowSpinner:         *flagShowSpinner,
+		ReadlineHistoryFile: *flagReadlineHistoryFile,
+	}
+
+	if err = s.Run(ctx, runConfig); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+type stringSliceFlag []string
+
+func (s *stringSliceFlag) String() string {
+	return strings.Join(*s, ", ")
+}
+
+func (s *stringSliceFlag) Set(value string) error {
+	*s = append(*s, value)
+	return nil
+}
+
+func (s *stringSliceFlag) Type() string {
+	return "stringSlice"
 }
 
 func initFlags() {
@@ -118,6 +154,8 @@ func initFlags() {
 	flag.CommandLine.MarkHidden("readline-history-file")
 	flag.CommandLine.MarkHidden("prefill-echo")
 	flag.CommandLine.MarkHidden("show-spinner")
+	flag.VarP((*stringSliceFlag)(&flagInputStrings), "input", "i", "Direct string input (can be used multiple times)")
+	flag.VarP((*stringSliceFlag)(&flagInputFiles), "file", "f", "Input file path. Use '-' for stdin (can be used multiple times)")
 	flag.Usage = func() {
 		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
 		fmt.Println()
@@ -134,4 +172,57 @@ func initFlags() {
 		flag.Usage()
 		os.Exit(0)
 	}
+}
+
+func processInputs(inputStrings, inputFiles stringSliceFlag) ([]string, error) {
+	var inputs []string
+
+	// Process direct string inputs
+	inputs = append(inputs, inputStrings...)
+
+	// Process file inputs
+	for _, file := range inputFiles {
+		input, err := readInput(file)
+		if err != nil {
+			return nil, fmt.Errorf("error processing input file %s: %v", file, err)
+		}
+		inputs = append(inputs, input)
+	}
+
+	// If no inputs provided, read from stdin
+	if len(inputs) == 0 {
+		if isReadingFromStdin() {
+			input, err := readInput("-")
+			if err != nil {
+				return nil, fmt.Errorf("error reading from stdin: %v", err)
+			}
+			inputs = append(inputs, input)
+		}
+	}
+
+	return inputs, nil
+}
+
+func readInput(source string) (string, error) {
+	if source == "-" {
+		if isReadingFromStdin() {
+			input, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return "", fmt.Errorf("error reading from stdin: %v", err)
+			}
+			return string(input), nil
+		}
+		return "", fmt.Errorf("stdin specified but no input provided")
+	}
+
+	input, err := os.ReadFile(source)
+	if err != nil {
+		return "", fmt.Errorf("error reading from file %s: %v", source, err)
+	}
+	return string(input), nil
+}
+
+func isReadingFromStdin() bool {
+	stat, _ := os.Stdin.Stat()
+	return (stat.Mode() & os.ModeCharDevice) == 0
 }
