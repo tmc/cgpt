@@ -389,7 +389,6 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		if s.nextCompletionPrefill != "" {
 			ch <- s.nextCompletionPrefill + " "
 			fullResponse.WriteString(s.nextCompletionPrefill)
-			payload.Messages = append(payload.Messages, llms.TextParts(llms.ChatMessageTypeAI, s.nextCompletionPrefill))
 		}
 
 		// Start spinner on the last character
@@ -425,14 +424,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			spinnerStop()
 		}
 
-		// Replace the last message with the full response
-		if len(payload.Messages) > 0 && payload.Messages[len(payload.Messages)-1].Role == llms.ChatMessageTypeAI {
-			fmt.Println("updating last message")
-			payload.Messages[len(payload.Messages)-1] = llms.TextParts(llms.ChatMessageTypeAI, fullResponse.String())
-		} else {
-			fmt.Println("adding new message")
-			payload.addAssistantMessage(fullResponse.String())
-		}
+		payload.addAssistantMessage(fullResponse.String())
 
 		s.nextCompletionPrefill = ""
 	}()
