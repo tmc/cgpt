@@ -2,6 +2,7 @@ package cgpt
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strings"
 
@@ -72,6 +73,32 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		}
 	}()
 	return ch, nil
+}
+
+// PerformCompletion provides a non-streaming version of the completion.
+func (s *CompletionService) PerformCompletion(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (string, error) {
+	var stopSpinner func()
+	if cfg.ShowSpinner {
+		stopSpinner = spin()
+		defer stopSpinner()
+	}
+
+	if s.nextCompletionPrefill != "" {
+		if !cfg.EchoPrefill {
+			fmt.Print(s.nextCompletionPrefill)
+		}
+		payload.addAssistantMessage(s.nextCompletionPrefill)
+		s.nextCompletionPrefill = ""
+	}
+
+	response, err := s.model.GenerateContent(ctx, payload.Messages,
+		llms.WithMaxTokens(s.cfg.MaxTokens),
+		llms.WithTemperature(s.cfg.Temperature))
+	if err != nil {
+		return "", fmt.Errorf("failed to generate content: %w", err)
+	}
+
+	return response.Choices[0].Content, nil
 }
 
 // SetNextCompletionPrefill sets the next completion prefill message.

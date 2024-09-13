@@ -68,6 +68,7 @@ var (
 	flagReadlineHistoryFile = flag.String("readline-history-file", "~/.cgpt_history", "File to store readline history in")
 	flagEchoPrefill         = flag.Bool("prefill-echo", true, "Print the prefill message")
 	flagShowSpinner         = flag.Bool("show-spinner", true, "Show spinner while waiting for completion (default true, auto-disabled when in continuous mode)")
+	flagStreamingOutput     = flag.Bool("stream-output", true, "Use streaming output")
 
 	flagShowAdvancedUsage = flag.String("show-advanced-usage", "", fmt.Sprintf("Show advanced usage examples (comma-separated list of: %s) - use 'all' to show them all", strings.Join(advancedUsageFiles, ", ")))
 )
@@ -102,6 +103,8 @@ func main() {
 		EchoPrefill: *flagEchoPrefill,
 		ShowSpinner: *flagShowSpinner,
 
+		StreamOutput: *flagStreamingOutput,
+
 		ReadlineHistoryFile: *flagReadlineHistoryFile,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -111,6 +114,7 @@ func main() {
 
 func initFlags() {
 	flag.CommandLine.SortFlags = false
+	flag.CommandLine.MarkHidden("stream-output")
 	flag.CommandLine.MarkHidden("readline-history-file")
 	flag.CommandLine.MarkHidden("prefill-echo")
 	flag.CommandLine.MarkHidden("show-spinner")
