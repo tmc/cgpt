@@ -90,30 +90,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = s.Run(ctx, cgpt.RunConfig{
-		InputString:  *flagInputString,
-		InputFile:    *flagInputFile,
-		Continuous:   *flagContinuous,
-		Prefill:      *flagPrefill,
-		HistoryIn:    *flagHistoryIn,
-		HistoryOut:   *flagHistoryOut,
-		NCompletions: *flagNCompletions,
-		Verbose:      *flagVerbose,
-		DebugMode:    *flagDebug,
-
-		EchoPrefill: *flagEchoPrefill,
-		ShowSpinner: *flagShowSpinner,
-
-		StreamOutput: *flagStreamingOutput,
-
-		ReadlineHistoryFile: *flagReadlineHistoryFile,
-	}); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
 	runConfig := cgpt.RunConfig{
-		InputStrings:        inputs,
+		InputStrings:        flagInputStrings,
+		InputFiles:          flagInputFiles,
 		PositionalArgs:      flag.Args(),
 		Continuous:          *flagContinuous,
 		Prefill:             *flagPrefill,
@@ -124,6 +103,7 @@ func main() {
 		DebugMode:           *flagDebug,
 		EchoPrefill:         *flagEchoPrefill,
 		ShowSpinner:         *flagShowSpinner,
+		StreamOutput:        *flagStreamingOutput,
 		ReadlineHistoryFile: *flagReadlineHistoryFile,
 	}
 

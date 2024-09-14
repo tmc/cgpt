@@ -200,7 +200,7 @@ func createInputProcessor(input string) (func() (string, error), error) {
 	}, nil
 }
 
-func (s *CompletionService) processInputs(ctx context.Context, cfg RunConfig) error {
+func (s *CompletionService) processInputs(_ context.Context, cfg RunConfig) error {
 	inputs := make([]string, 0, len(cfg.InputStrings)+len(cfg.InputFiles)+len(cfg.PositionalArgs))
 	inputs = append(inputs, cfg.InputStrings...)
 	inputs = append(inputs, cfg.InputFiles...)
@@ -261,33 +261,9 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 
 // Non-streaming version of one-shot completion.
 func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg RunConfig) error {
-	var (
-		input io.Reader = os.Stdin
-		err   error
-	)
 	s.logger.Debug("running one-shot completion")
-	inputString := runCfg.InputString
-	inputFile := runCfg.InputFile
-
-	var contents string
-	if inputString != "" {
-		contents = inputString
-	} else {
-		if inputFile != "-" {
-			input, err = os.Open(inputFile)
-			if err != nil {
-				return fmt.Errorf("failed to open input file %q: %w", inputFile, err)
-			}
-		}
-		b, err := io.ReadAll(input)
-		if err != nil {
-			return fmt.Errorf("failed to read input: %w", err)
-		}
-		contents = string(b)
-	}
 
 	s.payload.Stream = false
-	s.payload.addUserMessage(contents)
 	response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
 		ShowSpinner: runCfg.ShowSpinner,
 		EchoPrefill: !runCfg.EchoPrefill,
@@ -377,58 +353,37 @@ func expandTilde(path string) string {
 	return path
 }
 
-func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
-	ch := make(chan string)
-	go func() {
-		defer close(ch)
-
-		fullResponse := strings.Builder{}
-		firstChunk := true
-
-		// Send prefill immediately if it exists
-		if s.nextCompletionPrefill != "" {
-			ch <- s.nextCompletionPrefill + " "
-			fullResponse.WriteString(s.nextCompletionPrefill)
-		}
-
-		// Start spinner on the last character
-		var spinnerStop func()
-		if cfg.ShowSpinner {
-			// Start spinner on the last character
-			spinnerStop = spin(len(s.nextCompletionPrefill) + 1)
-		}
-
-		_, err := s.model.GenerateContent(ctx, payload.Messages,
-			llms.WithMaxTokens(s.cfg.MaxTokens),
-			llms.WithTemperature(s.cfg.Temperature),
-			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-				if firstChunk {
-					if spinnerStop != nil {
-						spinnerStop()
-						spinnerStop = nil
-					}
-					firstChunk = false
-				}
-
-				ch <- string(chunk)
-				fullResponse.Write(chunk)
-				return nil
-			}))
-
+func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunConfig) error {
+	s.payload.Stream = runCfg.StreamOutput
+	if runCfg.StreamOutput {
+		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
+			ShowSpinner: runCfg.ShowSpinner,
+			EchoPrefill: !runCfg.EchoPrefill,
+		})
 		if err != nil {
-			s.logger.Errorf("failed to generate content: %v", err)
+			return fmt.Errorf("failed to perform completion streaming: %w", err)
 		}
-
-		// Clean up spinner if it's still running
-		if spinnerStop != nil {
-			spinnerStop()
+		content := strings.Builder{}
+		for r := range streamPayloads {
+			content.WriteString(r)
+			fmt.Print(r)
 		}
-
-		payload.addAssistantMessage(fullResponse.String())
-
-		s.nextCompletionPrefill = ""
-	}()
-	return ch, nil
+		s.payload.addAssistantMessage(content.String())
+	} else {
+		response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
+			ShowSpinner: runCfg.ShowSpinner,
+			EchoPrefill: !runCfg.EchoPrefill,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Print(response)
+		s.payload.addAssistantMessage(response)
+	}
+	if err := s.saveHistory(); err != nil {
+		return fmt.Errorf("failed to save history: %w", err)
+	}
+	return nil
 }
 
 // SetNextCompletionPrefill sets the next completion prefill message.
