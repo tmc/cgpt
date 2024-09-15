@@ -18,7 +18,7 @@ let g:cgpt_include_filetype = get(g:, 'cgpt_include_filename', 1)
 let g:cgpt_include_filetype = get(g:, 'cgpt_include_filetype', 1)
 
 function! s:handle_output(channel, msg)
-  let l:lines = split(a:msg, "\n")
+  let l:lines = split(a:msg, "\n", 1)
   if s:first_output
     " Replace the "Processing..." line with the first line of output
     call setline(s:range_start, l:lines[0])
