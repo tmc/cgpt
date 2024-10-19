@@ -1,7 +1,9 @@
 package cgpt
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"github.com/tmc/cgpt/interactive"
 	"github.com/tmc/langchaingo/llms"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type CompletionService struct {
@@ -33,76 +36,83 @@ type CompletionService struct {
 
 	// nextCompletionPrefill is the message to prefill the assistant with for the next completion.
 	nextCompletionPrefill string
+
+	// Stdout is the writer for standard output. If nil, os.Stdout will be used.
+	Stdout io.Writer
+	// Stderr is the writer for standard error. If nil, os.Stderr will be used.
+	Stderr io.Writer
+}
+
+type CompletionServiceOption func(*CompletionService)
+
+func WithStdout(w io.Writer) CompletionServiceOption {
+	return func(s *CompletionService) {
+		s.Stdout = w
+	}
+}
+
+func WithStderr(w io.Writer) CompletionServiceOption {
+	return func(s *CompletionService) {
+		s.Stderr = w
+	}
+}
+
+// WithLogger sets the logger for the completion service.
+func WithLogger(l *zap.SugaredLogger) CompletionServiceOption {
+	return func(s *CompletionService) {
+		s.logger = l
+	}
 }
 
 // NewCompletionService creates a new CompletionService with the given configuration.
-func NewCompletionService(cfg *Config) (*CompletionService, error) {
-	model, err := initializeModel(cfg.Backend, cfg.Model, cfg.Debug, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize model: %w", err)
+func NewCompletionService(cfg *Config, model llms.Model, opts ...CompletionServiceOption) (*CompletionService, error) {
+	if cfg == nil {
+		return nil, errors.New("config cannot be nil")
 	}
-	loggerCfg := zap.NewDevelopmentConfig()
-	logger, err := loggerCfg.Build()
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize logger: %w", err)
+	if model == nil {
+		return nil, errors.New("model cannot be nil")
 	}
-	return &CompletionService{
+
+	s := &CompletionService{
 		cfg:               cfg,
-		loggerCfg:         loggerCfg,
-		logger:            logger.Sugar(),
 		model:             model,
 		payload:           newCompletionPayload(cfg),
 		completionTimeout: cfg.CompletionTimeout,
-	}, nil
-}
+		Stdout:            os.Stdout,
+		Stderr:            os.Stderr,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	s.loggerCfg = zap.NewDevelopmentConfig()
+	if s.logger == nil {
+		// Create custom WriteSyncer for Stderr only
+		stderrSyncer := zapcore.AddSync(os.Stderr)
 
-// RunConfig is the configuration for the Run method.
-type RunConfig struct {
-	// InputStrings are the input texts to complete. If present, these will be used instead of reading from files.
-	// These will be used for completions when either running in continuous mode or when running multiple completions.
-	InputStrings []string
-	// InputFiles are the files to read input from. Use "-" for stdin.
-	InputFiles []string
-	// PositionalArgs are additional arguments passed to the command.
-	PositionalArgs []string
-	// Continuous will run the completion API in a loop, using the previous output as the input for the next request.
-	Continuous bool
+		// Create custom Core with the WriteSyncer
+		core := zapcore.NewCore(
+			zapcore.NewConsoleEncoder(s.loggerCfg.EncoderConfig),
+			stderrSyncer,
+			s.loggerCfg.Level,
+		)
 
-	// StreamOutput will stream results as they come in.
-	StreamOutput bool
+		// Create logger with the custom Core
+		logger := zap.New(core)
+		s.logger = logger.Sugar()
+	}
 
-	// Prefill is the message to prefill the assistant with.
-	// This will only be used for the first completion if more than one completion is run.
-	// By default, it will be printed before the assistant's response.
-	Prefill string
-	// EchoPrefill is a flag that, when set to true, will echo the prefill message to the user.
-	EchoPrefill bool
-	// HistoryIn is the file to read cgpt history from.
-	HistoryIn string
-	// HistoryOut is the file to store cgpt history in.
-	HistoryOut string
-	// NCompletions is the number of completions to complete in a history-enabled context.
-	NCompletions int
-	// Verbose will enable verbose output.
-	Verbose bool
-	// DebugMode will enable debug output.
-	DebugMode bool
-	// ReadlineHistoryFile is the file to store readline history in.
-	ReadlineHistoryFile string
-	// MaximumTimeout is the maximum time to wait for a response.
-	MaximumTimeout time.Duration
-	// ShowSpinner is a flag that, when set to true, shows a spinner while waiting for the completion.
-	ShowSpinner bool
+	return s, nil
 }
 
 // PerformCompletionConfig is the configuration for the PerformCompletion method, it controls the behavior of the completion with regard to user interaction.
 type PerformCompletionConfig struct {
+	Stdout      io.Writer
 	EchoPrefill bool
 	ShowSpinner bool
 }
 
 // Run runs the completion service with the given configuration.
-func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
+func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
 	s.readlineHistoryFile = runCfg.ReadlineHistoryFile
 	s.loggerCfg.Level.SetLevel(zap.WarnLevel)
 	if runCfg.Verbose {
@@ -112,13 +122,16 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunConfig) error {
 		s.loggerCfg.Level.SetLevel(zap.DebugLevel)
 	}
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(s.Stderr, err)
 	}
 	if !s.loadedWithHistory() && s.cfg.SystemPrompt != "" {
 		s.payload.addSystemMessage(s.cfg.SystemPrompt)
 	}
 	if runCfg.Prefill != "" {
 		s.SetNextCompletionPrefill(runCfg.Prefill)
+	}
+	if runCfg.Stdout == nil {
+		runCfg.Stdout = os.Stdout
 	}
 
 	if err := s.processInputs(ctx, runCfg); err != nil {
@@ -176,21 +189,27 @@ func (s *CompletionService) getLastUserMessage() string {
 	return strings.Join(parts, "\n")
 }
 
+func readStdin() (string, error) {
+	var input strings.Builder
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		input.WriteString(scanner.Text())
+		input.WriteString("\n")
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("failed to read from stdin: %w", err)
+	}
+	return input.String(), nil
+}
+
 func createInputProcessor(input string) (func() (string, error), error) {
 	if input == "-" {
-		return func() (string, error) {
-			return readStdin()
-		}, nil
+		return readStdin, nil
 	}
 
 	if _, err := os.Stat(input); err == nil {
-		file, err := os.Open(input)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open file %s: %w", input, err)
-		}
 		return func() (string, error) {
-			defer file.Close()
-			content, err := io.ReadAll(file)
+			content, err := os.ReadFile(input)
 			return string(content), err
 		}, nil
 	}
@@ -200,7 +219,7 @@ func createInputProcessor(input string) (func() (string, error), error) {
 	}, nil
 }
 
-func (s *CompletionService) processInputs(_ context.Context, cfg RunConfig) error {
+func (s *CompletionService) processInputs(_ context.Context, cfg RunOptions) error {
 	inputs := make([]string, 0, len(cfg.InputStrings)+len(cfg.InputFiles)+len(cfg.PositionalArgs))
 	inputs = append(inputs, cfg.InputStrings...)
 	inputs = append(inputs, cfg.InputFiles...)
@@ -228,15 +247,7 @@ func (s *CompletionService) processInputs(_ context.Context, cfg RunConfig) erro
 	return nil
 }
 
-func readStdin() (string, error) {
-	content, err := io.ReadAll(os.Stdin)
-	if err != nil {
-		return "", fmt.Errorf("failed to read from stdin: %w", err)
-	}
-	return string(content), nil
-}
-
-func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
+func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion with streaming")
 
 	s.payload.Stream = true
@@ -250,7 +261,7 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 	content := strings.Builder{}
 	for r := range streamPayloads {
 		content.WriteString(r)
-		fmt.Print(r)
+		runCfg.Stdout.Write([]byte(r))
 	}
 	s.payload.addAssistantMessage(content.String())
 	if err := s.saveHistory(); err != nil {
@@ -260,7 +271,7 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 }
 
 // Non-streaming version of one-shot completion.
-func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg RunConfig) error {
+func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion")
 
 	s.payload.Stream = false
@@ -271,7 +282,7 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 	if err != nil {
 		return err
 	}
-	fmt.Print(response)
+	runCfg.Stdout.Write([]byte(response))
 	s.payload.addAssistantMessage(response)
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
@@ -280,8 +291,8 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 }
 
 // Enhanced function to run continuous streaming completion mode.
-func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context, runCfg RunConfig) error {
-	fmt.Fprintf(os.Stderr, "\033[38;5;240mcgpt: Running in continuous mode. Press ctrl+c to exit.\033[0m\n")
+func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
+	fmt.Fprintf(s.Stderr, "\033[38;5;240mcgpt: Running in continuous mode. Press ctrl+c to exit.\033[0m\n")
 
 	// If we have processed inputs, generate an initial response
 	if len(s.payload.Messages) > 0 && s.payload.Messages[len(s.payload.Messages)-1].Role == llms.ChatMessageTypeHuman {
@@ -311,8 +322,8 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 }
 
 // Non-streaming version of continuous completion.
-func (s *CompletionService) runContinuousCompletion(ctx context.Context, runCfg RunConfig) error {
-	fmt.Fprintln(os.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
+func (s *CompletionService) runContinuousCompletion(ctx context.Context, runCfg RunOptions) error {
+	fmt.Fprintln(s.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
 	processFn := func(input string) error {
 		s.payload.addUserMessage(input)
 		response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
@@ -322,9 +333,9 @@ func (s *CompletionService) runContinuousCompletion(ctx context.Context, runCfg 
 		if err != nil {
 			return err
 		}
-		fmt.Print(response)
+		runCfg.Stdout.Write([]byte(response))
 		s.payload.addAssistantMessage(response)
-		fmt.Println()
+		runCfg.Stdout.Write([]byte("\n"))
 		if err := s.saveHistory(); err != nil {
 			return fmt.Errorf("failed to save history: %w", err)
 		}
@@ -353,7 +364,7 @@ func expandTilde(path string) string {
 	return path
 }
 
-func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunConfig) error {
+func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOptions) error {
 	s.payload.Stream = runCfg.StreamOutput
 	if runCfg.StreamOutput {
 		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
@@ -366,7 +377,7 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunConf
 		content := strings.Builder{}
 		for r := range streamPayloads {
 			content.WriteString(r)
-			fmt.Print(r)
+			runCfg.Stdout.Write([]byte(r))
 		}
 		s.payload.addAssistantMessage(content.String())
 	} else {
@@ -377,7 +388,7 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunConf
 		if err != nil {
 			return err
 		}
-		fmt.Print(response)
+		runCfg.Stdout.Write([]byte(response))
 		s.payload.addAssistantMessage(response)
 	}
 	if err := s.saveHistory(); err != nil {

@@ -3,7 +3,7 @@ package cgpt
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 	"time"
 
@@ -16,9 +16,9 @@ var defaultModels = map[string]string{
 	"openai":    "gpt-4o",
 	"ollama":    "llama3",
 	"googleai":  "gemini-pro",
+	"dummy":     "dummy",
 }
 
-// Config is the configuration for cgpt.
 type Config struct {
 	Backend     string  `yaml:"backend"`
 	Model       string  `yaml:"modelName"`
@@ -33,33 +33,41 @@ type Config struct {
 
 	Debug bool `yaml:"debug"`
 
-	// API keys
 	OpenAIAPIKey    string `yaml:"openaiAPIKey"`
 	AnthropicAPIKey string `yaml:"anthropicAPIKey"`
 	GoogleAPIKey    string `yaml:"googleAPIKey"`
 }
 
-// LoadConfig loads the config file from the given path.
-// if the file is not found, it returns the default config.
-func LoadConfig(path string, flagSet *pflag.FlagSet) (*Config, error) {
+func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config, error) {
+	if flagSet == nil {
+		flagSet = pflag.CommandLine
+	}
 	cfg := &Config{}
 	flagBackend, flagModel := flagSet.Lookup("backend"), flagSet.Lookup("model")
+	if flagBackend == nil {
+		return cfg, fmt.Errorf("flag 'backend' not found")
+	}
 	defaultBackend := flagBackend.Value.String()
 	cfg.SetDefaults(defaultBackend)
 	if !flagModel.Changed {
 		flagModel.Value.Set(cfg.Model)
 	}
+	v := viper.New()
 
-	viper.AddConfigPath("/etc/cgpt/")
-	viper.AddConfigPath("$HOME/.cgpt")
-	viper.AddConfigPath(".")
-	viper.SetConfigFile(path)
+	v.AddConfigPath("/etc/cgpt/")
+	v.AddConfigPath("$HOME/.cgpt")
+	v.AddConfigPath(".")
+	v.SetConfigName("config")
+	flagConfigFilePath := flagSet.Lookup("config")
+	if flagConfigFilePath.Changed {
+		v.SetConfigFile(flagConfigFilePath.Value.String())
+	}
 
-	viper.SetEnvPrefix("CGPT")
-	viper.AutomaticEnv()
-	viper.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
-	viper.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
-	viper.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
+	v.SetEnvPrefix("CGPT")
+	v.AutomaticEnv()
+	v.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
+	v.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
+	v.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
 
 	normalizeFunc := flagSet.GetNormalizeFunc()
 	flagSet.SetNormalizeFunc(func(fs *pflag.FlagSet, name string) pflag.NormalizedName {
@@ -68,34 +76,33 @@ func LoadConfig(path string, flagSet *pflag.FlagSet) (*Config, error) {
 		return pflag.NormalizedName(name)
 	})
 
-	// Print the config to stderr if verbose flag is set.
 	defer func() {
 		if v, _ := flagSet.GetBool("verbose"); v {
-			fmt.Fprint(os.Stderr, "config ")
-			json.NewEncoder(os.Stderr).Encode(cfg)
+			fmt.Fprint(stderr, "cgpt-config: ")
+			json.NewEncoder(stderr).Encode(cfg)
 		}
 	}()
-	if err := viper.BindPFlags(flagSet); err != nil {
+	if err := v.BindPFlags(flagSet); err != nil {
 		return cfg, fmt.Errorf("unable to bind flags: %w", err)
 	}
-	// marshal here in case the config file below doesn't exist
-	if err := viper.Unmarshal(&cfg); err != nil {
+	if err := v.Unmarshal(&cfg); err != nil {
 		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
 	}
-	if err := viper.ReadInConfig(); err != nil {
+	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			fmt.Fprintln(os.Stderr, "config file not found, using defaults (%w)", err)
+			if v, _ := flagSet.GetBool("verbose"); v {
+				fmt.Fprintln(stderr, "config file not found, using defaults")
+			}
 			return cfg, nil
 		}
-		return cfg, err
+		return cfg, fmt.Errorf("unable to read config file: %w", err)
 	}
-	if err := viper.Unmarshal(&cfg); err != nil {
+	if err := v.Unmarshal(&cfg); err != nil {
 		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
 	}
 	return cfg, nil
 }
 
-// SetDefaults sets the default values for the config.
 func (cfg *Config) SetDefaults(defaultBackend string) *Config {
 	if cfg.Backend == "" {
 		cfg.Backend = defaultBackend
@@ -110,4 +117,33 @@ func (cfg *Config) SetDefaults(defaultBackend string) *Config {
 		cfg.CompletionTimeout = 2 * time.Minute
 	}
 	return cfg
+}
+
+// MergeConfigs merges two Config structs, with the second taking precedence
+func MergeConfigs(base, override Config) Config {
+	merged := base
+
+	if override.OpenAIAPIKey != "" {
+		merged.OpenAIAPIKey = override.OpenAIAPIKey
+	}
+	if override.AnthropicAPIKey != "" {
+		merged.AnthropicAPIKey = override.AnthropicAPIKey
+	}
+	if override.GoogleAPIKey != "" {
+		merged.GoogleAPIKey = override.GoogleAPIKey
+	}
+	if override.Backend != "" {
+		merged.Backend = override.Backend
+	}
+	if override.Model != "" {
+		merged.Model = override.Model
+	}
+	if override.MaxTokens != 0 {
+		merged.MaxTokens = override.MaxTokens
+	}
+	if override.Temperature != 0 {
+		merged.Temperature = override.Temperature
+	}
+
+	return merged
 }

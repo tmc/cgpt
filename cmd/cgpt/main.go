@@ -2,7 +2,13 @@
 //
 // Usage:
 //
-//	cgpt [flags]
+//	cgpt [flags] [input]
+//
+// Input can be provided via:
+//   - Command line arguments
+//   - -i/--input flag (can be used multiple times)
+//   - -f/--file flag (can be used multiple times, use '-' for stdin)
+//   - Piped input
 //
 // Flags:
 //
@@ -30,179 +36,155 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
+	"net/http"
 	"os"
-	"strings"
-	"time"
 
-	flag "github.com/spf13/pflag"
-
+	"github.com/spf13/pflag"
 	"github.com/tmc/cgpt"
 )
 
-var (
-	flagBackend = flag.StringP("backend", "b", "anthropic", "The backend to use")
-	flagModel   = flag.StringP("model", "m", "claude-3-5-sonnet-20240620", "The model to use")
+func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
+	// Runtime flags
+	fs.StringSliceVarP(&opts.InputStrings, "input", "i", nil, "Direct string input (can be used multiple times)")
+	fs.StringSliceVarP(&opts.InputFiles, "file", "f", nil, "Input file path. Use '-' for stdin (can be used multiple times)")
+	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Run in continuous mode (interactive)")
+	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
+	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")
+	fs.BoolVar(&opts.StreamOutput, "stream-output", true, "Use streaming output")
+	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
+	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
 
-	flagInputStrings stringSliceFlag
-	flagInputFiles   stringSliceFlag
+	// History flags
+	fs.StringVarP(&opts.HistoryIn, "history-in", "I", "", "File to read completion history from")
+	fs.StringVarP(&opts.HistoryOut, "history-out", "O", "", "File to store completion history in")
+	// mark these deprecated:
+	fs.StringVar(&opts.HistoryIn, "history-load", "", "File to read completion history from")
+	fs.StringVar(&opts.HistoryOut, "history-save", "", "File to store completion history in")
 
-	flagContinuous   = flag.BoolP("continuous", "c", false, "Run in continuous mode (interactive)")
-	flagSystemPrompt = flag.StringP("system-prompt", "s", "", "System prompt to use")
-	flagPrefill      = flag.StringP("prefill", "p", "", "Prefill the assistant's response")
+	fs.StringVar(&opts.ReadlineHistoryFile, "readline-history-file", "~/.cgpt_history", "File to store readline history in")
+	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
-	flagHistoryIn  = flag.StringP("history-load", "I", "", "File to read completion history from")
-	flagHistoryOut = flag.StringP("history-save", "O", "", "File to store completion history in")
+	// Config flags (these can override values in the config file)
+	fs.StringVarP(&opts.Config.Backend, "backend", "b", "", "The backend to use")
+	fs.StringVarP(&opts.Config.Model, "model", "m", "", "The model to use")
+	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum tokens to generate")
+	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0, "Temperature for sampling")
+	fs.StringVar(&opts.Config.OpenAIAPIKey, "openai-api-key", "", "OpenAI API Key")
+	fs.StringVar(&opts.Config.AnthropicAPIKey, "anthropic-api-key", "", "Anthropic API Key")
+	fs.StringVar(&opts.Config.GoogleAPIKey, "google-api-key", "", "Google API Key")
 
-	flagConfig  = flag.String("config", "config.yaml", "Path to the configuration file")
-	flagVerbose = flag.BoolP("verbose", "v", false, "Verbose output")
-	flagDebug   = flag.BoolP("debug", "", false, "Debug output")
-
-	flagNCompletions = flag.IntP("completions", "n", 0, "Number of completions (when running non-interactively with history)")
-
-	flagMaxTokens      = flag.IntP("max-tokens", "t", 8000, "Maximum tokens to generate")
-	flagTemp           = flag.Float64P("temperature", "T", 0.05, "Temperature for sampling")
-	flagMaximumTimeout = flag.DurationP("completion-timeout", "", 2*time.Minute, "Maximum time to wait for a response")
-	flagHelp           = flag.BoolP("help", "h", false, "")
-
-	// hidden flags
-	flagReadlineHistoryFile = flag.String("readline-history-file", "~/.cgpt_history", "File to store readline history in")
-	flagEchoPrefill         = flag.Bool("prefill-echo", true, "Print the prefill message")
-	flagShowSpinner         = flag.Bool("show-spinner", true, "Show spinner while waiting for completion (default true, auto-disabled when in continuous mode)")
-	flagStreamingOutput     = flag.Bool("stream-output", true, "Use streaming output")
-
-	flagShowAdvancedUsage = flag.String("show-advanced-usage", "", fmt.Sprintf("Show advanced usage examples (comma-separated list of: %s) - use 'all' to show them all", strings.Join(advancedUsageFiles, ", ")))
-)
+	// Config file path
+	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
+}
 
 func main() {
-	initFlags()
+	opts, flagSet, err := parseFlags()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(2)
+	}
+
 	ctx := context.Background()
-
-	// Load configuration and flags.
-	cfg, err := cgpt.LoadConfig(*flagConfig, flag.CommandLine)
-	if err != nil && *flagVerbose {
-		fmt.Fprintf(os.Stderr, "issue loading config: %v\n", err)
-	}
-
-	s, err := cgpt.NewCompletionService(cfg)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-
-	runConfig := cgpt.RunConfig{
-		InputStrings:        flagInputStrings,
-		InputFiles:          flagInputFiles,
-		PositionalArgs:      flag.Args(),
-		Continuous:          *flagContinuous,
-		Prefill:             *flagPrefill,
-		HistoryIn:           *flagHistoryIn,
-		HistoryOut:          *flagHistoryOut,
-		NCompletions:        *flagNCompletions,
-		Verbose:             *flagVerbose,
-		DebugMode:           *flagDebug,
-		EchoPrefill:         *flagEchoPrefill,
-		ShowSpinner:         *flagShowSpinner,
-		StreamOutput:        *flagStreamingOutput,
-		ReadlineHistoryFile: *flagReadlineHistoryFile,
-	}
-
-	if err = s.Run(ctx, runConfig); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	if err := run(ctx, opts, flagSet); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-type stringSliceFlag []string
-
-func (s *stringSliceFlag) String() string {
-	return strings.Join(*s, ", ")
-}
-
-func (s *stringSliceFlag) Set(value string) error {
-	*s = append(*s, value)
-	return nil
-}
-
-func (s *stringSliceFlag) Type() string {
-	return "stringSlice"
-}
-
-func initFlags() {
-	flag.CommandLine.SortFlags = false
-	flag.CommandLine.MarkHidden("stream-output")
-	flag.CommandLine.MarkHidden("readline-history-file")
-	flag.CommandLine.MarkHidden("prefill-echo")
-	flag.CommandLine.MarkHidden("show-spinner")
-	flag.VarP((*stringSliceFlag)(&flagInputStrings), "input", "i", "Direct string input (can be used multiple times)")
-	flag.VarP((*stringSliceFlag)(&flagInputFiles), "file", "f", "Input file path. Use '-' for stdin (can be used multiple times)")
-	flag.Usage = func() {
-		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
-		fmt.Println()
-		if *flagShowAdvancedUsage != "" {
-			printAdvancedUsage(*flagShowAdvancedUsage)
-			return
-		}
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
-		flag.CommandLine.PrintDefaults()
-		printBasicUsage()
-	}
-	flag.Parse()
-	if *flagHelp || *flagShowAdvancedUsage != "" {
-		flag.Usage()
-		os.Exit(0)
-	}
-}
-
-func processInputs(inputStrings, inputFiles stringSliceFlag) ([]string, error) {
-	var inputs []string
-
-	// Process direct string inputs
-	inputs = append(inputs, inputStrings...)
-
-	// Process file inputs
-	for _, file := range inputFiles {
-		input, err := readInput(file)
-		if err != nil {
-			return nil, fmt.Errorf("error processing input file %s: %v", file, err)
-		}
-		inputs = append(inputs, input)
-	}
-
-	// If no inputs provided, read from stdin
-	if len(inputs) == 0 {
-		if isReadingFromStdin() {
-			input, err := readInput("-")
-			if err != nil {
-				return nil, fmt.Errorf("error reading from stdin: %v", err)
-			}
-			inputs = append(inputs, input)
-		}
-	}
-
-	return inputs, nil
-}
-
-func readInput(source string) (string, error) {
-	if source == "-" {
-		if isReadingFromStdin() {
-			input, err := io.ReadAll(os.Stdin)
-			if err != nil {
-				return "", fmt.Errorf("error reading from stdin: %v", err)
-			}
-			return string(input), nil
-		}
-		return "", fmt.Errorf("stdin specified but no input provided")
-	}
-
-	input, err := os.ReadFile(source)
+func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) error {
+	// Load the config file
+	fileConfig, err := cgpt.LoadConfig(opts.ConfigPath, opts.Stderr, flagSet)
 	if err != nil {
-		return "", fmt.Errorf("error reading from file %s: %v", source, err)
+		return fmt.Errorf("failed to load config: %w", err)
 	}
-	return string(input), nil
+	// Merge the loaded config with the RunOptions.Config
+	mergedConfig := cgpt.MergeConfigs(*fileConfig, *opts.Config)
+	opts.Config = &mergedConfig
+
+	// Initialize the model (the llms.Model interface)
+	modelOpts := []cgpt.ModelOption{}
+	// if debug mode is on, attach the debug http client:
+	if opts.DebugMode {
+		modelOpts = append(modelOpts, cgpt.WithHTTPClient(http.DefaultClient))
+	}
+	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
+	if err != nil {
+		return fmt.Errorf("failed to initialize model: %w", err)
+	}
+
+	// Create the completion service
+	s, err := cgpt.NewCompletionService(opts.Config, model,
+		cgpt.WithStdout(opts.Stdout),
+		cgpt.WithStderr(opts.Stderr),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create completion service: %w", err)
+	}
+	// Run the completion service
+	return s.Run(ctx, opts)
 }
 
-func isReadingFromStdin() bool {
-	stat, _ := os.Stdin.Stat()
-	return (stat.Mode() & os.ModeCharDevice) == 0
+func parseFlags() (cgpt.RunOptions, *pflag.FlagSet, error) {
+	opts := cgpt.RunOptions{
+		Config: &cgpt.Config{}, // Initialize with default values
+		Stdin:  os.Stdin,       // Set stdin by default
+		Stdout: os.Stdout,      // Set stdout by default
+		Stderr: os.Stderr,      // Set stderr by default
+	}
+
+	fs := pflag.NewFlagSet("cgpt", pflag.ContinueOnError)
+	defineFlags(fs, &opts)
+
+	// Help and usage flags
+	help := fs.BoolP("help", "h", false, "Display help information")
+	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples")
+
+	err := fs.Parse(os.Args[1:])
+	if err != nil {
+		return opts, fs, err
+	}
+
+	if *help {
+		fs.Usage()
+		return opts, fs, fmt.Errorf("help requested")
+	}
+
+	if *showAdvancedUsage != "" {
+		showAdvancedUsageExamples(*showAdvancedUsage)
+		return opts, fs, fmt.Errorf("advanced usage examples requested")
+	}
+
+	// Handle non-flag arguments
+	opts.PositionalArgs = fs.Args()
+
+	// Check if stdin should be used
+	for _, file := range opts.InputFiles {
+		if file == "-" {
+			stat, _ := os.Stdin.Stat()
+			if (stat.Mode() & os.ModeCharDevice) == 0 {
+				// Data is being piped to stdin
+				opts.Stdin = os.Stdin
+			} else {
+				// No data is being piped, remove "-" from InputFiles
+				opts.InputFiles = removeString(opts.InputFiles, "-")
+			}
+			break
+		}
+	}
+
+	return opts, fs, nil
+}
+
+func removeString(slice []string, s string) []string {
+	for i, v := range slice {
+		if v == s {
+			return append(slice[:i], slice[i+1:]...)
+		}
+	}
+	return slice
+}
+
+func showAdvancedUsageExamples(examples string) {
+	// Implement the logic to show advanced usage examples
+	fmt.Println("Advanced usage examples:", examples)
 }

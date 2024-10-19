@@ -90,8 +90,6 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			spinnerStop()
 		}
 
-		payload.addAssistantMessage(fullResponse.String())
-
 		s.nextCompletionPrefill = ""
 	}()
 	return ch, nil
