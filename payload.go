@@ -46,31 +46,51 @@ func (p *ChatCompletionPayload) addAssistantMessage(content string) {
 
 func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
 	ch := make(chan string)
-	chunkSeen := func() {}
 	go func() {
 		defer close(ch)
-		if cfg.ShowSpinner {
-			chunkSeen = spin()
-		}
+		fullResponse := strings.Builder{}
+		firstChunk := true
+
+		// Send prefill immediately if it exists
 		if s.nextCompletionPrefill != "" {
-			// If the user has provided a prefill message, and hasn't opted out, then send it.
-			if !cfg.EchoPrefill {
-				ch <- s.nextCompletionPrefill
-			}
-			payload.addAssistantMessage(s.nextCompletionPrefill)
-			s.nextCompletionPrefill = ""
+			ch <- s.nextCompletionPrefill + " "
+			fullResponse.WriteString(s.nextCompletionPrefill)
 		}
+
+		// Start spinner on the last character
+		var spinnerStop func()
+		if cfg.ShowSpinner {
+			// Start spinner on the last character
+			spinnerStop = spin(len(s.nextCompletionPrefill) + 1)
+		}
+
 		_, err := s.model.GenerateContent(ctx, payload.Messages,
 			llms.WithMaxTokens(s.cfg.MaxTokens),
 			llms.WithTemperature(s.cfg.Temperature),
 			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-				chunkSeen()
+				if firstChunk {
+					if spinnerStop != nil {
+						spinnerStop()
+						spinnerStop = nil
+					}
+					firstChunk = false
+				}
+
 				ch <- string(chunk)
+				fullResponse.Write(chunk)
 				return nil
 			}))
+
 		if err != nil {
-			log.Fatalf("failed to generate content: %v", err)
+			log.Printf("failed to generate content: %v", err)
 		}
+
+		// Clean up spinner if it's still running
+		if spinnerStop != nil {
+			spinnerStop()
+		}
+
+		s.nextCompletionPrefill = ""
 	}()
 	return ch, nil
 }
@@ -78,17 +98,19 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 // PerformCompletion provides a non-streaming version of the completion.
 func (s *CompletionService) PerformCompletion(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (string, error) {
 	var stopSpinner func()
-	if cfg.ShowSpinner {
-		stopSpinner = spin()
-		defer stopSpinner()
-	}
+	var spinnerPos int
 
 	if s.nextCompletionPrefill != "" {
 		if !cfg.EchoPrefill {
 			fmt.Print(s.nextCompletionPrefill)
+			spinnerPos = len(s.nextCompletionPrefill) + 1
 		}
 		payload.addAssistantMessage(s.nextCompletionPrefill)
 		s.nextCompletionPrefill = ""
+	}
+	if cfg.ShowSpinner {
+		stopSpinner = spin(spinnerPos)
+		defer stopSpinner()
 	}
 
 	response, err := s.model.GenerateContent(ctx, payload.Messages,
@@ -99,11 +121,4 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	}
 
 	return response.Choices[0].Content, nil
-}
-
-// SetNextCompletionPrefill sets the next completion prefill message.
-// Note that not all inference engines support prefill messages.
-// Whitespace is trimmed from the end of the message.
-func (s *CompletionService) SetNextCompletionPrefill(content string) {
-	s.nextCompletionPrefill = strings.TrimRight(content, " \t\n")
 }

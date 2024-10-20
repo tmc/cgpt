@@ -7,16 +7,18 @@ if exists('g:loaded_cgpt')
 endif
 let g:loaded_cgpt = 1
 
+
 let g:cgpt_backend = get(g:, 'cgpt_backend', 'anthropic')
 let g:cgpt_model = get(g:, 'cgpt_model', 'claude-3-5-sonnet-20240620')
 let g:cgpt_system_prompt = get(g:, 'cgpt_system_prompt', 'The user is submitting a visual selection in the vim editor to you to help them with a programming task. Prefer to output code directly without surrounding commentary. If you do emit commentary please place it into comments.')
 let g:cgpt_prefill = get(g:, 'cgpt_prefill', '')
+let g:cgpt_history_file = get(g:, 'cgpt_history_file', '')
 let g:cgpt_config_file = get(g:, 'cgpt_config_file', '')
 let g:cgpt_include_filetype = get(g:, 'cgpt_include_filename', 1)
 let g:cgpt_include_filetype = get(g:, 'cgpt_include_filetype', 1)
 
 function! s:handle_output(channel, msg)
-  let l:lines = split(a:msg, "\n")
+  let l:lines = split(a:msg, "\n", 1)
   if s:first_output
     " Replace the "Processing..." line with the first line of output
     call setline(s:range_start, l:lines[0])
@@ -74,6 +76,20 @@ function! RunCgpt() range
   endif
   if !empty(g:cgpt_config_file)
     let l:command += ['--config', g:cgpt_config_file]
+  endif
+
+  " Add -show-spinner=false to the command:
+  let l:command += ['--show-spinner=false']
+
+  " Add the prefill option if enabled:
+  if !empty(g:cgpt_prefill)
+    let l:command += ['--prefill', g:cgpt_prefill]
+  endif
+
+  " Add the history file option if enabled:
+  if !empty(g:cgpt_history_file)
+    let l:command += ['--history-load', g:cgpt_history_file]
+    let l:command += ['--history-save', g:cgpt_history_file]
   endif
 
   " Start the job and handle the output incrementally

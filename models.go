@@ -3,8 +3,8 @@ package cgpt
 import (
 	"context"
 	"fmt"
+	"net/http"
 
-	"github.com/tmc/langchaingo/httputil"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/googleai"
@@ -12,64 +12,79 @@ import (
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
-// extend these to accept a debugMode flag
+// ModelOption is a function that modifies the model options
+type ModelOption func(*modelOptions)
 
-var constructors = map[string]func(modelName string, debugMode bool, apiKey string) (llms.Model, error){
-	"openai": func(modelName string, debugMode bool, apiKey string) (llms.Model, error) {
-		options := []openai.Option{openai.WithModel(modelName)}
-		if apiKey != "" {
-			options = append(options, openai.WithToken(apiKey))
+type modelOptions struct {
+	httpClient *http.Client
+}
+
+// WithHTTPClient sets a custom HTTP client for the model
+func WithHTTPClient(client *http.Client) ModelOption {
+	return func(mo *modelOptions) {
+		mo.httpClient = client
+	}
+}
+
+// InitializeModel initializes the model with the given configuration and options.
+func InitializeModel(cfg *Config, opts ...ModelOption) (llms.Model, error) {
+	mo := &modelOptions{}
+	for _, opt := range opts {
+		opt(mo)
+	}
+
+	constructor, ok := modelConstructors[cfg.Backend]
+	if !ok {
+		return nil, fmt.Errorf("unknown backend %q", cfg.Backend)
+	}
+
+	return constructor(cfg, mo)
+}
+
+type modelConstructor func(*Config, *modelOptions) (llms.Model, error)
+
+var modelConstructors = map[string]modelConstructor{
+	"openai": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		options := []openai.Option{openai.WithModel(cfg.Model)}
+		if cfg.OpenAIAPIKey != "" {
+			options = append(options, openai.WithToken(cfg.OpenAIAPIKey))
 		}
-		if debugMode {
-			options = append(options, openai.WithHTTPClient(httputil.DebugHTTPClient))
+		if mo.httpClient != nil {
+			options = append(options, openai.WithHTTPClient(mo.httpClient))
 		}
 		return openai.New(options...)
 	},
-	"anthropic": func(modelName string, debugMode bool, apiKey string) (llms.Model, error) {
-		options := []anthropic.Option{anthropic.WithModel(modelName)}
-		if apiKey != "" {
-			options = append(options, anthropic.WithToken(apiKey))
+	"anthropic": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		options := []anthropic.Option{anthropic.WithModel(cfg.Model)}
+		if cfg.AnthropicAPIKey != "" {
+			options = append(options, anthropic.WithToken(cfg.AnthropicAPIKey))
 		}
-		if debugMode {
-			options = append(options, anthropic.WithHTTPClient(httputil.DebugHTTPClient))
-		}
-		if modelName == "claude-3-5-sonnet-20240620" {
+		if cfg.Model == "claude-3-5-sonnet-20240620" {
 			options = append(options, anthropic.WithAnthropicBetaHeader(anthropic.MaxTokensAnthropicSonnet35))
+		}
+		if mo.httpClient != nil {
+			options = append(options, anthropic.WithHTTPClient(mo.httpClient))
 		}
 		return anthropic.New(options...)
 	},
-	"ollama": func(modelName string, debugMode bool, apiKey string) (llms.Model, error) {
-		options := []ollama.Option{ollama.WithModel(modelName)}
-		if debugMode {
-			options = append(options, ollama.WithHTTPClient(httputil.DebugHTTPClient))
+	"ollama": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		options := []ollama.Option{ollama.WithModel(cfg.Model)}
+		if mo.httpClient != nil {
+			options = append(options, ollama.WithHTTPClient(mo.httpClient))
 		}
 		return ollama.New(options...)
 	},
-	"googleai": func(modelName string, debugMode bool, apiKey string) (llms.Model, error) {
-		options := []googleai.Option{googleai.WithDefaultModel(modelName)}
-		if apiKey != "" {
-			options = append(options, googleai.WithAPIKey(apiKey))
+	"googleai": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		options := []googleai.Option{googleai.WithDefaultModel(cfg.Model)}
+		if cfg.GoogleAPIKey != "" {
+			options = append(options, googleai.WithAPIKey(cfg.GoogleAPIKey))
 		}
-		if debugMode {
-			options = append(options, googleai.WithHTTPClient(httputil.DebugHTTPClient))
+		if mo.httpClient != nil {
+			options = append(options, googleai.WithHTTPClient(mo.httpClient))
 		}
 		return googleai.New(context.TODO(), options...)
 	},
-}
-
-func initializeModel(backend, modelName string, debugMode bool, cfg *Config) (llms.Model, error) {
-	constructor, ok := constructors[backend]
-	if !ok {
-		return nil, fmt.Errorf("unknown backend %q", backend)
-	}
-	var apiKey string
-	switch backend {
-	case "openai":
-		apiKey = cfg.OpenAIAPIKey
-	case "anthropic":
-		apiKey = cfg.AnthropicAPIKey
-	case "googleai":
-		apiKey = cfg.GoogleAPIKey
-	}
-	return constructor(modelName, debugMode, apiKey)
+	"dummy": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		return NewDummyBackend()
+	},
 }
