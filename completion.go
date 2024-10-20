@@ -134,8 +134,16 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
 		runCfg.Stdout = os.Stdout
 	}
 
-	if err := s.processInputs(ctx, runCfg); err != nil {
-		return fmt.Errorf("failed to process inputs: %w", err)
+	r, err := runCfg.GetCombinedInputReader(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get inputs: %w", err)
+	}
+	input, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("failed to read inputs: %w", err)
+	}
+	if len(input) != 0 {
+		s.payload.addUserMessage(string(input))
 	}
 
 	if runCfg.Continuous {
@@ -145,6 +153,7 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
 			return s.runContinuousCompletion(ctx, runCfg)
 		}
 	}
+
 	if runCfg.StreamOutput {
 		return s.runOneShotCompletionStreaming(ctx, runCfg)
 	} else {
@@ -204,6 +213,7 @@ func readStdin() (string, error) {
 
 func createInputProcessor(input string) (func() (string, error), error) {
 	if input == "-" {
+		fmt.Fprintln(os.Stderr, "Reading input from stdin...")
 		return readStdin, nil
 	}
 
@@ -217,34 +227,6 @@ func createInputProcessor(input string) (func() (string, error), error) {
 	return func() (string, error) {
 		return input, nil
 	}, nil
-}
-
-func (s *CompletionService) processInputs(_ context.Context, cfg RunOptions) error {
-	inputs := make([]string, 0, len(cfg.InputStrings)+len(cfg.InputFiles)+len(cfg.PositionalArgs))
-	inputs = append(inputs, cfg.InputStrings...)
-	inputs = append(inputs, cfg.InputFiles...)
-	inputs = append(inputs, cfg.PositionalArgs...)
-
-	var combinedInput strings.Builder
-
-	for _, input := range inputs {
-		processor, err := createInputProcessor(input)
-		if err != nil {
-			return err
-		}
-		content, err := processor()
-		if err != nil {
-			return fmt.Errorf("failed to process input %s: %w", input, err)
-		}
-		combinedInput.WriteString(content)
-		combinedInput.WriteString("\n")
-	}
-
-	if combinedInput.Len() > 0 {
-		s.payload.addUserMessage(combinedInput.String())
-	}
-
-	return nil
 }
 
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
@@ -379,6 +361,7 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 			content.WriteString(r)
 			runCfg.Stdout.Write([]byte(r))
 		}
+		runCfg.Stdout.Write([]byte("\n"))
 		s.payload.addAssistantMessage(content.String())
 	} else {
 		response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{

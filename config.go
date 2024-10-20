@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,9 +15,17 @@ import (
 var defaultModels = map[string]string{
 	"anthropic": "claude-3-5-sonnet-20240620",
 	"openai":    "gpt-4o",
-	"ollama":    "llama3",
+	"ollama":    "llama3.2",
 	"googleai":  "gemini-pro",
 	"dummy":     "dummy",
+}
+
+// tokenLimits is a map of regex patterns to token limits for each backend.
+// The key "*" is a catch-all for any patterns not explicitly defined.
+// The value for each key is the maximum number of tokens allowed for a completion.
+var tokenLimits = map[string]int{
+	"*":                    4096,
+	"anthropic:.*sonnet.*": 8000,
 }
 
 type Config struct {
@@ -38,28 +47,53 @@ type Config struct {
 	GoogleAPIKey    string `yaml:"googleAPIKey"`
 }
 
+// LoadConfig loads the configuration from various sources in the following order of precedence:
+// 1. Command-line flags (highest priority)
+// 2. Environment variables
+// 3. Configuration file
+// 4. Default values (lowest priority)
+//
+// The function performs the following steps:
+// - Sets default values
+// - Binds command-line flags
+// - Loads environment variables
+// - Reads the configuration file
+// - Unmarshals the configuration into the Config struct
+//
+// If a config file is not found, it falls back to using defaults and flags.
+// The --verbose flag can be used to print the final configuration.
 func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config, error) {
 	if flagSet == nil {
 		flagSet = pflag.CommandLine
 	}
 	cfg := &Config{}
-	flagBackend, flagModel := flagSet.Lookup("backend"), flagSet.Lookup("model")
-	if flagBackend == nil {
-		return cfg, fmt.Errorf("flag 'backend' not found")
-	}
-	defaultBackend := flagBackend.Value.String()
-	cfg.SetDefaults(defaultBackend)
-	if !flagModel.Changed {
-		flagModel.Value.Set(cfg.Model)
-	}
 	v := viper.New()
 
+	setupViper(v, flagSet)
+	setupFlagNormalization(flagSet)
+
+	if err := bindAndUnmarshal(v, flagSet, cfg); err != nil {
+		return nil, err
+	}
+
+	if err := handleConfigFile(v, stderr, flagSet); err != nil {
+		return nil, err
+	}
+
+	if err := setBackendAndModel(cfg, flagSet); err != nil {
+		return nil, err
+	}
+	setMaxTokens(cfg)
+	logConfig(cfg, stderr, flagSet)
+	return cfg, nil
+}
+
+func setupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
 	v.AddConfigPath("/etc/cgpt/")
 	v.AddConfigPath("$HOME/.cgpt")
 	v.AddConfigPath(".")
 	v.SetConfigName("config")
-	flagConfigFilePath := flagSet.Lookup("config")
-	if flagConfigFilePath.Changed {
+	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath.Changed {
 		v.SetConfigFile(flagConfigFilePath.Value.String())
 	}
 
@@ -68,82 +102,93 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 	v.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
 	v.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
 	v.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
+}
 
+func setupFlagNormalization(flagSet *pflag.FlagSet) {
 	normalizeFunc := flagSet.GetNormalizeFunc()
 	flagSet.SetNormalizeFunc(func(fs *pflag.FlagSet, name string) pflag.NormalizedName {
 		result := normalizeFunc(fs, name)
 		name = strings.ReplaceAll(string(result), "-", "")
 		return pflag.NormalizedName(name)
 	})
+}
 
-	defer func() {
-		if v, _ := flagSet.GetBool("verbose"); v {
-			fmt.Fprint(stderr, "cgpt-config: ")
-			json.NewEncoder(stderr).Encode(cfg)
-		}
-	}()
+func bindAndUnmarshal(v *viper.Viper, flagSet *pflag.FlagSet, cfg *Config) error {
 	if err := v.BindPFlags(flagSet); err != nil {
-		return cfg, fmt.Errorf("unable to bind flags: %w", err)
+		return fmt.Errorf("unable to bind flags: %w", err)
 	}
-	if err := v.Unmarshal(&cfg); err != nil {
-		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
+	if err := v.Unmarshal(cfg); err != nil {
+		return fmt.Errorf("unable to unmarshal config: %w", err)
 	}
+	return nil
+}
+
+func handleConfigFile(v *viper.Viper, stderr io.Writer, flagSet *pflag.FlagSet) error {
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
 			if v, _ := flagSet.GetBool("verbose"); v {
-				fmt.Fprintln(stderr, "config file not found, using defaults")
+				fmt.Fprintln(stderr, "cgpt: config file not found, using defaults")
 			}
-			return cfg, nil
+		} else {
+			return fmt.Errorf("unable to read config file: %w", err)
 		}
-		return cfg, fmt.Errorf("unable to read config file: %w", err)
 	}
-	if err := v.Unmarshal(&cfg); err != nil {
-		return cfg, fmt.Errorf("unable to unmarshal config file: %w", err)
-	}
-	return cfg, nil
+	return nil
 }
 
-func (cfg *Config) SetDefaults(defaultBackend string) *Config {
-	if cfg.Backend == "" {
-		cfg.Backend = defaultBackend
+func setBackendAndModel(cfg *Config, flagSet *pflag.FlagSet) error {
+	flagBackend, flagModel := flagSet.Lookup("backend"), flagSet.Lookup("model")
+	if flagBackend == nil || flagModel == nil {
+		return fmt.Errorf("flags 'backend' and 'model' must be defined")
 	}
-	if cfg.Model == "" {
+
+	// Set backend
+	if flagBackend.Changed {
+		cfg.Backend = flagBackend.Value.String()
+	} else if cfg.Backend == "" {
+		cfg.Backend = flagBackend.DefValue
+	}
+
+	// Set model
+	if flagModel.Changed {
+		cfg.Model = flagModel.Value.String()
+	} else {
+		// If model is not explicitly set, choose based on the backend
 		cfg.Model = defaultModels[cfg.Backend]
 	}
-	if cfg.MaxTokens == 0 {
-		cfg.MaxTokens = 4000
-	}
-	if cfg.CompletionTimeout == 0 {
-		cfg.CompletionTimeout = 2 * time.Minute
-	}
-	return cfg
+
+	return nil
 }
 
-// MergeConfigs merges two Config structs, with the second taking precedence
-func MergeConfigs(base, override Config) Config {
-	merged := base
+func getBackendForModel(model string) string {
+	for backend, defaultModel := range defaultModels {
+		if defaultModel == model {
+			return backend
+		}
+	}
+	return ""
+}
+func setMaxTokens(cfg *Config) {
+	maxTokens := tokenLimits["*"]
+	backendModel := cfg.Backend + ":" + cfg.Model
 
-	if override.OpenAIAPIKey != "" {
-		merged.OpenAIAPIKey = override.OpenAIAPIKey
-	}
-	if override.AnthropicAPIKey != "" {
-		merged.AnthropicAPIKey = override.AnthropicAPIKey
-	}
-	if override.GoogleAPIKey != "" {
-		merged.GoogleAPIKey = override.GoogleAPIKey
-	}
-	if override.Backend != "" {
-		merged.Backend = override.Backend
-	}
-	if override.Model != "" {
-		merged.Model = override.Model
-	}
-	if override.MaxTokens != 0 {
-		merged.MaxTokens = override.MaxTokens
-	}
-	if override.Temperature != 0 {
-		merged.Temperature = override.Temperature
+	for pattern, limit := range tokenLimits {
+		if pattern == "*" {
+			continue
+		}
+		if matched, _ := regexp.MatchString(pattern, backendModel); matched {
+			maxTokens = limit
+			break
+		}
 	}
 
-	return merged
+	if cfg.MaxTokens == 0 || cfg.MaxTokens > maxTokens {
+		cfg.MaxTokens = maxTokens
+	}
+}
+func logConfig(cfg *Config, stderr io.Writer, flagSet *pflag.FlagSet) {
+	if v, _ := flagSet.GetBool("verbose"); v {
+		fmt.Fprint(stderr, "cgpt-config: ")
+		json.NewEncoder(stderr).Encode(cfg)
+	}
 }

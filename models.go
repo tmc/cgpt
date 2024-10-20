@@ -13,92 +13,78 @@ import (
 )
 
 // ModelOption is a function that modifies the model options
-type ModelOption func(interface{})
+type ModelOption func(*modelOptions)
+
+type modelOptions struct {
+	httpClient *http.Client
+}
 
 // WithHTTPClient sets a custom HTTP client for the model
 func WithHTTPClient(client *http.Client) ModelOption {
-	return func(opts interface{}) {
-		switch o := opts.(type) {
-		case *[]openai.Option:
-			*o = append(*o, openai.WithHTTPClient(client))
-		case *[]anthropic.Option:
-			*o = append(*o, anthropic.WithHTTPClient(client))
-		case *[]ollama.Option:
-			*o = append(*o, ollama.WithHTTPClient(client))
-		case *[]googleai.Option:
-			*o = append(*o, googleai.WithHTTPClient(client))
-		}
+	return func(mo *modelOptions) {
+		mo.httpClient = client
 	}
 }
 
 // InitializeModel initializes the model with the given configuration and options.
 func InitializeModel(cfg *Config, opts ...ModelOption) (llms.Model, error) {
-	model, err := initializeModel(cfg.Backend, cfg.Model, cfg.Debug, cfg, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize model: %w", err)
+	mo := &modelOptions{}
+	for _, opt := range opts {
+		opt(mo)
 	}
-	return model, nil
+
+	constructor, ok := modelConstructors[cfg.Backend]
+	if !ok {
+		return nil, fmt.Errorf("unknown backend %q", cfg.Backend)
+	}
+
+	return constructor(cfg, mo)
 }
 
-var constructors = map[string]func(modelName string, debugMode bool, apiKey string, opts ...ModelOption) (llms.Model, error){
-	"openai": func(modelName string, debugMode bool, apiKey string, opts ...ModelOption) (llms.Model, error) {
-		options := []openai.Option{openai.WithModel(modelName)}
-		if apiKey != "" {
-			options = append(options, openai.WithToken(apiKey))
+type modelConstructor func(*Config, *modelOptions) (llms.Model, error)
+
+var modelConstructors = map[string]modelConstructor{
+	"openai": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		options := []openai.Option{openai.WithModel(cfg.Model)}
+		if cfg.OpenAIAPIKey != "" {
+			options = append(options, openai.WithToken(cfg.OpenAIAPIKey))
 		}
-		for _, opt := range opts {
-			opt(&options)
+		if mo.httpClient != nil {
+			options = append(options, openai.WithHTTPClient(mo.httpClient))
 		}
 		return openai.New(options...)
 	},
-	"anthropic": func(modelName string, debugMode bool, apiKey string, opts ...ModelOption) (llms.Model, error) {
-		options := []anthropic.Option{anthropic.WithModel(modelName)}
-		if apiKey != "" {
-			options = append(options, anthropic.WithToken(apiKey))
+	"anthropic": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		options := []anthropic.Option{anthropic.WithModel(cfg.Model)}
+		if cfg.AnthropicAPIKey != "" {
+			options = append(options, anthropic.WithToken(cfg.AnthropicAPIKey))
 		}
-		if modelName == "claude-3-5-sonnet-20240620" {
+		if cfg.Model == "claude-3-5-sonnet-20240620" {
 			options = append(options, anthropic.WithAnthropicBetaHeader(anthropic.MaxTokensAnthropicSonnet35))
 		}
-		for _, opt := range opts {
-			opt(&options)
+		if mo.httpClient != nil {
+			options = append(options, anthropic.WithHTTPClient(mo.httpClient))
 		}
 		return anthropic.New(options...)
 	},
-	"ollama": func(modelName string, debugMode bool, apiKey string, opts ...ModelOption) (llms.Model, error) {
-		options := []ollama.Option{ollama.WithModel(modelName)}
-		for _, opt := range opts {
-			opt(&options)
+	"ollama": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		options := []ollama.Option{ollama.WithModel(cfg.Model)}
+		if mo.httpClient != nil {
+			options = append(options, ollama.WithHTTPClient(mo.httpClient))
 		}
 		return ollama.New(options...)
 	},
-	"googleai": func(modelName string, debugMode bool, apiKey string, opts ...ModelOption) (llms.Model, error) {
-		options := []googleai.Option{googleai.WithDefaultModel(modelName)}
-		if apiKey != "" {
-			options = append(options, googleai.WithAPIKey(apiKey))
+	"googleai": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+		options := []googleai.Option{googleai.WithDefaultModel(cfg.Model)}
+		if cfg.GoogleAPIKey != "" {
+			options = append(options, googleai.WithAPIKey(cfg.GoogleAPIKey))
 		}
-		for _, opt := range opts {
-			opt(&options)
+		if mo.httpClient != nil {
+			options = append(options, googleai.WithHTTPClient(mo.httpClient))
 		}
 		return googleai.New(context.TODO(), options...)
 	},
-	"dummy": func(modelName string, debugMode bool, apiKey string, opts ...ModelOption) (llms.Model, error) {
+	"dummy": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
 		return NewDummyBackend()
 	},
-}
-
-func initializeModel(backend, modelName string, debugMode bool, cfg *Config, opts ...ModelOption) (llms.Model, error) {
-	constructor, ok := constructors[backend]
-	if !ok {
-		return nil, fmt.Errorf("unknown backend %q", backend)
-	}
-	var apiKey string
-	switch backend {
-	case "openai":
-		apiKey = cfg.OpenAIAPIKey
-	case "anthropic":
-		apiKey = cfg.AnthropicAPIKey
-	case "googleai":
-		apiKey = cfg.GoogleAPIKey
-	}
-	return constructor(modelName, debugMode, apiKey, opts...)
 }

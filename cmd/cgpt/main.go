@@ -36,57 +36,62 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"io"
 	"os"
+	"time"
 
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/pflag"
 	"github.com/tmc/cgpt"
+	"github.com/tmc/langchaingo/httputil"
 )
 
+// defineFlags defines the command line flags for the cgpt command
 func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	// Runtime flags
 	fs.StringSliceVarP(&opts.InputStrings, "input", "i", nil, "Direct string input (can be used multiple times)")
-	fs.StringSliceVarP(&opts.InputFiles, "file", "f", nil, "Input file path. Use '-' for stdin (can be used multiple times)")
+	fs.StringSliceVarP(&opts.InputFiles, "file", "f", []string{"-"}, "Input file path. Use '-' for stdin (can be used multiple times)")
 	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Run in continuous mode (interactive)")
 	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
 	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")
-	fs.BoolVar(&opts.StreamOutput, "stream-output", true, "Use streaming output")
+	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
 	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
+	fs.DurationVar(&opts.CompletionTimeout, "completion-timeout", 2*time.Minute, "Maximum time to wait for a response")
 
 	// History flags
 	fs.StringVarP(&opts.HistoryIn, "history-in", "I", "", "File to read completion history from")
 	fs.StringVarP(&opts.HistoryOut, "history-out", "O", "", "File to store completion history in")
-	// mark these deprecated:
-	fs.StringVar(&opts.HistoryIn, "history-load", "", "File to read completion history from")
-	fs.StringVar(&opts.HistoryOut, "history-save", "", "File to store completion history in")
+	fs.StringVar(&opts.HistoryIn, "history-load", "", "File to read completion history from (deprecated)")
+	fs.StringVar(&opts.HistoryOut, "history-save", "", "File to store completion history in (deprecated)")
 
 	fs.StringVar(&opts.ReadlineHistoryFile, "readline-history-file", "~/.cgpt_history", "File to store readline history in")
 	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
-	// Config flags (these can override values in the config file)
-	fs.StringVarP(&opts.Config.Backend, "backend", "b", "", "The backend to use")
-	fs.StringVarP(&opts.Config.Model, "model", "m", "", "The model to use")
+	// Config flags
+	fs.StringVarP(&opts.Config.Backend, "backend", "b", "anthropic", "The backend to use")
+	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-3-5-sonnet-20240620", "The model to use")
+	fs.StringVarP(&opts.Config.SystemPrompt, "system-prompt", "s", "", "System prompt to use")
 	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum tokens to generate")
-	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0, "Temperature for sampling")
-	fs.StringVar(&opts.Config.OpenAIAPIKey, "openai-api-key", "", "OpenAI API Key")
-	fs.StringVar(&opts.Config.AnthropicAPIKey, "anthropic-api-key", "", "Anthropic API Key")
-	fs.StringVar(&opts.Config.GoogleAPIKey, "google-api-key", "", "Google API Key")
+	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0.05, "Temperature for sampling")
 
 	// Config file path
 	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
 }
 
 func main() {
-	opts, flagSet, err := parseFlags()
+	opts, flagSet, err := initFlags(os.Args, os.Stdin)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if err == pflag.ErrHelp {
+			os.Exit(0)
+		}
+		fmt.Fprintf(os.Stderr, "cgpt: flag error: %v\n", err)
 		os.Exit(2)
 	}
 
 	ctx := context.Background()
 	if err := run(ctx, opts, flagSet); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "cgpt: error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -94,23 +99,30 @@ func main() {
 func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) error {
 	// Load the config file
 	fileConfig, err := cgpt.LoadConfig(opts.ConfigPath, opts.Stderr, flagSet)
+	opts.Config = fileConfig
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
-	// Merge the loaded config with the RunOptions.Config
-	mergedConfig := cgpt.MergeConfigs(*fileConfig, *opts.Config)
-	opts.Config = &mergedConfig
 
 	// Initialize the model (the llms.Model interface)
 	modelOpts := []cgpt.ModelOption{}
 	// if debug mode is on, attach the debug http client:
 	if opts.DebugMode {
-		modelOpts = append(modelOpts, cgpt.WithHTTPClient(http.DefaultClient))
+		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
+		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.DebugHTTPClient))
 	}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize model: %w", err)
 	}
+
+	// If stdin is a tty, and no input files, strings, or args are provided,
+	// then we should run in continuous mode:
+	if isatty.IsTerminal(os.Stdin.Fd()) && len(opts.InputFiles) == 0 && len(opts.InputStrings) == 0 && len(opts.PositionalArgs) == 0 {
+		opts.Continuous = true
+	}
+	// Only have spinner on if stdout is a tty:
+	opts.ShowSpinner = opts.ShowSpinner && isatty.IsTerminal(os.Stdout.Fd())
 
 	// Create the completion service
 	s, err := cgpt.NewCompletionService(opts.Config, model,
@@ -124,53 +136,61 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	return s.Run(ctx, opts)
 }
 
-func parseFlags() (cgpt.RunOptions, *pflag.FlagSet, error) {
+func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet, error) {
 	opts := cgpt.RunOptions{
-		Config: &cgpt.Config{}, // Initialize with default values
-		Stdin:  os.Stdin,       // Set stdin by default
-		Stdout: os.Stdout,      // Set stdout by default
-		Stderr: os.Stderr,      // Set stderr by default
+		Config: &cgpt.Config{},
+		Stdin:  stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	}
+	if len(args) == 0 {
+		return opts, nil, fmt.Errorf("no arguments provided")
 	}
 
-	fs := pflag.NewFlagSet("cgpt", pflag.ContinueOnError)
+	fs := pflag.NewFlagSet(args[0], pflag.ContinueOnError)
+	fs.SortFlags = false
 	defineFlags(fs, &opts)
 
-	// Help and usage flags
-	help := fs.BoolP("help", "h", false, "Display help information")
-	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples")
+	if isatty.IsTerminal(os.Stdin.Fd()) {
+		opts.InputFiles = nil
+	}
 
-	err := fs.Parse(os.Args[1:])
+	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples")
+	help := fs.BoolP("help", "h", false, "Display help information")
+
+	fs.MarkHidden("stream-output")
+	fs.MarkHidden("readline-history-file")
+	fs.MarkHidden("prefill-echo")
+	fs.MarkHidden("show-spinner")
+
+	fs.Usage = func() {
+		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
+		fmt.Println()
+		if *showAdvancedUsage != "" {
+			printAdvancedUsage(*showAdvancedUsage)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", args[0])
+		fs.PrintDefaults()
+		printBasicUsage()
+	}
+
+	err := fs.Parse(args[1:])
 	if err != nil {
 		return opts, fs, err
 	}
 
 	if *help {
 		fs.Usage()
-		return opts, fs, fmt.Errorf("help requested")
+		return opts, fs, pflag.ErrHelp
 	}
 
 	if *showAdvancedUsage != "" {
-		showAdvancedUsageExamples(*showAdvancedUsage)
+		printAdvancedUsage(*showAdvancedUsage)
 		return opts, fs, fmt.Errorf("advanced usage examples requested")
 	}
 
-	// Handle non-flag arguments
 	opts.PositionalArgs = fs.Args()
-
-	// Check if stdin should be used
-	for _, file := range opts.InputFiles {
-		if file == "-" {
-			stat, _ := os.Stdin.Stat()
-			if (stat.Mode() & os.ModeCharDevice) == 0 {
-				// Data is being piped to stdin
-				opts.Stdin = os.Stdin
-			} else {
-				// No data is being piped, remove "-" from InputFiles
-				opts.InputFiles = removeString(opts.InputFiles, "-")
-			}
-			break
-		}
-	}
 
 	return opts, fs, nil
 }
@@ -184,7 +204,6 @@ func removeString(slice []string, s string) []string {
 	return slice
 }
 
-func showAdvancedUsageExamples(examples string) {
-	// Implement the logic to show advanced usage examples
-	fmt.Println("Advanced usage examples:", examples)
+func IsTTY(f *os.File) bool {
+	return isatty.IsTerminal(f.Fd())
 }

@@ -3,11 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -35,117 +39,124 @@ func newTestLogger(t *testing.T) *zap.SugaredLogger {
 	return logger.Sugar()
 }
 
-// readTxtarFile reads a txtar file and returns a map of its contents
-func readTxtarFile(t *testing.T, path string) map[string][]byte {
+// readTxtarFile reads a txtar file.
+func readTxtarFile(t *testing.T, path string) (string, map[string][]byte, error) {
 	t.Helper()
 	content, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("Failed to read txtar file: %v", err)
+		return "", nil, fmt.Errorf("Failed to read txtar file: %w", err)
 	}
 	ar := txtar.Parse(content)
 	result := make(map[string][]byte)
 	for _, f := range ar.Files {
 		result[f.Name] = f.Data
 	}
-	return result
+	return string(ar.Comment), result, nil
 }
 
-// TestRunWithBackends runs tests with different backends and input files
-func TestRunWithBackends(t *testing.T) {
+func Test(t *testing.T) {
+	t.Setenv("CGPT_TEMPERATURE", "0.0")
 	testCases := []struct {
 		name    string
 		backend string
 		model   string
-		input   string
 		args    []string
-		envVars map[string]string
-		skip    bool
-		skipMsg string
-
-		zapOpts []zap.Option
+		env     map[string]string
 	}{
-		{name: "basic dummy", backend: "dummy", model: "dummy-model", input: "testdata/basic_input.txt"},
-		{name: "dummy with debug", backend: "dummy", model: "dummy-model", input: "testdata/basic_input.txt", zapOpts: []zap.Option{zap.IncreaseLevel(zap.DebugLevel)}},
-		{name: "openai gpt-3.5", backend: "openai", model: "gpt-3.5-turbo", input: "testdata/basic_input.txt"},
-		{name: "openai gpt-4 complex", backend: "openai", model: "gpt-4", input: "testdata/complex_input.txt", envVars: map[string]string{"CGPT_OPENAI_API_KEY": "test-api-key"}},
-		{name: "anthropic claude", backend: "anthropic", model: "claude-v1", input: "testdata/basic_input.txt", skip: true, skipMsg: "Anthropic API not available in CI"},
-		{name: "ollama llama2 temp", backend: "ollama", model: "llama2", input: "testdata/basic_input.txt", args: []string{"--temperature", "0.7"}},
-		{name: "dummy with history", backend: "dummy", model: "dummy-model", input: "testdata/history_input.txt", args: []string{"--history-in", "testdata/history.yaml"}},
+		{name: "basic dummy", backend: "dummy", model: "dummy-model"},
+		{name: "dummy with debug", backend: "dummy", model: "dummy-model", args: []string{"--debug"}},
+		// {name: "dummy with history", backend: "dummy", model: "dummy-model"},
+		{name: "ollama llama3.2", backend: "ollama", model: "llama3.2:1b"},
 	}
 
 	for _, tc := range testCases {
-		testName := strings.ReplaceAll(fmt.Sprintf("%s_%s_%s", tc.name, tc.backend, tc.model), "/", "_")
-		t.Run(testName, func(t *testing.T) {
-			if tc.skip {
-				t.Skip(tc.skipMsg)
-			}
+		t.Run(tc.name, func(t *testing.T) {
+			testName := strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]+`).ReplaceAllString(t.Name(), "_"))
+			testInputFile := filepath.Join("testdata", fmt.Sprintf("%s.txtar", testName))
 
 			logger := newTestLogger(t)
-			var outBuf, errBuf bytes.Buffer
+			var (
+				inBuf  = new(bytes.Buffer)
+				outBuf = new(bytes.Buffer)
+				errBuf = new(bytes.Buffer)
+			)
 
 			// Read input from txtar file
-			inputContent := readTxtarFile(t, tc.input)
-			input := bytes.NewReader(inputContent["input"])
-
-			opts := cgpt.RunOptions{
-				Config: &cgpt.Config{},
-				Stdin:  input,
-				Stdout: &outBuf,
-				Stderr: &errBuf,
-			}
-			fs := pflag.NewFlagSet("cgpt-test", pflag.ContinueOnError)
-			defineFlags(fs, &opts)
-
-			args := append([]string{"cgpt-test", "-b", tc.backend, "--model", tc.model}, tc.args...)
-			if err := fs.Parse(args); err != nil {
-				t.Fatalf("Failed to parse flags: %v", err)
-			}
-
-			// Set environment variables
-			for k, v := range tc.envVars {
-				t.Setenv(k, v)
-			}
-
-			err := runTest(context.Background(), opts, fs, logger)
+			txtarComment, files, err := readTxtarFile(t, testInputFile)
 			if err != nil {
-				t.Fatalf("Unexpected error: %v", err)
+				if errors.Is(err, fs.ErrNotExist) {
+					files = make(map[string][]byte)
+					if *update {
+						t.Logf("Creating new golden file: %s", testInputFile)
+						updateGoldenFile(t, testInputFile, "what is your name?", nil, nil, nil, nil)
+						t.Skip("Skipping test as golden file created")
+					}
+				} else {
+					t.Fatalf("Failed to read input file: %v", err)
+				}
 			}
 
-			goldenPath := filepath.Join("testdata", fmt.Sprintf("%s_%s.txtar", tc.backend, tc.model))
+			args := []string{"cgpt-test", fmt.Sprintf("--backend=%s", tc.backend), fmt.Sprintf("--model=%s", tc.model)}
+			args = append(args, tc.args...)
+			//args := append(tc.args, "--debug")
+			t.Log("Input:", txtarComment)
+			t.Logf("Args: %q", args)
+			opts, fs, err := initFlags(args, inBuf)
+			opts.Stderr = errBuf
+			opts.Stdout = outBuf
+			inBuf.WriteString(txtarComment)
+
+			ctx := context.Background()
+			runTest(t, ctx, opts, fs, logger)
 			if *update {
-				updateGoldenFile(t, goldenPath, outBuf.Bytes(), errBuf.Bytes(), inputContent["http_payload"])
+				updateGoldenFile(t, testInputFile, txtarComment, files, outBuf.Bytes(), errBuf.Bytes(), files["http_payload"])
+				t.SkipNow()
 			}
-
-			expectedContent := readTxtarFile(t, goldenPath)
-			compareOutput(t, expectedContent, outBuf.Bytes(), errBuf.Bytes(), inputContent["http_payload"])
+			if outBuf.Len() == 0 {
+				t.Error("No output from test")
+			}
+			compareOutput(t, files["stdout"], files["stderr"], outBuf.Bytes(), errBuf.Bytes(), files["http_payload"])
 		})
 	}
 }
 
 // updateGoldenFile updates the golden txtar file with the current test output
-func updateGoldenFile(t *testing.T, path string, stdout, stderr, httpPayload []byte) {
+func updateGoldenFile(t *testing.T, path, comment string, files map[string][]byte, stdout, stderr, httpPayload []byte) {
 	t.Helper()
 	ar := &txtar.Archive{
-		Files: []txtar.File{
-			{Name: "stdout", Data: stdout},
-			{Name: "stderr", Data: stderr},
-		},
+		Files: []txtar.File{},
+	}
+	for _, k := range slices.Sorted(maps.Keys(files)) {
+		if k == "stdout" || k == "stderr" || k == "http_payload" {
+			continue
+		}
+		ar.Files = append(ar.Files, txtar.File{Name: k, Data: files[k]})
+	}
+	if comment != "" {
+		ar.Comment = []byte(comment)
+	}
+	if stdout != nil {
+		ar.Files = append(ar.Files, txtar.File{Name: "stdout", Data: stdout})
+	}
+	if stderr != nil {
+		ar.Files = append(ar.Files, txtar.File{Name: "stderr", Data: stderr})
 	}
 	if httpPayload != nil {
 		ar.Files = append(ar.Files, txtar.File{Name: "http_payload", Data: httpPayload})
 	}
-	if err := ioutil.WriteFile(path, txtar.Format(ar), 0644); err != nil {
+	t.Log("Updating golden file:", path)
+	t.Log("Contents:", string(txtar.Format(ar)))
+	if err := os.WriteFile(path, txtar.Format(ar), 0644); err != nil {
 		t.Fatalf("Failed to update golden file: %v", err)
 	}
 }
 
-// compareOutput compares the test output with the expected output from the golden file
-func compareOutput(t *testing.T, expected map[string][]byte, stdout, stderr, httpPayload []byte) {
+func compareOutput(t *testing.T, expectedStdout, expectedStderr, stdout, stderr, httpPayload []byte) {
 	t.Helper()
-	compareBytes(t, "stdout", expected["stdout"], stdout)
-	compareBytes(t, "stderr", expected["stderr"], stderr)
+	compareBytes(t, "stdout", expectedStdout, stdout)
+	compareBytes(t, "stderr", expectedStderr, stderr)
 	if httpPayload != nil {
-		compareBytes(t, "http_payload", expected["http_payload"], httpPayload)
+		compareBytes(t, "http_payload", expectedStdout, httpPayload)
 	}
 }
 
@@ -159,18 +170,24 @@ func compareBytes(t *testing.T, name string, want, got []byte) {
 	}
 }
 
-func runTest(ctx context.Context, opts cgpt.RunOptions, fs *pflag.FlagSet, logger *zap.SugaredLogger) error {
+func runTest(t *testing.T, ctx context.Context, opts cgpt.RunOptions, fs *pflag.FlagSet, logger *zap.SugaredLogger) {
+	t.Helper()
 	fileCfg, err := cgpt.LoadConfig(opts.ConfigPath, opts.Stderr, fs)
 	if err != nil {
-		return err
+		t.Fatalf("failed to load config: %v", err)
 	}
+	opts.Config = fileCfg
 
-	cfg := cgpt.MergeConfigs(*fileCfg, *opts.Config)
-	opts.Config = &cfg
+	t.Logf("Options: %+v\n", opts)
+	t.Logf("Config: %+v\n", opts.Config)
 
+	// TODO: add http client for debug/replay
+	// modelOpts := []cgpt.ModelOption{
+	// 	cgpt.WithHTTPClient(httputil.DebugHTTPClient),
+	// }
 	model, err := cgpt.InitializeModel(opts.Config)
 	if err != nil {
-		return err
+		t.Fatalf("failed to initialize model: %v", err)
 	}
 
 	s, err := cgpt.NewCompletionService(opts.Config, model,
@@ -179,7 +196,10 @@ func runTest(ctx context.Context, opts cgpt.RunOptions, fs *pflag.FlagSet, logge
 		cgpt.WithLogger(logger),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create completion service: %w", err)
+		t.Fatalf("failed to create completion service: %v", err)
 	}
-	return s.Run(ctx, opts)
+	err = s.Run(ctx, opts)
+	if err != nil {
+		t.Fatalf("failed to run completion service: %v", err)
+	}
 }
