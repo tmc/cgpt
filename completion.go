@@ -100,7 +100,6 @@ func NewCompletionService(cfg *Config, model llms.Model, opts ...CompletionServi
 		logger := zap.New(core)
 		s.logger = logger.Sugar()
 	}
-
 	return s, nil
 }
 
@@ -235,7 +234,7 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 	s.payload.Stream = true
 	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
 		ShowSpinner: runCfg.ShowSpinner,
-		EchoPrefill: !runCfg.EchoPrefill,
+		EchoPrefill: runCfg.EchoPrefill,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to perform completion streaming: %w", err)
@@ -259,7 +258,7 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 	s.payload.Stream = false
 	response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
 		ShowSpinner: runCfg.ShowSpinner,
-		EchoPrefill: !runCfg.EchoPrefill,
+		EchoPrefill: runCfg.EchoPrefill,
 	})
 	if err != nil {
 		return err
@@ -351,7 +350,7 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 	if runCfg.StreamOutput {
 		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
 			ShowSpinner: runCfg.ShowSpinner,
-			EchoPrefill: !runCfg.EchoPrefill,
+			EchoPrefill: runCfg.EchoPrefill,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to perform completion streaming: %w", err)
@@ -366,7 +365,7 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 	} else {
 		response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
 			ShowSpinner: runCfg.ShowSpinner,
-			EchoPrefill: !runCfg.EchoPrefill,
+			EchoPrefill: runCfg.EchoPrefill,
 		})
 		if err != nil {
 			return err

@@ -54,8 +54,10 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Run in continuous mode (interactive)")
 	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
 	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")
-	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
+	fs.StringVarP(&opts.Prefill, "prefill", "p", "", "Prefill the assistant's response")
+	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
+
 	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
 	fs.DurationVar(&opts.CompletionTimeout, "completion-timeout", 2*time.Minute, "Maximum time to wait for a response")
 
@@ -187,7 +189,7 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 
 	if *showAdvancedUsage != "" {
 		printAdvancedUsage(*showAdvancedUsage)
-		return opts, fs, fmt.Errorf("advanced usage examples requested")
+		return opts, fs, pflag.ErrHelp
 	}
 
 	opts.PositionalArgs = fs.Args()

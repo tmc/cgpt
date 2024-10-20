@@ -67,6 +67,7 @@ func Test(t *testing.T) {
 		{name: "dummy with debug", backend: "dummy", model: "dummy-model", args: []string{"--debug"}},
 		// {name: "dummy with history", backend: "dummy", model: "dummy-model"},
 		{name: "ollama llama3.2", backend: "ollama", model: "llama3.2:1b"},
+		{name: "ollama llama3.2 prefill", backend: "ollama", model: "llama3.2:1b", args: []string{"--prefill=yo"}},
 	}
 
 	for _, tc := range testCases {
