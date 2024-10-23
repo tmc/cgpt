@@ -14,9 +14,9 @@ g:cgpt_backend                                                *g:cgpt_backend*
 <
 
 g:cgpt_model                                                  *g:cgpt_model*
-  Set the model for cgpt. Default is 'claude-3-5-sonnet-20240620'.
+  Set the model for cgpt. Default is 'claude-3-5-sonnet-20241022'.
   Example: >
-    let g:cgpt_model = 'claude-3-5-sonnet-20240620'
+    let g:cgpt_model = 'claude-3-5-sonnet-20241022'
 <
 
 g:cgpt_system_prompt                                          *g:cgpt_system_prompt*

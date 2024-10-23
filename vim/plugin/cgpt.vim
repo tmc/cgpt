@@ -9,7 +9,7 @@ let g:loaded_cgpt = 1
 
 
 let g:cgpt_backend = get(g:, 'cgpt_backend', 'anthropic')
-let g:cgpt_model = get(g:, 'cgpt_model', 'claude-3-5-sonnet-20240620')
+let g:cgpt_model = get(g:, 'cgpt_model', 'claude-3-5-sonnet-20241022')
 let g:cgpt_system_prompt = get(g:, 'cgpt_system_prompt', 'The user is submitting a visual selection in the vim editor to you to help them with a programming task. Prefer to output code directly without surrounding commentary. If you do emit commentary please place it into comments.')
 let g:cgpt_prefill = get(g:, 'cgpt_prefill', '')
 let g:cgpt_history_file = get(g:, 'cgpt_history_file', '')
