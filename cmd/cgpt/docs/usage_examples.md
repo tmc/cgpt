@@ -13,27 +13,24 @@ This document provides examples and guidance for using cgpt, a command-line tool
 
 ## Basic Usage
 
+Examples: # Basic query about interpreting command output
+$ echo "how should I interpret the output of nvidia-smi?" | cgpt
 
-Examples:
-	# Basic query about interpreting command output
-	$ echo "how should I interpret the output of nvidia-smi?" | cgpt
+    # Quick explanation request
+    $ echo "explain plan 9 in one sentence" | cgpt
 
-	# Quick explanation request
-	$ echo "explain plan 9 in one sentence" | cgpt
+Advanced Examples: # Using a system prompt for a specific assistant role
+$ cgpt -s "You are a helpful programming assistant" -i "Write a Python function to calculate the Fibonacci sequence"
 
-Advanced Examples:
-	# Using a system prompt for a specific assistant role
-	$ cgpt -s "You are a helpful programming assistant" -i "Write a Python function to calculate the Fibonacci sequence"
+    # Code review using input from a file
+    $ cat complex_code.py | cgpt -s "You are a code reviewer. Provide constructive feedback." -m "claude-3-5-sonnet-20241022"
 
-	# Code review using input from a file
-	$ cat complex_code.py | cgpt -s "You are a code reviewer. Provide constructive feedback." -m "claude-3-5-sonnet-20240620"
+    # Interactive session for creative writing
+    $ cgpt -c -s "You are a creative writing assistant" # Start an interactive session for story writing
 
-	# Interactive session for creative writing
-	$ cgpt -c -s "You are a creative writing assistant" # Start an interactive session for story writing
-
-	# Show more advanced examples:
-	$ cgpt --show-advanced-usage basic
-	$ cgpt --show-advanced-usage all
+    # Show more advanced examples:
+    $ cgpt --show-advanced-usage basic
+    $ cgpt --show-advanced-usage all
 
 ## Advanced Usage
 
@@ -125,7 +122,7 @@ This section demonstrates how to use cgpt for various code improvement tasks.
 # Iteratively resolve bugs using cgpt until BUGS file is empty, with user confirmation and bash prefill
 $ while [ -s BUGS.txt ]; do bug=$(head -n 1 BUGS.txt); echo "Resolving: $bug"; fix=$(echo "Suggest a fix for this bug: $bug" | cgpt -s "You are an expert programmer and debugger. Analyze the given bug and suggest a concise, practical fix. Output only valid bash code or commands needed to resolve the issue." --prefill "#!/bin/bash
 # Fix for bug: $bug
-" -m "claude-3-5-sonnet-20240620" -t 500); echo "Suggested fix:"; echo "$fix"; read -p "Apply this fix? (y/n) " confirm; if [ "$confirm" = "y" ]; then echo "$fix" | bash; sed -i '1d' BUGS.txt; echo "Bug resolved."; else echo "Fix skipped."; fi; echo "Remaining bugs: $(wc -l < BUGS.txt)"; done; echo "All bugs resolved or skipped!"
+" -m "claude-3-5-sonnet-20241022" -t 500); echo "Suggested fix:"; echo "$fix"; read -p "Apply this fix? (y/n) " confirm; if [ "$confirm" = "y" ]; then echo "$fix" | bash; sed -i '1d' BUGS.txt; echo "Bug resolved."; else echo "Fix skipped."; fi; echo "Remaining bugs: $(wc -l < BUGS.txt)"; done; echo "All bugs resolved or skipped!"
 ```
 
 ### Shell Script Debugging
@@ -154,13 +151,16 @@ $(head -n 20 *)
 ### Common Issues and Solutions
 
 1. **Error: API key not found**
+
    - Ensure you've set the `CGPT_API_KEY` environment variable with your API key.
 
 2. **Error: Request timed out**
+
    - Check your internet connection and try again.
    - If the issue persists, try increasing the timeout using the `--completion-timeout` flag.
 
 3. **Output is truncated**
+
    - Increase the token limit using the `-t` flag.
 
 4. **Unexpected or irrelevant responses**
