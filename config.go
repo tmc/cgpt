@@ -30,7 +30,7 @@ var tokenLimits = map[string]int{
 
 type Config struct {
 	Backend     string  `yaml:"backend"`
-	Model       string  `yaml:"modelName"`
+	Model       string  `yaml:"model"`
 	Stream      bool    `yaml:"stream"`
 	MaxTokens   int     `yaml:"maxTokens"`
 	Temperature float64 `yaml:"temperature"`

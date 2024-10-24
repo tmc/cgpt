@@ -58,7 +58,7 @@ Example `config.yaml`:
 
 ```yaml
 backend: "anthropic"
-modelName: "claude-3-5-sonnet-20241022"
+model: "claude-3-5-sonnet-20241022"
 stream: true
 maxTokens: 2048
 systemPrompt: "You are a helpful assistant."
@@ -67,6 +67,7 @@ systemPrompt: "You are a helpful assistant."
 ## Environment Variables
 
 - `OPENAI_API_KEY`: OpenAI API key
+- `OPENAI_BASE_URL`: Override for OpenAI API Base URL
 - `ANTHROPIC_API_KEY`: Anthropic API key
 - `GOOGLE_API_KEY`: Google AI API key
 
