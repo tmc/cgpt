@@ -2,8 +2,9 @@ package interactive
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/chzyer/readline"
 )
+
+var ErrEmptyInput = errors.New("empty input")
 
 var pasteThreshold = 50 * time.Millisecond
 
@@ -115,7 +118,9 @@ func (s *InteractiveSession) Run() error {
 		if timeDelta > pasteThreshold && s.isInputComplete() {
 			input := s.buffer.String()
 			if err := s.config.ProcessFn(input); err != nil {
-				return err
+				if err != ErrEmptyInput {
+					return fmt.Errorf("supplied processing: %w", err)
+				}
 			}
 			s.buffer.Reset()
 			s.changePrompt(false) // Back to normal prompt after completing multiline input
@@ -198,7 +203,7 @@ func (s *InteractiveSession) editInEditor(line string) (string, error) {
 	}
 
 	// Create a temporary file
-	tmpfile, err := ioutil.TempFile("", "cgpt_input_*.txt")
+	tmpfile, err := os.CreateTemp("", "cgpt_input_*.txt")
 	if err != nil {
 		return "", err
 	}
@@ -223,7 +228,7 @@ func (s *InteractiveSession) editInEditor(line string) (string, error) {
 	}
 
 	// Read the edited content
-	content, err := ioutil.ReadFile(tmpfile.Name())
+	content, err := os.ReadFile(tmpfile.Name())
 	if err != nil {
 		return "", err
 	}

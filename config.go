@@ -160,14 +160,6 @@ func setBackendAndModel(cfg *Config, flagSet *pflag.FlagSet) error {
 	return nil
 }
 
-func getBackendForModel(model string) string {
-	for backend, defaultModel := range defaultModels {
-		if defaultModel == model {
-			return backend
-		}
-	}
-	return ""
-}
 func setMaxTokens(cfg *Config) {
 	maxTokens := tokenLimits["*"]
 	backendModel := cfg.Backend + ":" + cfg.Model

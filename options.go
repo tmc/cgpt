@@ -83,15 +83,6 @@ type InputHandler struct {
 // InputSources is a slice of InputSource.
 type InputSources []InputSource
 
-// Readers returns a slice of io.Reader from InputSources.
-func (is InputSources) Readers() []io.Reader {
-	readers := make([]io.Reader, len(is))
-	for i, s := range is {
-		readers[i] = s.Reader
-	}
-	return readers
-}
-
 // Process reads the set of inputs, this will block on stdin if it is included.
 // The order of precedence is:
 // 1. Files

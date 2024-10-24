@@ -38,7 +38,8 @@ func extractSection(sectionName string) string {
 	var sectionContent []string
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "## "+sectionName) {
+		// make case insensitive:
+		if strings.HasPrefix(strings.ToLower(line), "## "+strings.ToLower(sectionName)) {
 			inSection = true
 			continue
 		}
@@ -52,7 +53,6 @@ func extractSection(sectionName string) string {
 
 	return strings.TrimSpace(strings.Join(sectionContent, "\n"))
 }
-
 func listSections() {
 	fmt.Println("Available sections:")
 	lines := strings.Split(usageExamplesFile, "\n")

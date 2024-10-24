@@ -1,7 +1,6 @@
 package cgpt
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -197,37 +196,6 @@ func (s *CompletionService) getLastUserMessage() string {
 	return strings.Join(parts, "\n")
 }
 
-func readStdin() (string, error) {
-	var input strings.Builder
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		input.WriteString(scanner.Text())
-		input.WriteString("\n")
-	}
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("failed to read from stdin: %w", err)
-	}
-	return input.String(), nil
-}
-
-func createInputProcessor(input string) (func() (string, error), error) {
-	if input == "-" {
-		fmt.Fprintln(os.Stderr, "Reading input from stdin...")
-		return readStdin, nil
-	}
-
-	if _, err := os.Stat(input); err == nil {
-		return func() (string, error) {
-			content, err := os.ReadFile(input)
-			return string(content), err
-		}, nil
-	}
-
-	return func() (string, error) {
-		return input, nil
-	}, nil
-}
-
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion with streaming")
 
@@ -283,6 +251,10 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 	}
 
 	processFn := func(input string) error {
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return interactive.ErrEmptyInput
+		}
 		s.payload.addUserMessage(input)
 		return s.generateResponse(ctx, runCfg)
 	}
@@ -306,10 +278,14 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 func (s *CompletionService) runContinuousCompletion(ctx context.Context, runCfg RunOptions) error {
 	fmt.Fprintln(s.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
 	processFn := func(input string) error {
+		input = strings.TrimSpace(input)
+		if input == "" {
+			return interactive.ErrEmptyInput
+		}
 		s.payload.addUserMessage(input)
 		response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
 			ShowSpinner: runCfg.ShowSpinner,
-			EchoPrefill: !runCfg.EchoPrefill,
+			EchoPrefill: runCfg.EchoPrefill,
 		})
 		if err != nil {
 			return err

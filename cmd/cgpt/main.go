@@ -40,10 +40,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/mattn/go-isatty"
 	"github.com/spf13/pflag"
 	"github.com/tmc/cgpt"
 	"github.com/tmc/langchaingo/httputil"
+	"golang.org/x/term"
 )
 
 // defineFlags defines the command line flags for the cgpt command
@@ -120,11 +120,11 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 
 	// If stdin is a tty, and no input files, strings, or args are provided,
 	// then we should run in continuous mode:
-	if isatty.IsTerminal(os.Stdin.Fd()) && len(opts.InputFiles) == 0 && len(opts.InputStrings) == 0 && len(opts.PositionalArgs) == 0 {
+	if term.IsTerminal(int(os.Stdin.Fd())) && len(opts.InputFiles) == 0 && len(opts.InputStrings) == 0 && len(opts.PositionalArgs) == 0 {
 		opts.Continuous = true
 	}
 	// Only have spinner on if stdout is a tty:
-	opts.ShowSpinner = opts.ShowSpinner && isatty.IsTerminal(os.Stdout.Fd())
+	opts.ShowSpinner = opts.ShowSpinner && term.IsTerminal(int(os.Stdout.Fd()))
 
 	// Create the completion service
 	s, err := cgpt.NewCompletionService(opts.Config, model,
@@ -153,11 +153,11 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	fs.SortFlags = false
 	defineFlags(fs, &opts)
 
-	if isatty.IsTerminal(os.Stdin.Fd()) {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
 		opts.InputFiles = nil
 	}
 
-	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples")
+	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples (comma separated list of sections, or 'all')")
 	help := fs.BoolP("help", "h", false, "Display help information")
 
 	fs.MarkHidden("stream-output")
@@ -195,17 +195,4 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	opts.PositionalArgs = fs.Args()
 
 	return opts, fs, nil
-}
-
-func removeString(slice []string, s string) []string {
-	for i, v := range slice {
-		if v == s {
-			return append(slice[:i], slice[i+1:]...)
-		}
-	}
-	return slice
-}
-
-func IsTTY(f *os.File) bool {
-	return isatty.IsTerminal(f.Fd())
 }
