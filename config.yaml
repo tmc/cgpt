@@ -3,7 +3,7 @@
 # # The backend to use.
 # backend: "openai"
 # # The model to use.
-# modelName: "gpt-4o"
+# model: "gpt-4o"
 # # Whether or not to stream output.
 # stream: true
 # Optional system prompt.
