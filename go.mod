@@ -7,7 +7,7 @@ require (
 	github.com/google/go-cmp v0.6.0
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.19.0
-	github.com/tmc/langchaingo v0.1.13-0.20240725041451-1975058648b5
+	github.com/tmc/langchaingo v0.1.13-pre.0.0.20240913050512-179400979a5d
 	github.com/tmc/spinner v0.1.2
 	go.uber.org/zap v1.27.0
 	golang.org/x/term v0.20.0
