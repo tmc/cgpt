@@ -1,7 +1,7 @@
 fix ai role being written twice
+template mode, -e/-E mode, env vars? env file?
 auto-history, emitting somewhere
 allow ctrl-c to stop mid-generation
 add modes -> esc to get to a vim-like : experience
 retry setup/approach
-
 add auto-constraints for some models (o1 temp, no stream, etc.)
