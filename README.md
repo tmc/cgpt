@@ -11,20 +11,56 @@ cgpt is a command-line tool for interacting with Large Language Models (LLMs) us
 - Configurable via YAML file and environment variables
 - Vim plugin for easy integration
 
-## Installation
 
-### Using Homebrew
+# Installation
 
-```bash
-brew tap tmc/tap
-brew install cgpt
+## Using Homebrew
+
+```shell
+brew install tmc/tap/cgpt
 ```
 
-### From Source
+## From Source
 
-```bash
+cgpt is written in Go. To build from source, you need to have Go installed on your system. See the [Go installation instructions](https://golang.org/doc/install) for more information.
+
+<details>
+<summary>Quickstart Guide for Brew (including Go setup)</summary>
+
+1. Install Homebrew:
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+
+2. Install Go:
+   ```bash
+   brew install go
+   ```
+
+3. Add Go binary directory to PATH:
+   ```bash
+   echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
+   # Or if using bash:
+   # echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bash_profile
+   ```
+
+4. Reload your shell configuration:
+   ```bash
+   source ~/.zshrc
+   # Or if using bash:
+   # source ~/.bash_profile
+   ```
+</details>
+
+Once Go is set up, you can install cgpt from source:
+
+```shell
 go install github.com/tmc/cgpt/cmd/cgpt@latest
 ```
+
+## From GitHub Releases
+
+Download the latest release from the [GitHub Releases page](https://github.com/tmc/cgpt/releases).
 
 ## Usage
 
