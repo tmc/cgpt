@@ -13,7 +13,7 @@ import (
 )
 
 var defaultModels = map[string]string{
-	"anthropic": "claude-3-5-sonnet-20240620",
+	"anthropic": "claude-3-5-sonnet-20241022",
 	"openai":    "gpt-4o",
 	"ollama":    "llama3.2",
 	"googleai":  "gemini-pro",
