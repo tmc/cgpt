@@ -22,6 +22,8 @@ func newCompletionPayload(cfg *Config) *ChatCompletionPayload {
 	return p
 }
 
+type Message = []llms.MessageContent
+
 type ChatCompletionPayload struct {
 	Model    string `json:"model"`
 	Messages []llms.MessageContent

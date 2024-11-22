@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -109,21 +110,25 @@ type PerformCompletionConfig struct {
 	ShowSpinner bool
 }
 
-// Run runs the completion service with the given configuration.
 func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
+	if err := s.configure(runCfg); err != nil {
+		return fmt.Errorf("configuration error: %w", err)
+	}
+	if err := s.setupSystemPrompt(); err != nil {
+		return fmt.Errorf("system prompt setup error: %w", err)
+	}
+	if err := s.handleInput(ctx, runCfg); err != nil {
+		return fmt.Errorf("input handling error: %w", err)
+	}
+	return s.executeCompletion(ctx, runCfg)
+}
+
+func (s *CompletionService) configure(runCfg RunOptions) error {
 	s.readlineHistoryFile = runCfg.ReadlineHistoryFile
-	s.loggerCfg.Level.SetLevel(zap.WarnLevel)
-	if runCfg.Verbose {
-		s.loggerCfg.Level.SetLevel(zap.InfoLevel)
-	}
-	if runCfg.DebugMode {
-		s.loggerCfg.Level.SetLevel(zap.DebugLevel)
-	}
+	s.configureLogLevel(runCfg)
+
 	if err := s.handleHistory(runCfg.HistoryIn, runCfg.HistoryOut); err != nil {
 		fmt.Fprintln(s.Stderr, err)
-	}
-	if !s.loadedWithHistory() && s.cfg.SystemPrompt != "" {
-		s.payload.addSystemMessage(s.cfg.SystemPrompt)
 	}
 	if runCfg.Prefill != "" {
 		s.SetNextCompletionPrefill(runCfg.Prefill)
@@ -131,32 +136,70 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
 	if runCfg.Stdout == nil {
 		runCfg.Stdout = os.Stdout
 	}
+	return nil
+}
 
+func (s *CompletionService) configureLogLevel(runCfg RunOptions) {
+	s.loggerCfg.Level.SetLevel(zap.WarnLevel)
+	if runCfg.Verbose {
+		s.loggerCfg.Level.SetLevel(zap.InfoLevel)
+	}
+	if runCfg.DebugMode {
+		s.loggerCfg.Level.SetLevel(zap.DebugLevel)
+	}
+}
+
+func (s *CompletionService) setupSystemPrompt() error {
+	if s.loadedWithHistory() || s.cfg.SystemPrompt == "" {
+		return nil
+	}
+
+	s.payload.Messages = append([]llms.MessageContent(nil), s.payload.Messages...)
+	sysMsg := llms.TextParts(llms.ChatMessageTypeSystem, s.cfg.SystemPrompt)
+
+	sysIdx := slices.IndexFunc(s.payload.Messages, func(m llms.MessageContent) bool {
+		return m.Role == "system"
+	})
+
+	if sysIdx >= 0 {
+		s.payload.Messages[sysIdx] = sysMsg
+	} else {
+		s.payload.Messages = append([]llms.MessageContent{sysMsg}, s.payload.Messages...)
+	}
+
+	return nil
+}
+
+func (s *CompletionService) handleInput(ctx context.Context, runCfg RunOptions) error {
 	r, err := runCfg.GetCombinedInputReader(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get inputs: %w", err)
 	}
+
 	input, err := io.ReadAll(r)
 	if err != nil {
 		return fmt.Errorf("failed to read inputs: %w", err)
 	}
+
 	if len(input) != 0 {
 		s.payload.addUserMessage(string(input))
 	}
 
+	return nil
+}
+
+func (s *CompletionService) executeCompletion(ctx context.Context, runCfg RunOptions) error {
 	if runCfg.Continuous {
 		if runCfg.StreamOutput {
 			return s.runContinuousCompletionStreaming(ctx, runCfg)
-		} else {
-			return s.runContinuousCompletion(ctx, runCfg)
 		}
+		return s.runContinuousCompletion(ctx, runCfg)
 	}
 
 	if runCfg.StreamOutput {
 		return s.runOneShotCompletionStreaming(ctx, runCfg)
-	} else {
-		return s.runOneShotCompletion(ctx, runCfg)
 	}
+	return s.runOneShotCompletion(ctx, runCfg)
 }
 
 func (s *CompletionService) loadedWithHistory() bool {

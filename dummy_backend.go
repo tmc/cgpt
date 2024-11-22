@@ -65,7 +65,7 @@ func (d *DummyBackend) GenerateContent(ctx context.Context, messages []llms.Mess
 				if err := opts.StreamingFunc(ctx, []byte(word+" ")); err != nil {
 					return response, err
 				}
-				time.Sleep(10 * time.Millisecond) // Simulate streaming delay
+				time.Sleep(40 * time.Millisecond) // Simulate streaming delay
 			}
 		}
 		return response, nil
