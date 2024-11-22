@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
+
+var defaultBackend = "anthropic" // Configurable via 'CGPT_BACKEND" (or via configuration files).
 
 var defaultModels = map[string]string{
 	"anthropic": "claude-3-5-sonnet-20241022",
@@ -72,36 +75,109 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 	setupViper(v, flagSet)
 	setupFlagNormalization(flagSet)
 
-	if err := bindAndUnmarshal(v, flagSet, cfg); err != nil {
-		return nil, err
-	}
-
+	// Read config file first
 	if err := handleConfigFile(v, stderr, flagSet); err != nil {
 		return nil, err
 	}
 
-	if err := setBackendAndModel(cfg, flagSet); err != nil {
-		return nil, err
+	// Then bind flags (so they override config)
+	if err := v.BindPFlags(flagSet); err != nil {
+		return nil, fmt.Errorf("unable to bind flags: %w", err)
 	}
-	setMaxTokens(cfg)
+
+	// Get backend (respecting precedence)
+	backend := v.GetString("backend")
+	if verbose, _ := flagSet.GetBool("verbose"); verbose {
+		fmt.Fprintf(stderr, "cgpt: backend is %q\n", backend)
+	}
+
+	// Check if model is explicitly set anywhere before setting default
+	hasModel := false
+	if flagSet.Changed("model") {
+		if verbose, _ := flagSet.GetBool("verbose"); verbose {
+			fmt.Fprintf(stderr, "cgpt: model set by flag: %s\n", flagSet.Lookup("model").Value.String())
+		}
+		hasModel = true
+	} else if isEnvSet("CGPT_MODEL") {
+		if verbose, _ := flagSet.GetBool("verbose"); verbose {
+			fmt.Fprintf(stderr, "cgpt: model set by env: %s\n", os.Getenv("CGPT_MODEL"))
+		}
+		hasModel = true
+		v.Set("model", os.Getenv("CGPT_MODEL"))
+	} else if v.InConfig("model") {
+		if verbose, _ := flagSet.GetBool("verbose"); verbose {
+			fmt.Fprintf(stderr, "cgpt: model set in config: %s\n", v.GetString("model"))
+		}
+		hasModel = true
+	}
+
+	// Only set default model if no explicit model is set
+	if !hasModel {
+		if verbose, _ := flagSet.GetBool("verbose"); verbose {
+			fmt.Fprintln(stderr, "cgpt: no model set, using default")
+		}
+		if defaultModel, ok := defaultModels[backend]; ok {
+			v.Set("model", defaultModel)
+			if verbose, _ := flagSet.GetBool("verbose"); verbose {
+				fmt.Fprintf(stderr, "cgpt: using default model for %s backend: %s\n", backend, defaultModel)
+			}
+		}
+	}
+
+	if err := v.Unmarshal(cfg); err != nil {
+		return nil, fmt.Errorf("unable to unmarshal config: %w", err)
+	}
+
 	logConfig(cfg, stderr, flagSet)
 	return cfg, nil
 }
 
+// Helper to check if an environment variable is set
+func isEnvSet(key string) bool {
+	_, exists := os.LookupEnv(key)
+	return exists
+}
+
 func setupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
+	// Set defaults
+	v.SetDefault("backend", defaultBackend)
+	v.SetDefault("stream", true)
+	v.SetDefault("temperature", 0.05)
+	v.SetDefault("maxTokens", 4096)
+
+	// Setup paths and env
 	v.AddConfigPath("/etc/cgpt/")
 	v.AddConfigPath("$HOME/.cgpt")
 	v.AddConfigPath(".")
 	v.SetConfigName("config")
-	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath.Changed {
-		v.SetConfigFile(flagConfigFilePath.Value.String())
-	}
 
+	// Setup env vars
 	v.SetEnvPrefix("CGPT")
 	v.AutomaticEnv()
 	v.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
 	v.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
 	v.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
+
+	// Set config file if specified in flags
+	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath.Changed {
+		v.SetConfigFile(flagConfigFilePath.Value.String())
+	}
+}
+func logConfigSources(v *viper.Viper, stderr io.Writer) {
+	for _, key := range []string{"backend", "model"} {
+		var source string
+		switch {
+		case v.InConfig(key):
+			source = "config file"
+		case os.Getenv("CGPT_"+strings.ToUpper(key)) != "":
+			source = "environment"
+		case v.IsSet(key):
+			source = "flag"
+		default:
+			source = "default"
+		}
+		fmt.Fprintf(stderr, "cgpt: using %s from %s: %s\n", key, source, v.GetString(key))
+	}
 }
 
 func setupFlagNormalization(flagSet *pflag.FlagSet) {
@@ -111,53 +187,6 @@ func setupFlagNormalization(flagSet *pflag.FlagSet) {
 		name = strings.ReplaceAll(string(result), "-", "")
 		return pflag.NormalizedName(name)
 	})
-}
-
-func bindAndUnmarshal(v *viper.Viper, flagSet *pflag.FlagSet, cfg *Config) error {
-	if err := v.BindPFlags(flagSet); err != nil {
-		return fmt.Errorf("unable to bind flags: %w", err)
-	}
-	if err := v.Unmarshal(cfg); err != nil {
-		return fmt.Errorf("unable to unmarshal config: %w", err)
-	}
-	return nil
-}
-
-func handleConfigFile(v *viper.Viper, stderr io.Writer, flagSet *pflag.FlagSet) error {
-	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			if v, _ := flagSet.GetBool("verbose"); v {
-				fmt.Fprintln(stderr, "cgpt: config file not found, using defaults")
-			}
-		} else {
-			return fmt.Errorf("unable to read config file: %w", err)
-		}
-	}
-	return nil
-}
-
-func setBackendAndModel(cfg *Config, flagSet *pflag.FlagSet) error {
-	flagBackend, flagModel := flagSet.Lookup("backend"), flagSet.Lookup("model")
-	if flagBackend == nil || flagModel == nil {
-		return fmt.Errorf("flags 'backend' and 'model' must be defined")
-	}
-
-	// Set backend
-	if flagBackend.Changed {
-		cfg.Backend = flagBackend.Value.String()
-	} else if cfg.Backend == "" {
-		cfg.Backend = flagBackend.DefValue
-	}
-
-	// Set model
-	if flagModel.Changed {
-		cfg.Model = flagModel.Value.String()
-	} else {
-		// If model is not explicitly set, choose based on the backend
-		cfg.Model = defaultModels[cfg.Backend]
-	}
-
-	return nil
 }
 
 func setMaxTokens(cfg *Config) {
@@ -178,8 +207,42 @@ func setMaxTokens(cfg *Config) {
 		cfg.MaxTokens = maxTokens
 	}
 }
+func handleConfigFile(v *viper.Viper, stderr io.Writer, flagSet *pflag.FlagSet) error {
+	if configFlag := flagSet.Lookup("config"); configFlag != nil && configFlag.Changed {
+		configFile := configFlag.Value.String()
+		if verbose, _ := flagSet.GetBool("verbose"); verbose {
+			fmt.Fprintf(stderr, "cgpt: trying to read config file: %s\n", configFile)
+		}
+
+		// Check if file exists and is readable
+		if _, err := os.Stat(configFile); err != nil {
+			if verbose, _ := flagSet.GetBool("verbose"); verbose {
+				fmt.Fprintf(stderr, "cgpt: config file %s not accessible: %v\n", configFile, err)
+			}
+			return nil
+		}
+
+		v.SetConfigFile(configFile)
+	}
+
+	if err := v.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			if verbose, _ := flagSet.GetBool("verbose"); verbose {
+				fmt.Fprintln(stderr, "cgpt: config file not found, using defaults")
+			}
+			return nil
+		}
+		return fmt.Errorf("unable to read config file: %w", err)
+	}
+
+	if verbose, _ := flagSet.GetBool("verbose"); verbose {
+		fmt.Fprintf(stderr, "cgpt: successfully read config from %s\n", v.ConfigFileUsed())
+	}
+	return nil
+}
+
 func logConfig(cfg *Config, stderr io.Writer, flagSet *pflag.FlagSet) {
-	if v, _ := flagSet.GetBool("verbose"); v {
+	if verbose, _ := flagSet.GetBool("verbose"); verbose {
 		fmt.Fprint(stderr, "cgpt-config: ")
 		json.NewEncoder(stderr).Encode(cfg)
 	}
