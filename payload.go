@@ -2,6 +2,7 @@ package cgpt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -25,9 +26,10 @@ func newCompletionPayload(cfg *Config) *ChatCompletionPayload {
 type Message = []llms.MessageContent
 
 type ChatCompletionPayload struct {
-	Model    string `json:"model"`
-	Messages []llms.MessageContent
-	Stream   bool `json:"stream,omitempty"`
+	Model     string `json:"model"`
+	Messages  []llms.MessageContent
+	Stream    bool   `json:"stream,omitempty"`
+	StopToken string `json:"stopToken,omitempty"`
 }
 
 func (p *ChatCompletionPayload) addMessage(role llms.ChatMessageType, content string) {
@@ -72,6 +74,9 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			spinnerStop = spin(spinnerPos)
 		}
 
+		// Buffer for detecting stop token
+		buffer := ""
+
 		_, err := s.model.GenerateContent(ctx, payload.Messages,
 			llms.WithMaxTokens(s.cfg.MaxTokens),
 			llms.WithTemperature(s.cfg.Temperature),
@@ -85,12 +90,19 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 					firstChunk = false
 				}
 
-				ch <- string(chunk)
+				text := string(chunk)
+				buffer += text
+
+				if payload.StopToken != "" && strings.Contains(buffer, payload.StopToken) {
+					return errors.New("stop token reached")
+				}
+
+				ch <- text
 				fullResponse.Write(chunk)
 				return nil
 			}))
 
-		if err != nil {
+		if err != nil && err.Error() != "stop token reached" {
 			log.Printf("failed to generate content: %v", err)
 		}
 

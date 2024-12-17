@@ -131,11 +131,17 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 		fmt.Fprintln(s.Stderr, err)
 	}
 	if runCfg.Prefill != "" {
+		if strings.HasPrefix(runCfg.Prefill, "```") {
+			runCfg.StopToken = runCfg.Prefill
+			runCfg.Prefill = ""
+		}
 		s.SetNextCompletionPrefill(runCfg.Prefill)
 	}
 	if runCfg.Stdout == nil {
 		runCfg.Stdout = os.Stdout
 	}
+	// Pass stop token to payload
+	s.payload.StopToken = runCfg.StopToken
 	return nil
 }
 
