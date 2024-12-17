@@ -29,7 +29,7 @@ type ChatCompletionPayload struct {
 	Model     string `json:"model"`
 	Messages  []llms.MessageContent
 	Stream    bool   `json:"stream,omitempty"`
-	StopToken string `json:"stopToken,omitempty"`
+	StopSequence string `json:"stopSequence,omitempty"`
 }
 
 func (p *ChatCompletionPayload) addMessage(role llms.ChatMessageType, content string) {
@@ -74,7 +74,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			spinnerStop = spin(spinnerPos)
 		}
 
-		// Buffer for detecting stop token
+		// Buffer for detecting stop sequence
 		buffer := ""
 
 		_, err := s.model.GenerateContent(ctx, payload.Messages,
@@ -93,8 +93,8 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 				text := string(chunk)
 				buffer += text
 
-				if payload.StopToken != "" && strings.Contains(buffer, payload.StopToken) {
-					return errors.New("stop token reached")
+				if payload.StopSequence != "" && strings.Contains(buffer, payload.StopSequence) {
+					return errors.New("stop sequence reached")
 				}
 
 				ch <- text
@@ -102,7 +102,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 				return nil
 			}))
 
-		if err != nil && err.Error() != "stop token reached" {
+		if err != nil && err.Error() != "stop sequence reached" {
 			log.Printf("failed to generate content: %v", err)
 		}
 

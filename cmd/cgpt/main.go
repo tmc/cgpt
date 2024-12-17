@@ -57,7 +57,7 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
 	fs.StringVarP(&opts.Prefill, "prefill", "p", "", "Prefill the assistant's response")
 	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
-	fs.StringVar(&opts.StopToken, "stop-token", "", "Stop token for completion")
+	fs.StringVar(&opts.StopSequence, "stop-sequence", "", "Stop sequence for completion")
 
 	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
 	fs.DurationVar(&opts.CompletionTimeout, "completion-timeout", 2*time.Minute, "Maximum time to wait for a response")

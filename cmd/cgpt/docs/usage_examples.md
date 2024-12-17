@@ -7,7 +7,7 @@ This document provides examples and guidance for using cgpt, a command-line tool
 1. [Basic Usage](#basic-usage)
 2. [Advanced Usage](#advanced-usage)
    - [Shell Script Generation](#shell-script-generation)
-   - [Stop Tokens](#stop-tokens)
+   - [Stop Sequences](#stop-sequences)
    - [Research Analysis](#research-analysis)
    - [Git Commit Analysis](#git-commit-analysis)
 3. [Meta-Prompting](#meta-prompting)
@@ -49,19 +49,22 @@ $ echo "Write a script that analyzes the current local git branch, the recent ac
      --prefill "#!/usr/bin/env" | tee suggest-process-improvement.sh
 ```
 
-### Stop Tokens
+### Stop Sequences
 
-Stop tokens allow you to control where the model's output should end, which is particularly useful when generating code or configuration files. The stop token is automatically extracted from prefill strings that start with triple backticks.
+Stop sequences allow you to control where the model's output should end, which is particularly useful when generating code or configuration files. You can specify a stop sequence explicitly using the `--stop-sequence` flag, or it can be automatically extracted from prefill strings that start with triple backticks.
 
 ```shell
-# Generate Python code with automatic stop token
-$ echo "Write a function to calculate fibonacci numbers" | cgpt -p'```python' --prefill-echo=false > fib.py
+# Generate Python code with explicit stop sequence
+$ echo "Write a function to calculate fibonacci numbers" | cgpt --stop-sequence '```' > fib.py
+
+# Using legacy prefill-based stop sequence (backward compatible)
+$ cgpt -i "Write a function to calculate fibonacci numbers" -p'```python' --prefill-echo=false > fib.py
 
 # Create a vimrc configuration file
-$ cgpt -s 'you are a vimrc expert' -i 'output a basic vimrc' -p'```vimrc' --prefill-echo=false > .vimrc
+$ cgpt -s 'you are a vimrc expert' -i 'output a basic vimrc' --stop-sequence '```vimrc' > .vimrc
 
 # Generate markdown documentation
-$ cgpt -i 'Write documentation for a REST API' -p'```markdown' > api-docs.md
+$ cgpt -i 'Write documentation for a REST API' --stop-sequence '```markdown' > api-docs.md
 ```
 
 ### Research Analysis

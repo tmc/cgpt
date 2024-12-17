@@ -132,7 +132,7 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 	}
 	if runCfg.Prefill != "" {
 		if strings.HasPrefix(runCfg.Prefill, "```") {
-			runCfg.StopToken = runCfg.Prefill
+			runCfg.StopSequence = runCfg.Prefill
 			runCfg.Prefill = ""
 		}
 		s.SetNextCompletionPrefill(runCfg.Prefill)
@@ -140,8 +140,8 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 	if runCfg.Stdout == nil {
 		runCfg.Stdout = os.Stdout
 	}
-	// Pass stop token to payload
-	s.payload.StopToken = runCfg.StopToken
+	// Pass stop sequence to payload
+	s.payload.StopSequence = runCfg.StopSequence
 	return nil
 }
 

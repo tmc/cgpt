@@ -64,8 +64,8 @@ func Test(t *testing.T) {
 	}{
 		{name: "basic dummy", backend: "dummy", model: "dummy-model"},
 		{name: "dummy with debug", backend: "dummy", model: "dummy-model", args: []string{"--debug"}},
-		{name: "dummy with stop token", backend: "dummy", model: "dummy-model", args: []string{"--prefill=```test", "--prefill-echo=false"}},
-		{name: "dummy with vimrc stop token", backend: "dummy", model: "dummy-model", args: []string{"--prefill=```vimrc", "--prefill-echo=false", "--system-prompt=you are a vimrc expert"}},
+		{name: "dummy with stop sequence", backend: "dummy", model: "dummy-model", args: []string{"--prefill=```test", "--prefill-echo=false"}},
+		{name: "dummy with vimrc stop sequence", backend: "dummy", model: "dummy-model", args: []string{"--prefill=```vimrc", "--prefill-echo=false", "--system-prompt=you are a vimrc expert"}},
 		{name: "ollama llama3.2", backend: "ollama", model: "llama3.2:1b"},
 		{name: "ollama llama3.2 prefill", backend: "ollama", model: "llama3.2:1b", args: []string{"--prefill=yo"}},
 	}

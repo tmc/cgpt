@@ -17,8 +17,8 @@ type RunOptions struct {
 	InputFiles     []string `json:"inputFiles,omitempty" yaml:"inputFiles,omitempty"`
 	PositionalArgs []string `json:"positionalArgs,omitempty" yaml:"positionalArgs,omitempty"`
 	Prefill        string   `json:"prefill,omitempty" yaml:"prefill,omitempty"`
-	// Stop token for completion
-	StopToken string `json:"stopToken,omitempty" yaml:"stopToken,omitempty"`
+	// Stop sequence for completion
+	StopSequence string `json:"stopSequence,omitempty" yaml:"stopSequence,omitempty"`
 
 	// Output options
 	Continuous   bool `json:"continuous,omitempty" yaml:"continuous,omitempty"`
