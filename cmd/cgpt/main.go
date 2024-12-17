@@ -165,7 +165,6 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	fs.MarkHidden("readline-history-file")
 	fs.MarkHidden("prefill-echo")
 	fs.MarkHidden("show-spinner")
-	fs.MarkHidden("stop-token")
 
 	fs.Usage = func() {
 		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
