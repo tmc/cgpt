@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -65,7 +64,8 @@ func Test(t *testing.T) {
 	}{
 		{name: "basic dummy", backend: "dummy", model: "dummy-model"},
 		{name: "dummy with debug", backend: "dummy", model: "dummy-model", args: []string{"--debug"}},
-		// {name: "dummy with history", backend: "dummy", model: "dummy-model"},
+		{name: "dummy with stop token", backend: "dummy", model: "dummy-model", args: []string{"--prefill=```test", "--prefill-echo=false"}},
+		{name: "dummy with vimrc stop token", backend: "dummy", model: "dummy-model", args: []string{"--prefill=```vimrc", "--prefill-echo=false", "--system-prompt=you are a vimrc expert"}},
 		{name: "ollama llama3.2", backend: "ollama", model: "llama3.2:1b"},
 		{name: "ollama llama3.2 prefill", backend: "ollama", model: "llama3.2:1b", args: []string{"--prefill=yo"}},
 	}
@@ -121,13 +121,19 @@ func Test(t *testing.T) {
 	}
 }
 
-// updateGoldenFile updates the golden txtar file with the current test output
 func updateGoldenFile(t *testing.T, path, comment string, files map[string][]byte, stdout, stderr, httpPayload []byte) {
 	t.Helper()
 	ar := &txtar.Archive{
 		Files: []txtar.File{},
 	}
-	for _, k := range slices.Sorted(maps.Keys(files)) {
+	// Get sorted keys without using slices.Sorted and maps.Keys
+	keys := make([]string, 0, len(files))
+	for k := range files {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+
+	for _, k := range keys {
 		if k == "stdout" || k == "stderr" || k == "http_payload" {
 			continue
 		}

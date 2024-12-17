@@ -1,6 +1,8 @@
 module github.com/tmc/cgpt
 
-go 1.23
+go 1.22.4
+
+toolchain go1.22.10
 
 require (
 	github.com/chzyer/readline v1.5.1

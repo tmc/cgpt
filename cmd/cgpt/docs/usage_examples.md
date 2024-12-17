@@ -6,6 +6,10 @@ This document provides examples and guidance for using cgpt, a command-line tool
 
 1. [Basic Usage](#basic-usage)
 2. [Advanced Usage](#advanced-usage)
+   - [Shell Script Generation](#shell-script-generation)
+   - [Stop Tokens](#stop-tokens)
+   - [Research Analysis](#research-analysis)
+   - [Git Commit Analysis](#git-commit-analysis)
 3. [Meta-Prompting](#meta-prompting)
 4. [Code Improvements](#code-improvements)
 5. [Tips and Tricks](#tips-and-tricks)
@@ -43,6 +47,21 @@ These examples showcase more sophisticated uses of cgpt, demonstrating its flexi
 $ echo "Write a script that analyzes the current local git branch, the recent activity, and suggest a meta-learning for making more effective progress." \
      | cgpt --system-prompt "You are a self-improving unix toolchain assistant. Output a program that uses AI to the goals of the user. The current system is $(uname). The help for cgpt is <cgpt-help-output>$(cgpt --help 2>&1). Your output should be only valid bash. If you have commentary make sure it is prefixed with comment characters." \
      --prefill "#!/usr/bin/env" | tee suggest-process-improvement.sh
+```
+
+### Stop Tokens
+
+Stop tokens allow you to control where the model's output should end, which is particularly useful when generating code or configuration files. The stop token is automatically extracted from prefill strings that start with triple backticks.
+
+```shell
+# Generate Python code with automatic stop token
+$ echo "Write a function to calculate fibonacci numbers" | cgpt -p'```python' --prefill-echo=false > fib.py
+
+# Create a vimrc configuration file
+$ cgpt -s 'you are a vimrc expert' -i 'output a basic vimrc' -p'```vimrc' --prefill-echo=false > .vimrc
+
+# Generate markdown documentation
+$ cgpt -i 'Write documentation for a REST API' -p'```markdown' > api-docs.md
 ```
 
 ### Research Analysis
