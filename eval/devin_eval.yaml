@@ -1,0 +1,16 @@
+tasks:
+  - name: "code_understanding"
+    description: "Evaluate ability to understand complex codebases"
+    test_cases:
+      - input: "Explain the architecture of this codebase"
+      - input: "How does the error handling work in this module?"
+  - name: "refactoring"
+    description: "Evaluate code refactoring capabilities"
+    test_cases:
+      - input: "Refactor this function to improve performance"
+      - input: "Split this module into smaller components"
+  - name: "debugging"
+    description: "Evaluate debugging capabilities"
+    test_cases:
+      - input: "Find the root cause of this error"
+      - input: "Debug this failing test"

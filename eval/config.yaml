@@ -1,0 +1,4 @@
+backend: "ollama"
+model: "codellama"
+stream: true
+maxTokens: 4096

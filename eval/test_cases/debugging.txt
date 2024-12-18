@@ -1,0 +1,50 @@
+# Task: Debugging
+# Complexity: High
+# Expected Skills: Problem Analysis, Error Handling, System Integration
+
+Debug the following issues in the cgpt implementation:
+
+1. System prompts not being properly loaded in non-interactive mode
+   Expected behavior:
+   - System prompts should be loaded from config file
+   - Prompts should persist across sessions
+   - Configuration changes should be reflected immediately
+   Current issues:
+   - Prompts not loading consistently
+   - Configuration changes not taking effect
+   - Session state inconsistencies
+
+2. Meta-prompt generation failing for complex inputs
+   Expected behavior:
+   - Handle nested prompts correctly
+   - Process multi-line inputs
+   - Maintain context across generations
+   Current issues:
+   - Generation fails with nested structures
+   - Context loss between calls
+   - Inconsistent output formatting
+
+3. Configuration validation errors not providing clear feedback
+   Expected behavior:
+   - Detailed error messages
+   - Clear resolution steps
+   - Validation at all input points
+   Current issues:
+   - Generic error messages
+   - Missing validation steps
+   - Unclear error sources
+
+4. Inconsistent handling of streaming vs non-streaming modes
+   Expected behavior:
+   - Seamless mode switching
+   - Consistent output format
+   - Proper error propagation
+   Current issues:
+   - Mode switching errors
+   - Output format inconsistencies
+   - Lost error context
+
+Success Criteria:
+- Root cause identification for each issue
+- Implementation of fixes with proper error handling
+- Verification of fixes across different scenarios

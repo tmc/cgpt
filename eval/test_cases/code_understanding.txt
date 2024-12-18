@@ -1,0 +1,29 @@
+# Task: Code Understanding
+# Complexity: Medium
+# Expected Skills: Code Analysis, Architecture Understanding, Component Relationships
+
+Given the following code structure:
+- completion.go: Handles system prompts and completions
+- interactive/interactive.go: Manages interactive mode
+- scripts/cgpt-script-suggester: Generates meta-prompts
+
+Please analyze:
+1. How does the system prompt configuration flow work?
+   - Identify configuration sources
+   - Explain the loading sequence
+   - Describe validation mechanisms
+
+2. What is the relationship between these components?
+   - Describe data flow between components
+   - Identify dependencies
+   - Explain communication patterns
+
+3. How are meta-prompts generated and processed?
+   - Detail the generation pipeline
+   - Explain processing steps
+   - Identify error handling mechanisms
+
+Success Criteria:
+- Complete understanding of system prompt configuration
+- Clear explanation of component relationships
+- Detailed analysis of meta-prompt processing

@@ -1,0 +1,6 @@
+# Configuration for local evaluation using Ollama
+backend: "ollama"
+model: "codellama"
+stream: true
+maxTokens: 4096
+systemPrompt: "You are a helpful AI assistant focused on software development tasks."

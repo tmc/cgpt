@@ -1,0 +1,37 @@
+# Task: Refactoring
+# Complexity: High
+# Expected Skills: Code Design, Modularity, Testing
+
+The current meta-prompt generation in scripts/cgpt-script-suggester uses a single function.
+Consider refactoring to:
+
+1. Separate concerns (prompt generation vs evaluation)
+   Requirements:
+   - Create distinct modules for generation and evaluation
+   - Define clear interfaces between components
+   - Implement proper dependency injection
+
+2. Add configuration validation
+   Requirements:
+   - Validate all input parameters
+   - Implement schema validation
+   - Add runtime checks for dependencies
+
+3. Improve error handling
+   Requirements:
+   - Implement comprehensive error types
+   - Add proper error propagation
+   - Include detailed error context
+
+4. Make the code more modular and testable
+   Requirements:
+   - Create smaller, focused functions
+   - Add unit tests for each component
+   - Implement integration tests
+   - Add performance benchmarks
+
+Success Criteria:
+- Clear separation of concerns
+- Comprehensive test coverage
+- Improved error handling
+- Better maintainability
