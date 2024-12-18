@@ -61,7 +61,6 @@ var modelConstructors = map[string]modelConstructor{
 		if mo.httpClient != nil {
 			options = append(options, openai.WithHTTPClient(mo.httpClient))
 		}
-		fmt.Println("openai compat:", mo.openaiCompatUseLegacyMaxTokens)
 		if mo.openaiCompatUseLegacyMaxTokens {
 			options = append(options, openai.WithUseLegacyMaxTokens(true))
 		}
