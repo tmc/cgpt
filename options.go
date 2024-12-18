@@ -43,6 +43,9 @@ type RunOptions struct {
 	MaximumTimeout time.Duration `json:"maximumTimeout,omitempty" yaml:"maximumTimeout,omitempty"`
 
 	ConfigPath string `json:"configPath,omitempty" yaml:"configPath,omitempty"`
+
+	// Backend/Provider-specific options.
+	OpenAIUseLegacyMaxTokens bool `json:"openaiUseLegacyMaxTokens,omitempty"`
 }
 
 // GetCombinedInputReader returns an io.Reader that combines all input sources.

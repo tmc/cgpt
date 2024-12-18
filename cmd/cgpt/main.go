@@ -58,6 +58,8 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.StringVarP(&opts.Prefill, "prefill", "p", "", "Prefill the assistant's response")
 	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
 
+	fs.BoolVar(&opts.OpenAIUseLegacyMaxTokens, "openai-use-max-tokens", false, "If true, uses 'max_tokens' vs 'max_output_tokens' for openai backends")
+
 	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
 	fs.DurationVar(&opts.CompletionTimeout, "completion-timeout", 2*time.Minute, "Maximum time to wait for a response")
 
@@ -107,11 +109,14 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	}
 
 	// Initialize the model (the llms.Model interface)
-	modelOpts := []cgpt.ModelOption{}
+	modelOpts := []cgpt.InferenceProviderOption{}
 	// if debug mode is on, attach the debug http client:
 	if opts.DebugMode {
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
 		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.DebugHTTPClient))
+	}
+	if opts.OpenAIUseLegacyMaxTokens {
+		modelOpts = append(modelOpts, cgpt.WithUseLegacyMaxTokens(true))
 	}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {

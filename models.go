@@ -12,23 +12,32 @@ import (
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
-// ModelOption is a function that modifies the model options
-type ModelOption func(*modelOptions)
+// InferenceProviderOption is a function that modifies the model options
+type InferenceProviderOption func(*inferenceProviderOptions)
 
-type modelOptions struct {
+type inferenceProviderOptions struct {
 	httpClient *http.Client
+
+	openaiCompatUseLegacyMaxTokens bool
 }
 
 // WithHTTPClient sets a custom HTTP client for the model
-func WithHTTPClient(client *http.Client) ModelOption {
-	return func(mo *modelOptions) {
+func WithHTTPClient(client *http.Client) InferenceProviderOption {
+	return func(mo *inferenceProviderOptions) {
 		mo.httpClient = client
 	}
 }
 
+// WithUseLegacyMaxTokens sets whether to use legacy max tokens behavior for OpenAI compatibility
+func WithUseLegacyMaxTokens(useLegacy bool) InferenceProviderOption {
+	return func(mo *inferenceProviderOptions) {
+		mo.openaiCompatUseLegacyMaxTokens = useLegacy
+	}
+}
+
 // InitializeModel initializes the model with the given configuration and options.
-func InitializeModel(cfg *Config, opts ...ModelOption) (llms.Model, error) {
-	mo := &modelOptions{}
+func InitializeModel(cfg *Config, opts ...InferenceProviderOption) (llms.Model, error) {
+	mo := &inferenceProviderOptions{}
 	for _, opt := range opts {
 		opt(mo)
 	}
@@ -41,10 +50,10 @@ func InitializeModel(cfg *Config, opts ...ModelOption) (llms.Model, error) {
 	return constructor(cfg, mo)
 }
 
-type modelConstructor func(*Config, *modelOptions) (llms.Model, error)
+type modelConstructor func(*Config, *inferenceProviderOptions) (llms.Model, error)
 
 var modelConstructors = map[string]modelConstructor{
-	"openai": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+	"openai": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
 		options := []openai.Option{openai.WithModel(cfg.Model)}
 		if cfg.OpenAIAPIKey != "" {
 			options = append(options, openai.WithToken(cfg.OpenAIAPIKey))
@@ -52,9 +61,14 @@ var modelConstructors = map[string]modelConstructor{
 		if mo.httpClient != nil {
 			options = append(options, openai.WithHTTPClient(mo.httpClient))
 		}
+		fmt.Println("openai compat:", mo.openaiCompatUseLegacyMaxTokens)
+		if mo.openaiCompatUseLegacyMaxTokens {
+			options = append(options, openai.WithUseLegacyMaxTokens(true))
+		}
+
 		return openai.New(options...)
 	},
-	"anthropic": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+	"anthropic": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
 		options := []anthropic.Option{anthropic.WithModel(cfg.Model)}
 		if cfg.AnthropicAPIKey != "" {
 			options = append(options, anthropic.WithToken(cfg.AnthropicAPIKey))
@@ -67,14 +81,14 @@ var modelConstructors = map[string]modelConstructor{
 		}
 		return anthropic.New(options...)
 	},
-	"ollama": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+	"ollama": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
 		options := []ollama.Option{ollama.WithModel(cfg.Model)}
 		if mo.httpClient != nil {
 			options = append(options, ollama.WithHTTPClient(mo.httpClient))
 		}
 		return ollama.New(options...)
 	},
-	"googleai": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+	"googleai": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
 		options := []googleai.Option{googleai.WithDefaultModel(cfg.Model)}
 		if cfg.GoogleAPIKey != "" {
 			options = append(options, googleai.WithAPIKey(cfg.GoogleAPIKey))
@@ -84,7 +98,7 @@ var modelConstructors = map[string]modelConstructor{
 		}
 		return googleai.New(context.TODO(), options...)
 	},
-	"dummy": func(cfg *Config, mo *modelOptions) (llms.Model, error) {
+	"dummy": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
 		return NewDummyBackend()
 	},
 }
