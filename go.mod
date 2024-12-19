@@ -1,6 +1,8 @@
 module github.com/tmc/cgpt
 
-go 1.22.0
+go 1.22.4
+
+toolchain go1.22.10
 
 require (
 	github.com/chzyer/readline v1.5.1
@@ -76,3 +78,5 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/tmc/langchaingo => ../langchaingo

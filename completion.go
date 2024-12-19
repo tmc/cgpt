@@ -131,7 +131,8 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 		fmt.Fprintln(s.Stderr, err)
 	}
 	if runCfg.Prefill != "" {
-		if strings.HasPrefix(runCfg.Prefill, "```") {
+		// If prefill starts with ``` and no stop sequence is set, use prefill as stop sequence
+		if strings.HasPrefix(runCfg.Prefill, "```") && runCfg.StopSequence == "" {
 			runCfg.StopSequence = runCfg.Prefill
 			runCfg.Prefill = ""
 		}
