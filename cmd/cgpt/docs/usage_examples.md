@@ -51,20 +51,20 @@ $ echo "Write a script that analyzes the current local git branch, the recent ac
 
 ### Stop Sequences
 
-Stop sequences allow you to control where the model's output should end, which is particularly useful when generating code or configuration files. You can specify a stop sequence explicitly using the `--stop-sequence` flag, or it can be automatically extracted from prefill strings that start with triple backticks.
+Stop sequences allow you to control where the model's output should end, which is particularly useful when generating code or configuration files. You can use stop sequences together with prefill for better control over the output format.
 
 ```shell
-# Generate Python code with explicit stop sequence
-$ echo "Write a function to calculate fibonacci numbers" | cgpt --stop-sequence '```' > fib.py
-
-# Using legacy prefill-based stop sequence (backward compatible)
-$ cgpt -i "Write a function to calculate fibonacci numbers" -p'```python' --prefill-echo=false > fib.py
+# Generate Python code with prefill and stop sequence
+$ cgpt -i "Write a function to calculate fibonacci numbers" -p '```python' --stop-sequence '```' > fib.py
 
 # Create a vimrc configuration file
-$ cgpt -s 'you are a vimrc expert' -i 'output a basic vimrc' --stop-sequence '```vimrc' > .vimrc
+$ cgpt -s 'you are a vimrc expert' -i 'output a basic vimrc' -p '```vimrc' --stop-sequence '```' > .vimrc
 
 # Generate markdown documentation
-$ cgpt -i 'Write documentation for a REST API' --stop-sequence '```markdown' > api-docs.md
+$ cgpt -i 'Write documentation for a REST API' -p '```markdown' --stop-sequence '```' > api-docs.md
+
+# Using prefill with explicit stop sequence for shell scripts
+$ cgpt -i "Write a script to backup files" -p '```bash' --stop-sequence '```' > backup.sh
 ```
 
 ### Research Analysis

@@ -1,3 +1,35 @@
-output a basic vimrc
+output a basic vimrc with vim-go and tpope essentials
 -- stdout --
-This is a dummy backend response. It will stream out a few hundred tokens to simulate a real backend. The quick brown fox jumps over the lazy dog. This pangram contains every letter of the English alphabet at least once. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. This concludes the dummy backend response. Thank you for using the dummy backend! 
+This is a dummy backend response. It will stream out a few hundred tokens to simulate a real backend. Here's a basic vimrc configuration:
+
+```vimrc
+" Basic vim settings
+set nocompatible
+syntax enable
+filetype plugin indent on
+
+" Install vim-plug if not found
+if empty(glob('~/.vim/autoload/plug.vim'))
+  silent !curl -fLo ~/.vim/autoload/plug.vim --create-dirs
+    \ https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+endif
+
+call plug#begin('~/.vim/plugged')
+" Tpope essentials
+Plug 'tpope/vim-sensible'
+Plug 'tpope/vim-surround'
+Plug 'tpope/vim-commentary'
+Plug 'tpope/vim-fugitive'
+
+" Vim-go
+Plug 'fatih/vim-go'
+
+" Theme
+Plug 'nanotech/jellybeans.vim'
+call plug#end()
+
+" Theme settings
+colorscheme jellybeans
+```
+
+This concludes the dummy backend response. Thank you for using the dummy backend! 
