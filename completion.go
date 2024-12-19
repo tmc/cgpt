@@ -131,11 +131,18 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 		fmt.Fprintln(s.Stderr, err)
 	}
 	if runCfg.Prefill != "" {
+		// If prefill starts with ``` and no stop sequence is set, use prefill as stop sequence
+		if strings.HasPrefix(runCfg.Prefill, "```") && runCfg.StopSequence == "" {
+			runCfg.StopSequence = runCfg.Prefill
+			runCfg.Prefill = ""
+		}
 		s.SetNextCompletionPrefill(runCfg.Prefill)
 	}
 	if runCfg.Stdout == nil {
 		runCfg.Stdout = os.Stdout
 	}
+	// Pass stop sequence to payload
+	s.payload.StopSequence = runCfg.StopSequence
 	return nil
 }
 
