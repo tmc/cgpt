@@ -94,6 +94,9 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 				buffer += text
 
 				if payload.StopSequence != "" && strings.Contains(buffer, payload.StopSequence) {
+					// Find the index of the stop sequence and include it
+					idx := strings.Index(buffer, payload.StopSequence)
+					ch <- buffer[:idx+len(payload.StopSequence)]
 					return errors.New("stop sequence reached")
 				}
 

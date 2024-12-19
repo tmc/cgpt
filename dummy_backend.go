@@ -141,6 +141,8 @@ func (d *DummyBackend) GenerateContent(ctx context.Context, messages []llms.Mess
 
 				// Check if we've hit the stop sequence after streaming the character
 				if opts.StopSequence != "" && strings.HasSuffix(buffer.String(), opts.StopSequence) {
+					// Update response content to include everything up to and including stop sequence
+					response.Choices[0].Content = buffer.String()
 					return response, nil
 				}
 
@@ -148,6 +150,13 @@ func (d *DummyBackend) GenerateContent(ctx context.Context, messages []llms.Mess
 			}
 		}
 		return response, nil
+	}
+
+	// Handle non-streaming case
+	if opts.StopSequence != "" {
+		if idx := strings.Index(dummyText, opts.StopSequence); idx >= 0 {
+			response.Choices[0].Content = dummyText[:idx+len(opts.StopSequence)]
+		}
 	}
 
 	return response, nil
