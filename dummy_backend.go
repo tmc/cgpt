@@ -135,15 +135,15 @@ func (d *DummyBackend) GenerateContent(ctx context.Context, messages []llms.Mess
 				char := string(dummyText[i])
 				buffer.WriteString(char)
 
-				if err := opts.StreamingFunc(ctx, []byte(char)); err != nil {
-					return response, err
-				}
-
-				// Check if we've hit the stop sequence after streaming the character
+				// Check if we've hit the stop sequence before streaming the character
 				if opts.StopSequence != "" && strings.HasSuffix(buffer.String(), opts.StopSequence) {
 					// Update response content to include everything up to and including stop sequence
 					response.Choices[0].Content = buffer.String()
 					return response, nil
+				}
+
+				if err := opts.StreamingFunc(ctx, []byte(char)); err != nil {
+					return response, err
 				}
 
 				time.Sleep(10 * time.Millisecond) // Reduced delay for character-by-character streaming

@@ -79,4 +79,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/tmc/langchaingo => ../langchaingo
+replace github.com/tmc/langchaingo => /home/ubuntu/repos/langchaingo
