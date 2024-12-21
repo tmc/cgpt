@@ -32,6 +32,9 @@
 // The -c/--continuous flag enables interactive mode, where the program runs in a loop,
 // using the previous output as input for the next request. This mode is automatically
 // enabled when receiving piped input or when running interactively with no inputs.
+//
+// When receiving piped input, the program will continue running in continuous mode
+// until EOF is received, at which point it gracefully exits.
 package main
 
 import (
