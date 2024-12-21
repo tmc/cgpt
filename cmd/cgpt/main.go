@@ -30,7 +30,8 @@
 //	-h, --help                       Display help information
 //
 // The -c/--continuous flag enables interactive mode, where the program runs in a loop,
-// using the previous output as input for the next request. In this mode, inference
+// using the previous output as input for the next request. This mode is automatically
+// enabled when receiving piped input or when running interactively with no inputs.
 package main
 
 import (
@@ -123,9 +124,11 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 		return fmt.Errorf("failed to initialize model: %w", err)
 	}
 
-	// If stdin is a tty, and no input files, strings, or args are provided,
-	// then we should run in continuous mode:
-	if term.IsTerminal(int(os.Stdin.Fd())) && len(opts.InputFiles) == 0 && len(opts.InputStrings) == 0 && len(opts.PositionalArgs) == 0 {
+	// Enable continuous mode when:
+	// 1. stdin is a tty with no inputs (interactive shell), or
+	// 2. stdin is not a tty (piped input)
+	if (term.IsTerminal(int(os.Stdin.Fd())) && len(opts.InputFiles) == 0 && len(opts.InputStrings) == 0 && len(opts.PositionalArgs) == 0) ||
+		(!term.IsTerminal(int(os.Stdin.Fd())) && slices.Contains(opts.InputFiles, "-")) {
 		opts.Continuous = true
 	}
 	// Only have spinner on if stdout is a tty:
