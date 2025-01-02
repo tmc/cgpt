@@ -27,6 +27,7 @@ import (
 var update = flag.Bool("update", false, "update golden files")
 
 func Test(t *testing.T) {
+	t.Parallel()
 	testCases := []struct {
 		name    string
 		backend string
@@ -141,6 +142,7 @@ func shellSplit(t *testing.T, cmdString string) ([]string, error) {
 }
 
 func TestShellQuoting(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		command string
