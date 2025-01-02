@@ -49,8 +49,8 @@ import (
 // defineFlags defines the command line flags for the cgpt command
 func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	// Runtime flags
-	fs.StringSliceVarP(&opts.InputStrings, "input", "i", nil, "Direct string input (can be used multiple times)")
-	fs.StringSliceVarP(&opts.InputFiles, "file", "f", []string{"-"}, "Input file path. Use '-' for stdin (can be used multiple times)")
+	fs.StringArrayVarP(&opts.InputStrings, "input", "i", nil, "Direct string input (can be used multiple times)")
+	fs.StringArrayVarP(&opts.InputFiles, "file", "f", []string{"-"}, "Input file path. Use '-' for stdin (can be used multiple times)")
 	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Run in continuous mode (interactive)")
 	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
 	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")

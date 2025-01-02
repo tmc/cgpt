@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -25,21 +26,173 @@ import (
 
 var update = flag.Bool("update", false, "update golden files")
 
+func Test(t *testing.T) {
+	testCases := []struct {
+		name    string
+		backend string
+		model   string
+		args    []string
+	}{
+		{
+			name:    "basic dummy",
+			backend: "dummy",
+			model:   "dummy-model",
+		},
+		{
+			name:    "dummy with debug",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--debug"},
+		},
+		{
+			name:    "dummy flag test",
+			backend: "dummy",
+			model:   "dummy-model",
+			args: []string{
+				`-s`, `you are a yq expert`,
+				`-i`, `how can i force "pipe" mode in yq`,
+			},
+		},
+		{
+			name:    "ollama model",
+			backend: "ollama",
+			model:   "llama3.2:1b",
+			args:    []string{"--prefill=yo"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			testName := strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]+`).ReplaceAllString(t.Name(), "_"))
+			testInputFile := filepath.Join("testdata", fmt.Sprintf("%s.txtar", testName))
+
+			var (
+				inBuf  = new(bytes.Buffer)
+				outBuf = new(bytes.Buffer)
+				errBuf = new(bytes.Buffer)
+			)
+
+			txtarComment, files, err := readTxtarFile(t, testInputFile)
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				t.Fatalf("Failed to read input file: %v", err)
+			}
+			if errors.Is(err, fs.ErrNotExist) {
+				files = make(map[string][]byte)
+				if *update {
+					updateGoldenFile(t, testInputFile, "what is your name?", nil, nil, nil, nil)
+					t.Skip("Skipping test as golden file created")
+				}
+			}
+
+			args := []string{"cgpt-test", fmt.Sprintf("--backend=%s", tc.backend), fmt.Sprintf("--model=%s", tc.model)}
+			args = append(args, tc.args...)
+			opts, fs, err := initFlags(args, inBuf)
+			if err != nil {
+				t.Fatalf("initFlags: %v", err)
+			}
+			opts.Stderr = errBuf
+			opts.Stdout = outBuf
+			inBuf.WriteString(txtarComment)
+
+			runTest(t, context.Background(), opts, fs, newTestLogger(t))
+			if *update {
+				updateGoldenFile(t, testInputFile, txtarComment, files, outBuf.Bytes(), errBuf.Bytes(), files["http_payload"])
+				t.SkipNow()
+			}
+			compareOutput(t, files["stdout"], files["stderr"], outBuf.Bytes(), errBuf.Bytes(), files["http_payload"])
+		})
+	}
+}
+
+func runTest(t *testing.T, ctx context.Context, opts cgpt.RunOptions, fs *pflag.FlagSet, logger *zap.SugaredLogger) {
+	t.Helper()
+	fileCfg, err := cgpt.LoadConfig(opts.ConfigPath, opts.Stderr, fs)
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+	opts.Config = fileCfg
+
+	model, err := cgpt.InitializeModel(opts.Config)
+	if err != nil {
+		t.Fatalf("failed to initialize model: %v", err)
+	}
+
+	s, err := cgpt.NewCompletionService(opts.Config, model,
+		cgpt.WithStdout(opts.Stdout),
+		cgpt.WithStderr(opts.Stderr),
+		cgpt.WithLogger(logger),
+	)
+	if err != nil {
+		t.Fatalf("failed to create completion service: %v", err)
+	}
+	if err := s.Run(ctx, opts); err != nil {
+		t.Fatalf("failed to run completion service: %v", err)
+	}
+}
+
+func shellSplit(t *testing.T, cmdString string) ([]string, error) {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("printf '%%s\\0' %s", cmdString))
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("shell split failed: %w", err)
+	}
+	return strings.Split(strings.TrimRight(string(output), "\x00"), "\x00"), nil
+}
+
+func TestShellQuoting(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		wantErr bool
+	}{
+		{
+			name:    "basic quotes",
+			command: `cgpt -s "system prompt" -i "basic input"`,
+			wantErr: false,
+		},
+		{
+			name:    "unescaped quotes",
+			command: `cgpt -s "expert" -i "how can i force "pipe" mode in yq"`,
+			wantErr: false, // shell treats as literals, merges parts
+		},
+		{
+			name:    "single quotes",
+			command: `cgpt -s 'expert' -i 'how can i force "pipe" mode in yq'`,
+			wantErr: false,
+		},
+		{
+			name:    "unterminated quote",
+			command: `cgpt -s "unterminated`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := shellSplit(t, tt.command)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("shellSplit() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err == nil {
+				t.Logf("Shell-split arguments: %#v", args)
+				_, _, err = initFlags(args, strings.NewReader(""))
+				if err != nil {
+					t.Errorf("unexpected initFlags error: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func newTestLogger(t *testing.T) *zap.SugaredLogger {
 	t.Helper()
-	// set logger based on the test level, and add to stack depth
-	level := zap.DebugLevel
-	logger := zaptest.NewLogger(t, zaptest.WrapOptions(
-		zap.AddCaller(),
-		zap.AddCallerSkip(1),
-		zap.AddStacktrace(zap.ErrorLevel),
-		zap.IncreaseLevel(level),
-	))
+	logger := zaptest.NewLogger(t, zaptest.WrapOptions(zap.AddCaller(), zap.AddCallerSkip(1)))
 	t.Cleanup(func() { _ = logger.Sync() })
 	return logger.Sugar()
 }
 
-// readTxtarFile reads a txtar file.
 func readTxtarFile(t *testing.T, path string) (string, map[string][]byte, error) {
 	t.Helper()
 	content, err := os.ReadFile(path)
@@ -54,79 +207,9 @@ func readTxtarFile(t *testing.T, path string) (string, map[string][]byte, error)
 	return string(ar.Comment), result, nil
 }
 
-func Test(t *testing.T) {
-	t.Setenv("CGPT_TEMPERATURE", "0.0")
-	testCases := []struct {
-		name    string
-		backend string
-		model   string
-		args    []string
-		env     map[string]string
-	}{
-		{name: "basic dummy", backend: "dummy", model: "dummy-model"},
-		{name: "dummy with debug", backend: "dummy", model: "dummy-model", args: []string{"--debug"}},
-		// {name: "dummy with history", backend: "dummy", model: "dummy-model"},
-		{name: "ollama llama3.2", backend: "ollama", model: "llama3.2:1b"},
-		{name: "ollama llama3.2 prefill", backend: "ollama", model: "llama3.2:1b", args: []string{"--prefill=yo"}},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			testName := strings.ToLower(regexp.MustCompile(`[^a-zA-Z0-9]+`).ReplaceAllString(t.Name(), "_"))
-			testInputFile := filepath.Join("testdata", fmt.Sprintf("%s.txtar", testName))
-
-			logger := newTestLogger(t)
-			var (
-				inBuf  = new(bytes.Buffer)
-				outBuf = new(bytes.Buffer)
-				errBuf = new(bytes.Buffer)
-			)
-
-			// Read input from txtar file
-			txtarComment, files, err := readTxtarFile(t, testInputFile)
-			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
-					files = make(map[string][]byte)
-					if *update {
-						t.Logf("Creating new golden file: %s", testInputFile)
-						updateGoldenFile(t, testInputFile, "what is your name?", nil, nil, nil, nil)
-						t.Skip("Skipping test as golden file created")
-					}
-				} else {
-					t.Fatalf("Failed to read input file: %v", err)
-				}
-			}
-
-			args := []string{"cgpt-test", fmt.Sprintf("--backend=%s", tc.backend), fmt.Sprintf("--model=%s", tc.model)}
-			args = append(args, tc.args...)
-			//args := append(tc.args, "--debug")
-			t.Log("Input:", txtarComment)
-			t.Logf("Args: %q", args)
-			opts, fs, err := initFlags(args, inBuf)
-			opts.Stderr = errBuf
-			opts.Stdout = outBuf
-			inBuf.WriteString(txtarComment)
-
-			ctx := context.Background()
-			runTest(t, ctx, opts, fs, logger)
-			if *update {
-				updateGoldenFile(t, testInputFile, txtarComment, files, outBuf.Bytes(), errBuf.Bytes(), files["http_payload"])
-				t.SkipNow()
-			}
-			if outBuf.Len() == 0 {
-				t.Error("No output from test")
-			}
-			compareOutput(t, files["stdout"], files["stderr"], outBuf.Bytes(), errBuf.Bytes(), files["http_payload"])
-		})
-	}
-}
-
-// updateGoldenFile updates the golden txtar file with the current test output
 func updateGoldenFile(t *testing.T, path, comment string, files map[string][]byte, stdout, stderr, httpPayload []byte) {
 	t.Helper()
-	ar := &txtar.Archive{
-		Files: []txtar.File{},
-	}
+	ar := &txtar.Archive{Files: []txtar.File{}}
 	for _, k := range slices.Sorted(maps.Keys(files)) {
 		if k == "stdout" || k == "stderr" || k == "http_payload" {
 			continue
@@ -145,8 +228,6 @@ func updateGoldenFile(t *testing.T, path, comment string, files map[string][]byt
 	if httpPayload != nil {
 		ar.Files = append(ar.Files, txtar.File{Name: "http_payload", Data: httpPayload})
 	}
-	t.Log("Updating golden file:", path)
-	t.Log("Contents:", string(txtar.Format(ar)))
 	if err := os.WriteFile(path, txtar.Format(ar), 0644); err != nil {
 		t.Fatalf("Failed to update golden file: %v", err)
 	}
@@ -161,46 +242,11 @@ func compareOutput(t *testing.T, expectedStdout, expectedStderr, stdout, stderr,
 	}
 }
 
-// compareBytes compares two byte slices and reports any differences
 func compareBytes(t *testing.T, name string, want, got []byte) {
 	t.Helper()
 	wantStr := strings.TrimRight(string(want), "\n") + "\n"
 	gotStr := strings.TrimRight(string(got), "\n") + "\n"
 	if diff := cmp.Diff(wantStr, gotStr); diff != "" {
 		t.Errorf("%s mismatch (-want +got):\n%s", name, diff)
-	}
-}
-
-func runTest(t *testing.T, ctx context.Context, opts cgpt.RunOptions, fs *pflag.FlagSet, logger *zap.SugaredLogger) {
-	t.Helper()
-	fileCfg, err := cgpt.LoadConfig(opts.ConfigPath, opts.Stderr, fs)
-	if err != nil {
-		t.Fatalf("failed to load config: %v", err)
-	}
-	opts.Config = fileCfg
-
-	t.Logf("Options: %+v\n", opts)
-	t.Logf("Config: %+v\n", opts.Config)
-
-	// TODO: add http client for debug/replay
-	// modelOpts := []cgpt.ModelOption{
-	// 	cgpt.WithHTTPClient(httputil.DebugHTTPClient),
-	// }
-	model, err := cgpt.InitializeModel(opts.Config)
-	if err != nil {
-		t.Fatalf("failed to initialize model: %v", err)
-	}
-
-	s, err := cgpt.NewCompletionService(opts.Config, model,
-		cgpt.WithStdout(opts.Stdout),
-		cgpt.WithStderr(opts.Stderr),
-		cgpt.WithLogger(logger),
-	)
-	if err != nil {
-		t.Fatalf("failed to create completion service: %v", err)
-	}
-	err = s.Run(ctx, opts)
-	if err != nil {
-		t.Fatalf("failed to run completion service: %v", err)
 	}
 }

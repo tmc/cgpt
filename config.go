@@ -28,6 +28,7 @@ var defaultModels = map[string]string{
 // The value for each key is the maximum number of tokens allowed for a completion.
 var tokenLimits = map[string]int{
 	"*":                    4096,
+	"google:*":             8192,
 	"anthropic:.*sonnet.*": 8000,
 }
 
