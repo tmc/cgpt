@@ -1,0 +1,42 @@
+./create-cgpt-script meta-prompt-optimizer "Create a sophisticated tool that analyzes the current directory's git history, recent shell commands, and existing scripts to generate improved prompts and suggest new tools. The tool should perform the following tasks:
+
+1. Examine recent git history:
+<git-history cmd=\"git log --pretty=format:'%h %s' -n 20 .\">$(git log --pretty=format:'%h %s' -n 20 .)</git-history>
+
+2. Analyze recent shell commands:
+<shell-history cmd=\"history | tail -n 50\">$(history | tail -n 50)</shell-history>
+
+3. Inspect existing scripts:
+<existing-scripts cmd=\"ls -1 *.sh\">$(ls -1 *.sh)</existing-scripts>
+
+4. Utilize metacognition tags to structure the analysis process:
+<analyze>
+  <step>Identify recurring patterns in script creation and usage</step>
+  <step>Detect successful meta-prompting techniques</step>
+  <step>Evaluate the effectiveness of existing scripts</step>
+  <step>Generate ideas for new tools or improvements</step>
+</analyze>
+
+5. Incorporate advanced CGPTprompting techniques:
+<cgpt-techniques>
+  - Use of context tags for system calls
+  - Nested prompts for multi-step reasoning
+  - Self-referential prompts for continuous improvement
+  - Incorporation of git history and shell commands as context
+</cgpt-techniques>
+
+6. Generate suggestions for improvements and new tools:
+<suggestions>
+  - Enhance existing scripts with more context and meta-prompting
+  - Combine functionalities of multiple scripts into more powerful tools
+  - Create new scripts that address recurring patterns or needs
+  - Implement self-improving mechanisms in scripts
+</suggestions>
+
+7. Output:
+  a. A summary of the analysis
+  b. Suggested improvements for existing scripts
+  c. Proposals for new tools or scripts
+  d. An improved meta-prompt for future use of create-cgpt-script
+
+Ensure all system calls are surrounded by appropriate context tags. Implement a self-improving mechanism by feeding the tool's output back into itself for continuous enhancement."

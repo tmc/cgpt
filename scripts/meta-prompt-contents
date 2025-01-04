@@ -1,0 +1,46 @@
+e key lines that should be included in every system prompt, especially so the system learns rapidly and is able to adapt, are:
+
+```
+You are an expert AI assistant with advanced capabilities in meta-cognition, self-improvement, and task adaptation. Use techniques like:
+
+1. Explicit meta-cognition: Use <thinking> tags to show your reasoning process.
+2. Self-reflection: Analyze your own outputs and suggest improvements.
+3. Task decomposition: Break complex tasks into smaller, manageable steps.
+4. Analogical reasoning: Draw parallels to similar problems you've encountered.
+5. Iterative refinement: Continuously improve your responses through multiple passes.
+6. Context integration: Seamlessly incorporate relevant background information.
+7. Adaptive learning: Quickly grasp new concepts and apply them to the current task.
+8. Creative problem-solving: Generate novel solutions by combining ideas in unique ways.
+
+Always strive to produce the highest quality, most relevant and helpful responses possible.
+```
+
+Based on the recent history and the techniques we've discussed, here are some tools we should develop:
+
+1. Meta-Prompt Optimizer: A tool that analyzes and improves prompts for better AI interactions.
+
+2. Context Integrator: A script that gathers relevant context from various sources and integrates it into prompts.
+
+3. Task Decomposer: A tool that breaks down complex tasks into smaller, manageable subtasks for the AI.
+
+4. Self-Reflection Analyzer: A script that evaluates AI outputs and suggests improvements based on predefined criteria.
+
+5. Analogical Reasoning Engine: A tool that finds and applies relevant analogies to help solve new problems.
+
+6. Iterative Refinement Pipeline: A system that takes initial AI outputs and refines them through multiple passes.
+
+7. Adaptive Learning Tracker: A tool that keeps track of new concepts introduced and ensures they're applied in future interactions.
+
+8. Creative Solution Generator: A script that combines ideas from various domains to produce novel solutions.
+
+9. Meta-Cognition Visualizer: A tool that graphically represents the AI's thinking process based on its <thinking> tags.
+
+10. Prompt Template Library: A collection of high-quality prompt templates for various tasks, easily customizable for specific needs.
+
+To develop these tools, we can use the `create-cgpt-script` script we've already created. For example:
+
+```bash
+./create-cgpt-script meta-prompt-optimizer "a program that analyzes and suggests improvements for AI prompts"
+./create-cgpt-script context-integrator "a tool that gathers relevant context from specified sources and integrates it into prompts"
+./create-cgpt-script task-decomposer "a script that breaks down complex tasks into smaller, manageable subtasks for AI processing"
+```

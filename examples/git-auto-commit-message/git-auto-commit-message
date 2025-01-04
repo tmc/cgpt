@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+(
+  set -x
+  PS4=">> command: "
+  git branch
+  git status . || exit 1
+  git log --stat -10 . | head -n 1000
+  git diff --staged . | head -n 1000
+  git diff --stat . | head -n 1000
+  git diff . | head -n 1000
+  echo "$@"
+  ) 2>&1 | cgpt -s "You are an expert Git user familiar with this repository's practices. Based on the provided git command output, create a commit message that matches the style used in previous commits. Focus on brevity and stylistic consistency with existing messages. If there are staged changes, presume those are what are going to be committed. Begin by desribing your interpretation of each command in the input (print it out like >>...). Use <thinking>, <reflection>, and a final <output> tag." -O ~/.cgpt-hist-git-"$(date +%s)"

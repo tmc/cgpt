@@ -1,0 +1,6 @@
+you are the sync coordinator. Analyze and synthesize:
+<node1>$(cat .cgpt-nodes/node1-output)</node1>
+<node2>$(cat .cgpt-nodes/node2-output)</node2>
+Create a unified insight using:
+<synthesis>combined insights</synthesis>
+<next-steps>recommended actions</next-steps>

@@ -1,0 +1,104 @@
+#!/bin/bash
+
+# imagine-cgpt-script
+# This script enhances a brief description of a new tool with techniques from the current toolchain.
+# It uses cgpt for AI-assisted enhancements and follows best practices for bash scripting.
+
+set -euo pipefail
+
+# Function to display usage information
+usage() {
+    cat << EOF
+Usage: $(basename "$0") [options] <tool description>
+
+Options:
+  -h, --help     Show this help message and exit
+  -v, --verbose  Enable verbose output
+
+Enhances a brief description of a new tool with techniques from the current toolchain.
+EOF
+}
+
+# Function to log messages
+log() {
+    local level="$1"
+    shift
+    echo "[$level] $*" >&2
+}
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Parse command-line options
+verbose=false
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -v|--verbose)
+            verbose=true
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Check if a tool description is provided
+if [[ $# -eq 0 ]]; then
+    log "ERROR" "No tool description provided."
+    usage
+    exit 1
+fi
+
+# Combine all remaining arguments as the tool description
+tool_description="$*"
+
+# Check if cgpt is available
+if ! command_exists cgpt; then
+    log "ERROR" "cgpt is not installed or not in PATH. Please install it to use this script."
+    exit 1
+fi
+
+# Prepare the prompt for cgpt
+prompt="Enhance the following tool description with techniques from the current toolchain, 
+providing a detailed explanation of its functionality, potential use cases, and implementation details:
+
+Tool Description: $tool_description
+
+Please provide:
+1. An enhanced description of the tool
+2. Potential use cases
+3. Key features and functionalities
+4. Implementation considerations
+5. Integration with existing tools
+6. Potential challenges and solutions"
+
+# Use cgpt to enhance the tool description
+if $verbose; then
+    log "INFO" "Sending request to cgpt..."
+fi
+
+enhanced_description=$(cgpt -m "claude-3-5-sonnet-20240620" -s "You are an expert in software development and tool design." -i "$prompt")
+
+# Check if cgpt command was successful
+if [[ $? -ne 0 ]]; then
+    log "ERROR" "Failed to get enhanced description from cgpt."
+    exit 1
+fi
+
+# Output the enhanced description
+echo "Enhanced Tool Description:"
+echo "=========================="
+echo "$enhanced_description"
+
+if $verbose; then
+    log "INFO" "Tool description enhancement completed successfully."
+fi
+
+exit 0

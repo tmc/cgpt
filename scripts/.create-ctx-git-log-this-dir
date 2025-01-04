@@ -1,0 +1,2 @@
+./create-ctx-helper-script git-log-this "dir a script that prepares context for the current directory git contents (git log ./*)"
+

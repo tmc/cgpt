@@ -1,0 +1,9 @@
+./create-cgpt-script prompt-evaluator 'a tool to evaluate and score prompts based on various quality metrics'
+
+./create-cgpt-script prompt-version-control 'a tool to manage versions of prompts, track changes, and facilitate comparisons'
+
+./create-cgpt-script prompt-template-generator 'a tool to generate prompt templates based on successful patterns and task requirements'
+
+./create-cgpt-script prompt-visualizer 'a tool to visualize prompt evolution and effectiveness over time'
+
+./create-cgpt-script prompt-composer 'a tool to combine different prompt components or patterns into complex, multi-step prompts'

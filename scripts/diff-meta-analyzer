@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+# diff-meta-analyzer: A tool that analyzes the last commit and current diff
+# to provide insights into the operator's thought process and intentions.
+
+set -euo pipefail
+
+# Function to fetch git information
+fetch_git_info() {
+    local type="$1"
+    if [[ "$type" == "commit" ]]; then
+        git show . 2>/dev/null || echo "No previous commit found"
+    elif [[ "$type" == "diff" ]]; then
+        git diff . 2>/dev/null || echo "No changes in the working directory"
+    else
+        echo "Invalid git info type"
+        return 1
+    fi
+}
+
+# Function to analyze changes
+analyze_changes() {
+    local last_commit="$1"
+    local current_diff="$2"
+    local extra_context="${3:-}"
+
+    # Use cgpt to analyze the changes
+    cgpt -s "You are an AI assistant tasked with analyzing git changes and providing insights into the operator's thought process. Analyze the following information and provide your insights using metacognition tags:
+
+Last commit:
+$last_commit
+
+Current diff:
+$current_diff
+
+Extra context:
+$extra_context
+
+Please provide your analysis, including what you think the operator is thinking and what they are up to. Use metacognition tags such as <thinking>, <observation>, and <conclusion> in your response." \
+    -m "claude-3-5-sonnet-20240620" \
+    -t 2000 \
+    -T 0.7 \
+    -i "Analyze the git changes and provide insights"
+}
+
+# Main execution flow
+main() {
+    local last_commit
+    local current_diff
+    local extra_context=""
+
+    # Fetch git information
+    last_commit=$(fetch_git_info "commit")
+    current_diff=$(fetch_git_info "diff")
+
+    # Check if extra context is provided
+    if [[ $# -gt 0 ]]; then
+        extra_context="$*"
+    fi
+
+    # Analyze changes
+    analysis=$(analyze_changes "$last_commit" "$current_diff" "$extra_context")
+
+    # Output the analysis
+    echo "Analysis of Git Changes:"
+    echo "========================"
+    echo "$analysis"
+}
+
+# Error handling
+if ! command -v git &>/dev/null; then
+    echo "Error: git is not installed or not in the PATH" >&2
+    exit 1
+fi
+
+if ! command -v cgpt &>/dev/null; then
+    echo "Error: cgpt is not installed or not in the PATH" >&2
+    exit 1
+fi
+
+# Check if we're in a git repository
+if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+    echo "Error: Not inside a git repository" >&2
+    exit 1
+fi
+
+# Run the main function
+main "$@"

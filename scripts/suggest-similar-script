@@ -1,0 +1,118 @@
+#!/bin/bash
+
+# suggest-similar-script
+#
+# This script takes an existing script and a description of desired changes,
+# then generates a new ./create-cgpt-script prompt based on the input.
+#
+# Usage: ./suggest-similar-script <existing_script> <change_description>
+#
+# Example:
+#   ./suggest-similar-script my-script.sh "Add error handling and logging"
+#
+# Author: AI Assistant
+# Date: [Current Date]
+# Version: 1.0
+
+# Function to display usage information
+usage() {
+    echo "Usage: $0 <existing_script> <change_description>"
+    echo "Example: $0 my-script.sh \"Add error handling and logging\""
+    exit 1
+}
+
+# Check if we have the correct number of arguments
+if [ $# -ne 2 ]; then
+    usage
+fi
+
+existing_script="$1"
+change_description="$2"
+
+# Check if the existing script exists
+if [ ! -f "$existing_script" ]; then
+    echo "Error: The script '$existing_script' does not exist."
+    exit 1
+fi
+
+# Read the content of the existing script
+existing_content=$(cat "$existing_script")
+
+# Create the prompt for cgpt
+prompt="Based on the following existing script:
+
+$existing_content
+
+Create a new ./create-cgpt-script prompt that will generate a similar script with the following changes: $change_description
+
+The new prompt should:
+1. Clearly describe the purpose and functionality of the new script
+2. Request that the script be written in bash
+3. Ask for the script to be clean, concise, and compliant with shellcheck
+4. Include any necessary error handling and best practices
+5. Incorporate the requested changes while maintaining the overall structure and purpose of the original script
+
+Output only the text for the new ./create-cgpt-script prompt, without any additional formatting or explanations."
+
+# Use cgpt to generate the new prompt
+new_prompt=$(echo "$prompt" | cgpt -s "You are an expert bash programmer and AI assistant. Your task is to create high-quality, well-documented bash scripts based on the given descriptions. Ensure the scripts are efficient, follow best practices, and include error handling where appropriate." -m "claude-3-5-sonnet-20240620" -t 2000 -T 0.7)
+
+# Display the new prompt
+echo "New ./create-cgpt-script prompt:"
+echo "--------------------------------"
+echo "$new_prompt"
+
+# Optionally, you can save the new prompt to a file
+# echo "$new_prompt" > new_create_cgpt_script_prompt.txt
+# echo "New prompt has been saved to new_create_cgpt_script_prompt.txt"
+
+# Usage information for cgpt
+cgpt_usage() {
+    cat << EOF
+cgpt is a command line tool for interacting with generative AI models
+
+Usage of cgpt:
+  -b, --backend string                The backend to use (default "anthropic")
+  -m, --model string                  The model to use (default "claude-3-5-sonnet-20240620")
+  -i, --input string                  Direct string input (overrides -f)
+  -f, --file string                   Input file path. Use '-' for stdin (default), mutually exclusive with -i (default "-")
+  -c, --continuous                    Run in continuous mode (interactive)
+  -s, --system-prompt string          System prompt to use
+  -p, --prefill string                Prefill the assistant's response
+  -I, --history-load string           File to read completion history from
+  -O, --history-save string           File to store completion history in
+      --config string                 Path to the configuration file (default "config.yaml")
+  -v, --verbose                       Verbose output
+      --debug                         Debug output
+  -n, --completions int               Number of completions (when running non-interactively with history)
+  -t, --max-tokens int                Maximum tokens to generate (default 8000)
+  -T, --temperature float             Temperature for sampling (default 0.05)
+      --completion-timeout duration   Maximum time to wait for a response (default 2m0s)
+  -h, --help                          
+      --show-advanced-usage string    Show advanced usage examples (comma-separated list of: basic, code-improvements, make-more-examples, meta-prompting, prompt-chaining) - use 'all' to show them all
+
+Examples:
+	# Basic query about interpreting command output
+	$ echo "how should I interpret the output of nvidia-smi?" | cgpt
+
+	# Quick explanation request
+	$ echo "explain plan 9 in one sentence" | cgpt
+
+Advanced Examples:
+	# Using a system prompt for a specific assistant role
+	$ cgpt -s "You are a helpful programming assistant" -i "Write a Python function to calculate the Fibonacci sequence"
+
+	# Code review using input from a file
+	$ cat complex_code.py | cgpt -s "You are a code reviewer. Provide constructive feedback." -m "claude-3-5-sonnet-20240620"
+
+	# Interactive session for creative writing
+	$ cgpt -c -s "You are a creative writing assistant" # Start an interactive session for story writing
+
+	# Show more advanced examples:
+	$ cgpt --show-advanced-usage basic
+	$ cgpt --show-advanced-usage all 
+EOF
+}
+
+# Uncomment the following line if you want to include cgpt usage information in the script
+# cgpt_usage

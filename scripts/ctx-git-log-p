@@ -1,0 +1,1 @@
+ctx-exec git log -p ./*

@@ -1,0 +1,57 @@
+#!/bin/bash
+
+# Script: collect-metaprompting-techniques
+# Description: Analyzes git history of specified scripts and summarizes metaprompting techniques.
+# Usage: ./collect-metaprompting-techniques
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check for required commands
+for cmd in git cgpt; do
+    if ! command_exists "$cmd"; then
+        echo "Error: $cmd is not installed or not in PATH" >&2
+        exit 1
+    fi
+done
+
+# Array of scripts to analyze
+scripts=(
+    "./create-cgpt-script"
+    "./create-create-cgpt-script"
+    "./diff-meta-analyzer"
+    "./git-auto-commit"
+    "./suggest-similar-script"
+)
+
+# Function to extract prompts from git history
+extract_prompts() {
+    local script="$1"
+    git log -p "$script" | grep -E '^[-+].*Human:|^[-+].*Assistant:' | sed 's/^[-+]//'
+}
+
+# Temporary file for storing extracted prompts
+tmp_file=$(mktemp)
+trap 'rm -f "$tmp_file"' EXIT
+
+# Extract prompts from all scripts
+for script in "${scripts[@]}"; do
+    if [[ -f "$script" ]]; then
+        extract_prompts "$script" >> "$tmp_file"
+    else
+        echo "Warning: $script not found, skipping..." >&2
+    fi
+done
+
+# Use cgpt to analyze the extracted prompts and summarize metaprompting techniques
+cgpt_prompt="Analyze the following prompts and summarize the metaprompting techniques used. Focus on techniques that can enhance other prompts:
+
+$(cat "$tmp_file")
+
+Provide a concise summary of the metaprompting techniques identified, explaining how they can be used to improve other prompts."
+
+cgpt -m "claude-3-5-sonnet-20240620" -s "You are an AI expert specializing in prompt engineering and metaprompting techniques." -i "$cgpt_prompt"
+
+# Note: The script outputs the summary directly to stdout

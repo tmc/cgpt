@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# Script: explain-email-and-compose-response
+# Description: This script takes an email from Outlook, explains it, and composes a response using AI assistance.
+# Usage: ./explain-email-and-compose-response <email_file>
+
+set -euo pipefail
+
+# Function to display usage information
+usage() {
+    echo "Usage: $0 <email_file>"
+    echo "  <email_file>: Path to the file containing the email content"
+    exit 1
+}
+
+# Check if the correct number of arguments is provided
+if [ $# -ne 1 ]; then
+    usage
+fi
+
+EMAIL_FILE="$1"
+
+# Check if the email file exists
+if [ ! -f "$EMAIL_FILE" ]; then
+    echo "Error: Email file not found: $EMAIL_FILE" >&2
+    exit 1
+fi
+
+# Function to process the email using cgpt
+process_email() {
+    local email_content="$1"
+    local prompt="$2"
+    
+    echo "$prompt" | cgpt -s "You are an expert email analyst and composer. Analyze the following email and $prompt" -i "$email_content"
+}
+
+# Read the email content
+EMAIL_CONTENT=$(cat "$EMAIL_FILE")
+
+# Explain the email
+echo "Explaining the email:"
+process_email "$EMAIL_CONTENT" "provide a concise explanation of its main points and intent."
+
+echo
+
+# Compose a response
+echo "Composing a response:"
+process_email "$EMAIL_CONTENT" "compose an appropriate and professional response."
+
+# Note: The script uses 'cgpt' for AI-assisted analysis and response composition.
+# Make sure 'cgpt' is installed and properly configured in your system.

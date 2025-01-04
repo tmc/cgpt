@@ -1,0 +1,53 @@
+Here's the bash script for the 'meta-prompt-optimizer' tool based on your requirements:
+
+```bash
+#!/bin/bash
+
+# meta-prompt-optimizer
+# This script analyzes git history, recent shell commands, and existing scripts
+# to generate improved prompts and suggest new tools.
+
+set -euo pipefail
+
+# Function to log messages
+log() {
+    echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" >&2
+}
+
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check for required commands
+for cmd in git cgpt; do
+    if ! command_exists "$cmd"; then
+        log "Error: $cmd is not installed or not in PATH"
+        exit 1
+    fi
+done
+
+# Function to get recent git history
+get_git_history() {
+    <git-history>
+    git log --pretty=format:'%h %s' -n 20 .
+    </git-history>
+}
+
+# Function to get recent shell commands
+get_shell_history() {
+    <shell-history>
+    history | tail -n 50
+    </shell-history>
+}
+
+# Function to list existing scripts
+list_existing_scripts() {
+    <existing-scripts>
+    ls -1 *.sh
+    </existing-scripts>
+}
+
+# Function to analyze patterns and generate suggestions
+analyze_and_suggest() {
+    local git_history="$
