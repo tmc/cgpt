@@ -74,22 +74,31 @@ func (s *InteractiveSession) changePrompt(toAlt bool) {
 	s.reader.Refresh()
 }
 
+const (
+	enableBracketedPaste  = "\033[?2004h"
+	disableBracketedPaste = "\033[?2004l"
+	startPaste            = "\033[200~"
+	endPaste              = "\033[201~"
+)
+
 func (s *InteractiveSession) Run() error {
 	defer s.reader.Close()
-	for {
-		var line string
-		var err error
-		now := time.Now()
-		timeDelta := now.Sub(s.lastInput)
-		s.lastInput = now
 
-		line, err = s.reader.Readline()
+	// Enable bracketed paste mode
+	fmt.Print(enableBracketedPaste)
+	defer fmt.Print(disableBracketedPaste) // Ensure it's disabled on exit
+
+	isPasting := false
+
+	for {
+		line, err := s.reader.Readline()
 
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
 				return err
 			}
 			s.buffer.Reset()
+			isPasting = false
 			s.changePrompt(false)
 			continue
 		} else if err == io.EOF {
@@ -98,8 +107,26 @@ func (s *InteractiveSession) Run() error {
 			return err
 		}
 
-		s.buffer.WriteString(line)
-		s.buffer.WriteString("\n")
+		if strings.HasPrefix(line, startPaste) {
+			isPasting = true
+			line = strings.TrimPrefix(line, startPaste)
+		}
+
+		if isPasting {
+			s.buffer.WriteString(line)
+			if strings.HasSuffix(line, endPaste) {
+				isPasting = false
+				s.buffer.WriteString("\n") // Add a newline to separate pasted blocks
+				line = strings.TrimSuffix(s.buffer.String(), endPaste)
+				s.buffer.Reset()
+				s.buffer.WriteString(strings.TrimSuffix(line, endPaste))
+			} else {
+				continue // Keep buffering until endPaste is found
+			}
+		} else {
+			s.buffer.WriteString(line)
+			s.buffer.WriteString("\n")
+		}
 
 		if s.mlState == MultilineNone {
 			if s.shouldStartMultiline(line) {
@@ -115,7 +142,8 @@ func (s *InteractiveSession) Run() error {
 			}
 		}
 
-		if timeDelta > pasteThreshold && s.isInputComplete() {
+		// Process input if it's not part of a paste or if a non-paste input is complete
+		if !isPasting && s.isInputComplete() {
 			input := s.buffer.String()
 			if err := s.config.ProcessFn(input); err != nil {
 				if err != ErrEmptyInput {
@@ -123,7 +151,7 @@ func (s *InteractiveSession) Run() error {
 				}
 			}
 			s.buffer.Reset()
-			s.changePrompt(false) // Back to normal prompt after completing multiline input
+			s.changePrompt(false)
 		}
 	}
 
