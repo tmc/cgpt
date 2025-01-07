@@ -1,0 +1,604 @@
+# Feature Areas & Development Roadmap
+
+## Core Functionality 🛠️
+- [x] Fix AI role being written twice in messages
+- [x] Fix writing of bad history lines
+- [x] Fix paste flash issue
+- [x] Allow ctrl-c to stop mid-generation
+- [x] Fix concurrent connections rate limit issue
+- [ ] Add EDITOR support like bash
+- [ ] Enable streaming output functionality
+- [ ] Add retry setup/approach
+- [ ] Add auto-constraints for some models (o1 temp, no stream, etc.)
+
+### Automatic Backend Management 🔄
+- [ ] Implement dynamic backend selection
+  - [ ] Auto-detect available API keys
+  - [ ] Check model availability per backend
+  - [ ] Support fallback chains
+  - [ ] Add cost-based routing
+- [ ] Add backend configuration
+  - [ ] Support per-backend settings
+  - [ ] Add backend-specific rate limits
+  - [ ] Configure model preferences
+  - [ ] Set backend priorities
+- [ ] Implement smart model selection
+  - [ ] Auto-select based on task type
+  - [ ] Consider token limits
+  - [ ] Factor in cost constraints
+  - [ ] Support capability requirements
+- [ ] Add backend health monitoring
+  - [ ] Track API availability
+  - [ ] Monitor rate limit status
+  - [ ] Handle backend failures
+  - [ ] Support automatic failover
+- [ ] Implement backend optimization
+  - [ ] Load balance across backends
+  - [ ] Cache model capabilities
+  - [ ] Optimize for cost/performance
+  - [ ] Support quota management
+
+### Documentation & Guides 📖
+- [ ] Add core feature documentation
+  - [ ] Document prefill and stop sequence usage
+  - [ ] Add examples for common use cases
+  - [ ] Document error handling and recovery
+  - [ ] Add troubleshooting guide for common issues
+- [ ] Improve CLI documentation
+  - [ ] Document all flags and options
+  - [ ] Add usage examples for each flag
+  - [ ] Document environment variables
+  - [ ] Add configuration file examples
+- [ ] Add integration guides
+  - [ ] Document vim integration
+  - [ ] Document shell integration
+  - [ ] Add CI/CD integration examples
+  - [ ] Document API usage patterns
+- [ ] Create getting started experience
+  - [ ] Add interactive first-launch walkthrough
+  - [ ] Create quick-start guide with common setups
+  - [ ] Add configuration wizard
+  - [ ] Include sample prompts and templates
+  - [ ] Add model selection guide
+- [ ] Build web playground
+  - [ ] Create interactive web demo using WASM
+  - [ ] Add common use-case examples
+  - [ ] Include live configuration testing
+  - [ ] Add shareable snippets/configurations
+  - [ ] Implement browser-based tutorial
+  - [ ] Support offline mode with WASM-based inference
+  - [ ] Add local model support via WASM
+- [ ] Create example sessions gallery
+  - [ ] Record asciinema sessions for common workflows
+  - [ ] Add interactive session player
+  - [ ] Create searchable session library
+  - [ ] Include annotated session walkthroughs
+  - [ ] Add session bookmarking and sharing
+  - [ ] Support session forking and customization
+
+### Output and Generation Control 🎯
+- [ ] Implement stop sequence support
+  - [ ] Add stop sequence flag to CLI
+  - [ ] Support multiple stop sequences
+  - [ ] Handle stop sequences in streaming mode
+  - [ ] Add common stop sequence presets
+- [ ] Improve output handling
+  - [ ] Fix prefill-echo output display
+  - [ ] Add output format validation
+  - [ ] Support direct file output with format stripping
+  - [ ] Handle partial outputs gracefully
+
+### Fault Tolerance & Recovery 🔄
+- [ ] Implement robust retry policy
+  - [ ] Add exponential backoff for API requests
+  - [ ] Set configurable max retry attempts
+  - [ ] Add jitter to prevent thundering herd
+  - [ ] Respect provider-specific headers
+    - [ ] Handle Anthropic retry-after
+    - [ ] Support OpenAI rate limits
+    - [ ] Add Azure rate limit handling
+    - [ ] Implement provider-specific backoff
+  - [ ] Add smart retry strategies
+    - [ ] Track provider availability
+    - [ ] Implement adaptive backoff
+    - [ ] Support circuit breaking
+    - [ ] Add retry budgeting
+- [ ] Add file corruption prevention
+  - [ ] Implement atomic writes for history files
+  - [ ] Add file checksums for integrity verification
+  - [ ] Create backup files before modifications
+- [ ] Improve error handling
+  - [ ] Add graceful degradation for API failures
+  - [ ] Implement request timeout handling
+  - [ ] Add partial response recovery
+- [ ] Add fault injection testing
+  - [ ] Simulate API timeouts and failures
+  - [ ] Test network interruptions
+  - [ ] Verify file corruption recovery
+  - [ ] Test concurrent access scenarios
+
+### Structured Outputs & Tool Calling 🛠️
+- [ ] Implement structured output support
+  - [ ] Add JSON schema validation
+  - [ ] Support custom output formats
+  - [ ] Enable format conversion
+  - [ ] Add output templating
+- [ ] Add tool calling framework
+  - [ ] Support function definitions
+  - [ ] Add tool registration system
+  - [ ] Enable tool chaining
+  - [ ] Support async tool execution
+- [ ] Implement tool validation
+  - [ ] Add schema validation
+  - [ ] Support runtime validation
+  - [ ] Add type checking
+  - [ ] Enable custom validators
+- [ ] Add tool management
+  - [ ] Support tool versioning
+  - [ ] Add tool documentation
+  - [ ] Enable tool discovery
+  - [ ] Support tool dependencies
+- [ ] Enhance tool integration
+  - [ ] Add shell command tools
+  - [ ] Support HTTP/API tools
+  - [ ] Enable database tools
+  - [ ] Add file system tools
+- [ ] Implement tool orchestration
+  - [ ] Support tool pipelines
+  - [ ] Add error handling
+  - [ ] Enable parallel execution
+  - [ ] Support tool composition
+
+## History & Session Management 📝
+- [ ] Implement auto-history functionality
+  - [ ] Auto-history naming sessions
+  - [ ] History emitting to designated location
+- [ ] Add hist/history subcommands
+- [ ] Add -H flag for history
+- [ ] Enable "auto" mode for recent file history
+- [ ] Add option to "redo" last generation/input
+- [ ] Add --autoresume capability
+- [ ] Allow sending content into running cgpt session
+
+### Git-backed History Management 🌳
+- [ ] Implement git-based storage
+  - [ ] Auto-initialize git repo for history
+  - [ ] Add configurable history root location
+  - [ ] Support multiple history repositories
+  - [ ] Implement garbage collection policies
+- [ ] Add conversation versioning
+  - [ ] Auto-commit after each interaction
+  - [ ] Store metadata in commit messages
+  - [ ] Support conversation checkpoints
+  - [ ] Enable reverting to previous states
+- [ ] Implement conversation forking
+  - [ ] Add git branch per conversation fork
+  - [ ] Track fork relationships
+  - [ ] Support merging conversation branches
+  - [ ] Add visual fork graph display
+- [ ] Add history references
+  - [ ] Implement conversation linking
+  - [ ] Add cross-references between forks
+  - [ ] Support shared context across forks
+  - [ ] Track conversation ancestry
+- [ ] Add collaboration features
+  - [ ] Support remote history repositories
+  - [ ] Enable conversation sharing
+  - [ ] Add multi-user history support
+  - [ ] Implement conflict resolution
+- [ ] Add history analytics
+  - [ ] Track conversation evolution
+  - [ ] Generate usage statistics
+  - [ ] Support history visualization
+  - [ ] Add search across versions
+
+### Smart Session Management 🏷️
+- [ ] Implement content-based session naming
+  - [ ] Generate descriptive names from conversation content
+  - [ ] Use AI to summarize session purpose
+  - [ ] Support custom naming patterns
+  - [ ] Add name collision handling
+- [ ] Add terminal title integration
+  - [ ] Update tab title with session name
+  - [ ] Show session status in title
+  - [ ] Support custom title formats
+  - [ ] Add dynamic title updates
+- [ ] Enhance session organization
+  - [ ] Add session tagging
+  - [ ] Support session categorization
+  - [ ] Enable session search by content
+  - [ ] Add session metadata
+- [ ] Implement session linking
+  - [ ] Track related sessions
+  - [ ] Support session dependencies
+  - [ ] Enable session merging
+  - [ ] Add session branching
+
+## Model Integration 🤖
+- [ ] Implement auto-start ollama
+- [ ] Add auto-obtain ollama functionality
+- [ ] Implement automatic/dynamic inference picks
+- [ ] Add model management
+  - [ ] Support model downloading
+  - [ ] Enable model updates
+  - [ ] Add model version control
+  - [ ] Support custom model loading
+- [ ] Implement model configuration
+  - [ ] Add per-model settings
+  - [ ] Support model-specific prompts
+  - [ ] Enable parameter tuning
+  - [ ] Add model performance profiles
+
+## UI/UX & Editor Integration 🎨
+- [ ] Add modes with vim-like : experience
+- [ ] Implement status bar or window title setting
+- [ ] Add template mode
+- [ ] Implement -e/-E mode
+- [ ] Add environment variables support
+- [ ] Add environment file support
+
+### Status Bar Customization 📊
+- [ ] Add configurable metrics display
+  - [ ] Show token usage and costs
+  - [ ] Display model and temperature
+  - [ ] Show request latency stats
+  - [ ] Add rate limit indicators
+- [ ] Implement real-time updates
+  - [ ] Track streaming token count
+  - [ ] Show generation progress
+  - [ ] Display API status
+  - [ ] Add error indicators
+- [ ] Add customization options
+  - [ ] Support custom metric plugins
+  - [ ] Allow layout configuration
+  - [ ] Enable color themes
+  - [ ] Support conditional display
+- [ ] Add session analytics
+  - [ ] Track session token usage
+  - [ ] Show cost estimates
+  - [ ] Display usage trends
+  - [ ] Add budget warnings
+
+### Enhanced Vim/Neovim Integration 🔌
+- [ ] Implement Cursor-like agent features
+  - [ ] Add inline code completion
+  - [ ] Support context-aware suggestions
+  - [ ] Add code action suggestions
+  - [ ] Implement hover documentation
+- [ ] Add advanced editing commands
+  - [ ] Support block-level editing
+  - [ ] Add refactoring commands
+  - [ ] Implement test generation
+  - [ ] Add documentation generation
+- [ ] Improve context awareness
+  - [ ] Track cursor position and selection
+  - [ ] Monitor file changes
+  - [ ] Add buffer content analysis
+  - [ ] Support multi-file context
+- [ ] Add UI enhancements
+  - [ ] Implement floating windows
+  - [ ] Add inline diagnostics
+  - [ ] Support virtual text
+  - [ ] Add status line integration
+- [ ] Enhance command integration
+  - [ ] Add custom Ex commands
+  - [ ] Support key mappings
+  - [ ] Add command palette
+  - [ ] Implement command history
+- [ ] Add terminal integration
+  - [ ] Support built-in terminal buffer
+  - [ ] Add terminal split management
+  - [ ] Enable terminal session persistence
+  - [ ] Support external terminal process
+  - [ ] Add terminal multiplexer integration
+- [ ] Implement Neovim-specific features
+  - [ ] Add LSP-like protocol support
+  - [ ] Support Lua configuration
+  - [ ] Add treesitter integration
+  - [ ] Enable extmark usage
+  - [ ] Support Neovim remote API
+
+### Multi-Editor Support 🎯
+- [ ] Add VSCode extension
+  - [ ] Port vim features to VSCode
+  - [ ] Add VSCode-specific UI elements
+  - [ ] Support VSCode terminal integration
+  - [ ] Enable extension settings
+- [ ] Add Emacs integration
+  - [ ] Implement Evil mode support
+  - [ ] Add REPL integration
+  - [ ] Support org-mode features
+  - [ ] Enable package management
+- [ ] Support JetBrains IDEs
+  - [ ] Create IntelliJ plugin
+  - [ ] Add IDE-specific features
+  - [ ] Support tool window integration
+  - [ ] Enable project-wide context
+- [ ] Add Sublime Text support
+  - [ ] Create Sublime package
+  - [ ] Add command palette integration
+  - [ ] Support project-wide features
+  - [ ] Enable package settings
+
+## Advanced Features 🚀
+- [ ] Implement conversation forking
+- [ ] Add multi-modal support
+- [ ] Implement tool use functionality
+- [ ] Add prefill manipulation
+- [ ] Add forked generation capability
+- [ ] Implement auto-context-compression
+
+### Conversation Weaving & Version Control 🧵
+- [ ] Implement advanced branching
+  - [ ] Support non-linear conversation history
+  - [ ] Add branch point annotations
+  - [ ] Enable branch merging/rebasing
+  - [ ] Support selective branch replay
+- [ ] Add conversation patches
+  - [ ] Create portable conversation diffs
+  - [ ] Support patch application/reversal
+  - [ ] Enable patch composition
+  - [ ] Add patch dependency tracking
+- [ ] Implement conversation DAG
+  - [ ] Build directed acyclic graph
+  - [ ] Support multi-parent relationships
+  - [ ] Add branch point detection
+  - [ ] Enable graph traversal/query
+- [ ] Add state management
+  - [ ] Track conversation state changes
+  - [ ] Support state checkpointing
+  - [ ] Enable state reconstruction
+  - [ ] Add state diffing/merging
+- [ ] Implement change propagation
+  - [ ] Support change broadcasting
+  - [ ] Add change subscription
+  - [ ] Enable selective sync
+  - [ ] Support change filtering
+- [ ] Add collaboration features
+  - [ ] Support concurrent editing
+  - [ ] Add change attribution
+  - [ ] Enable change review
+  - [ ] Support change approval flows
+
+### Model Context Protocol Support 🔗
+- [ ] Implement MCP host functionality
+  - [ ] Add context sharing protocol
+  - [ ] Support context serialization
+  - [ ] Enable context streaming
+  - [ ] Add context versioning
+- [ ] Add context management
+  - [ ] Support context merging
+  - [ ] Enable context pruning
+  - [ ] Add context validation
+  - [ ] Implement context caching
+- [ ] Implement context providers
+  - [ ] Add file system provider
+  - [ ] Support git provider
+  - [ ] Enable network provider
+  - [ ] Add database provider
+- [ ] Add context transformers
+  - [ ] Support format conversion
+  - [ ] Add context compression
+  - [ ] Enable context filtering
+  - [ ] Support custom transformers
+- [ ] Implement context synchronization
+  - [ ] Add real-time updates
+  - [ ] Support conflict resolution
+  - [ ] Enable distributed sync
+  - [ ] Add change notifications
+
+### Advanced Prefill & Message Control 🔄
+- [ ] Implement smart prefill handling
+  - [ ] Auto-detect partial outputs
+  - [ ] Support infinite generation via prefill
+  - [ ] Handle incomplete code blocks
+  - [ ] Add format-specific continuations
+- [ ] Add program-based message modification
+  - [ ] Run programs on last input/output
+  - [ ] Support token-budgeted execution
+  - [ ] Add message prefix/suffix injection
+  - [ ] Enable custom message processors
+- [ ] Enhance prefill automation
+  - [ ] Auto-detect output format
+  - [ ] Add language-specific prefills
+  - [ ] Support template-based prefills
+  - [ ] Enable context-aware prefills
+- [ ] Add error recovery
+  - [ ] Detect malformed outputs
+  - [ ] Auto-fix txtar elisions
+  - [ ] Handle incomplete JSON
+  - [ ] Support partial code completion
+- [ ] Implement prefill chaining
+  - [ ] Support multi-stage prefills
+  - [ ] Add conditional prefills
+  - [ ] Enable prefill pipelines
+  - [ ] Support prefill transformers
+
+### Plugin System & Subcommand Framework 🔌
+- [ ] Implement plugin architecture
+  - [ ] Add plugin discovery mechanism
+  - [ ] Support dynamic plugin loading
+  - [ ] Enable plugin hot-reloading
+  - [ ] Add plugin dependency resolution
+  - [ ] Implement plugin versioning
+- [ ] Add subcommand framework
+  - [ ] Support custom subcommand registration
+  - [ ] Add subcommand help generation
+  - [ ] Enable subcommand aliases
+  - [ ] Support command groups/namespaces
+  - [ ] Add command completion
+- [ ] Implement plugin management
+  - [ ] Add plugin installation/removal
+  - [ ] Support plugin updates
+  - [ ] Enable plugin configuration
+  - [ ] Add plugin health checks
+  - [ ] Support plugin marketplace
+- [ ] Add plugin development tools
+  - [ ] Create plugin templates
+  - [ ] Add plugin testing framework
+  - [ ] Enable plugin debugging
+  - [ ] Support plugin documentation
+  - [ ] Add development guidelines
+- [ ] Implement plugin security
+  - [ ] Add plugin sandboxing
+  - [ ] Support permission system
+  - [ ] Enable code signing
+  - [ ] Add security auditing
+  - [ ] Implement resource limits
+
+## Documentation & Community 📚
+### Documentation
+- [ ] Add starter guide
+- [ ] Add prompt guide
+- [ ] Create project website
+- [ ] Add comprehensive troubleshooting guide
+- [ ] Create API documentation
+- [ ] Add integration tutorials
+- [ ] Create video walkthroughs
+- [ ] Write best practices guide
+
+### Community Platform
+- [ ] Implement conversation sharing
+  - [ ] Add public/private visibility controls
+  - [ ] Support conversation forking
+  - [ ] Enable collaborative editing
+  - [ ] Add attribution tracking
+- [ ] Add community features
+  - [ ] Support user profiles
+  - [ ] Add conversation ratings/reviews
+  - [ ] Enable commenting/discussions
+  - [ ] Support tagging/categorization
+- [ ] Implement discovery features
+  - [ ] Add trending conversations
+  - [ ] Support search by topic/tag
+  - [ ] Add curated collections
+  - [ ] Enable user recommendations
+- [ ] Add social features
+  - [ ] Support following users
+  - [ ] Add activity feeds
+  - [ ] Enable notifications
+  - [ ] Support user groups
+
+## Analytics & Visualization 📊
+### Analytics & Monitoring
+- [ ] Implement opt-in telemetry
+- [ ] Add automatic git-managed history
+- [ ] Implement auto-compression of context
+- [ ] Add usage analytics
+  - [ ] Track model usage
+  - [ ] Monitor token consumption
+  - [ ] Analyze conversation patterns
+  - [ ] Generate cost reports
+- [ ] Implement performance monitoring
+  - [ ] Track response times
+  - [ ] Monitor error rates
+  - [ ] Analyze completion quality
+  - [ ] Generate performance reports
+- [ ] Add token usage tracking
+  - [ ] Track per-request token counts
+  - [ ] Record input/output token usage
+  - [ ] Track cost per interaction
+  - [ ] Add token usage reports
+  - [ ] Support token budget limits
+  - [ ] Enable token usage alerts
+  - [ ] Add token usage visualization
+  - [ ] Support cost center tracking
+
+### Session & Process Management 🔄
+- [ ] Implement session management
+  - [ ] Add unique session identifiers
+  - [ ] Track session start/end times
+  - [ ] Support session resumption
+  - [ ] Enable session cleanup
+  - [ ] Add session state persistence
+  - [ ] Support session migration
+- [ ] Add process tracking
+  - [ ] Record process IDs in history
+  - [ ] Track parent/child relationships
+  - [ ] Support process groups
+  - [ ] Enable process discovery
+- [ ] Implement process coordination
+  - [ ] Add inter-process communication
+  - [ ] Support shared state
+  - [ ] Enable process synchronization
+  - [ ] Add resource locking
+  - [ ] Support cooperative multitasking
+- [ ] Add session coordination
+  - [ ] Support session handoff
+  - [ ] Enable session merging
+  - [ ] Add session locking
+  - [ ] Support concurrent access
+  - [ ] Add conflict resolution
+- [ ] Implement resource management
+  - [ ] Track resource usage per session
+  - [ ] Support resource limits
+  - [ ] Add resource cleanup
+  - [ ] Enable resource sharing
+  - [ ] Support resource prioritization
+
+### Web Interface & Visualization
+- [ ] Implement web UI
+  - [ ] Add conversation viewer/editor
+  - [ ] Support real-time collaboration
+  - [ ] Add file management
+  - [ ] Enable web-based terminal
+- [ ] Add conversation visualization
+  - [ ] Create embedding-based forest view
+  - [ ] Support interactive navigation
+  - [ ] Add timeline visualization
+  - [ ] Enable cluster analysis
+- [ ] Implement advanced visualizations
+  - [ ] Add conversation heatmaps
+  - [ ] Support topic modeling
+  - [ ] Create semantic networks
+  - [ ] Enable pattern detection
+- [ ] Add analysis tools
+  - [ ] Support conversation comparison
+  - [ ] Add similarity metrics
+  - [ ] Enable insight extraction
+  - [ ] Support custom analytics
+- [ ] Implement search & filter
+  - [ ] Add semantic search
+  - [ ] Support advanced filtering
+  - [ ] Enable faceted navigation
+  - [ ] Add saved searches
+
+## Documentation Site 📚
+### Core Documentation
+- [ ] Implement documentation site
+  - [ ] Set up static site generator
+  - [ ] Add search functionality
+  - [ ] Enable versioned docs
+- [ ] Create content structure
+  - [ ] Add getting started guide
+  - [ ] Write core concepts
+  - [ ] Create API reference
+  - [ ] Document CLI commands
+- [ ] Add interactive examples
+  - [ ] Embed runnable code samples
+  - [ ] Create interactive tutorials
+  - [ ] Support playground integration
+
+### Learning & Community
+- [ ] Add learning resources
+  - [ ] Create beginner tutorials
+  - [ ] Write best practices
+  - [ ] Add troubleshooting guides
+  - [ ] Include common patterns
+- [ ] Add community features
+  - [ ] Support user contributions
+  - [ ] Enable doc commenting
+  - [ ] Add feedback system
+  - [ ] Share user examples
+
+### Developer Resources
+- [ ] Add developer guides
+  - [ ] Create API documentation
+  - [ ] Write integration guides
+  - [ ] Add plugin development docs
+  - [ ] Include architecture overview
+- [ ] Add contribution guides
+  - [ ] Document development setup
+  - [ ] Write testing guidelines
+  - [ ] Add PR workflow guide
+  - [ ] Include style guide
