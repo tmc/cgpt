@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+(
+  set -x
+  PS4=">> command: "
+  git branch
+  git status . || exit 1
+  git log --stat -10 . | head -n 1000
+  git diff --staged . | head -n 1000
+  git diff --stat . | head -n 1000
+  git diff . | head -n 1000
+  echo "$@"
+  ) 2>&1 | cgpt -s "You are an expert Git user familiar with this repository's practices. Based on the provided git command output, create a commit message that matches the style used in previous commits. Focus on brevity and stylistic consistency with existing messages. If there are staged changes, presume those are what are going to be committed. Begin by desribing your interpretation of each command in the input (print it out like >>...). Use <thinking>, <reflection>, and a final <output> tag." -O ~/.cgpt-hist-git-"$(date +%s)" \
+    | tee ~/.git-auto-commit-message.last \
+    | (>&2 cat)
+echo -ne "\033[0m" # set normal output
+
+(ctx-exec cat ~/.git-auto-commit-message.last; ctx-exec git status .) | cgpt -s "you are an expert bash script authoriing assistant. Based on the git status and the command output, create a 'git commit' command. It should contain one -m arg and use -a depending on status. Output only the command with no suffix or code fence after it." -O ~/.cgpt-hist-git-"$(date +%s)" --prefill='#!/usr/bin/bash' --prefill-echo=false > ~/.git-auto-commit-command.sh
+chmod +x ~/.git-auto-commit-command.sh
+
+# # Show and run the command with confirmation (default: yes)
+echo -e "\033[1m"; cat ~/.git-auto-commit-command.sh; echo -e "\033[0m"
+read -p "Run the command above? [Y/n] " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]] || [[ $REPLY == "" ]]; then
+  ~/.git-auto-commit-command.sh
+fi
