@@ -26,6 +26,33 @@ import (
 
 var update = flag.Bool("update", false, "update golden files")
 
+// App represents the main application
+type App struct {
+	Stdin  *strings.Reader
+	Stdout *bytes.Buffer
+	Stderr *bytes.Buffer
+}
+
+func (a *App) Run(args []string) error {
+	oldStdin, oldStdout, oldStderr := os.Stdin, os.Stdout, os.Stderr
+	defer func() {
+		os.Stdin, os.Stdout, os.Stderr = oldStdin, oldStdout, oldStderr
+	}()
+
+	// Set up pipes for stdin/stdout/stderr
+	os.Stdin = os.NewFile(0, "stdin")
+	os.Stdout = os.NewFile(1, "stdout")
+	os.Stderr = os.NewFile(2, "stderr")
+
+	opts, fs, err := initFlags(args, os.Stdin)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	return run(ctx, opts, fs)
+}
+
 func Test(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
@@ -250,5 +277,113 @@ func compareBytes(t *testing.T, name string, want, got []byte) {
 	gotStr := strings.TrimRight(string(got), "\n") + "\n"
 	if diff := cmp.Diff(wantStr, gotStr); diff != "" {
 		t.Errorf("%s mismatch (-want +got):\n%s", name, diff)
+	}
+}
+
+func TestDuplicateAIRole(t *testing.T) {
+	// Create a temporary file for history
+	histFile, err := os.CreateTemp("", "cgpt-test-history-*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(histFile.Name())
+	defer histFile.Close()
+
+	// Run a completion with prefill to test both prefill and regular completion
+	var stdout, stderr bytes.Buffer
+	app := &App{
+		Stdin:  strings.NewReader("test message"),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	args := []string{
+		"cgpt-test",
+		"--backend", "dummy",
+		"--model", "dummy-model",
+		"--history-save", histFile.Name(),
+		"--prefill", "prefill message",
+		"--stream",
+	}
+	if err := app.Run(args); err != nil {
+		t.Fatalf("Failed to run app: %v\nStderr: %s", err, stderr.String())
+	}
+
+	// Read and parse the history file
+	history, err := os.ReadFile(histFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read history file: %v", err)
+	}
+
+	// Count AI role occurrences
+	aiCount := strings.Count(string(history), `role: ai`)
+	if aiCount > 1 {
+		t.Errorf("Found %d AI role messages in history, expected 1", aiCount)
+		t.Logf("History content: %s", string(history))
+	}
+
+	// Clear buffers for next test
+	stdout.Reset()
+	stderr.Reset()
+
+	// Run another completion using the same history file
+	app = &App{
+		Stdin:  strings.NewReader("follow-up message"),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	args = []string{
+		"cgpt-test",
+		"--backend", "dummy",
+		"--model", "dummy-model",
+		"--history-load", histFile.Name(),
+		"--history-save", histFile.Name(),
+		"--stream",
+	}
+	if err := app.Run(args); err != nil {
+		t.Fatalf("Failed to run app with history: %v\nStderr: %s", err, stderr.String())
+	}
+
+	// Read and parse the history file again
+	history, err = os.ReadFile(histFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read history file: %v", err)
+	}
+
+	// Count AI role occurrences after second completion
+	aiCount = strings.Count(string(history), `role: ai`)
+	expectedCount := 2 // One from each completion
+	if aiCount != expectedCount {
+		t.Errorf("Found %d AI role messages in history after second completion, expected %d", aiCount, expectedCount)
+		t.Logf("History content: %s", string(history))
+	}
+
+	// Verify stdout doesn't contain duplicate responses
+	output := stdout.String()
+	if strings.Count(output, "dummy response") > expectedCount {
+		t.Errorf("Found duplicate responses in output: %s", output)
+	}
+}
+
+func TestMain(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{
+			name:    "no args",
+			args:    []string{},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			opts := cgpt.RunOptions{}
+			fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			if err := run(ctx, opts, fs); (err != nil) != tt.wantErr {
+				t.Errorf("run() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

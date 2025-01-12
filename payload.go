@@ -2,6 +2,7 @@ package cgpt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -52,6 +53,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		defer close(ch)
 		fullResponse := strings.Builder{}
 		firstChunk := true
+		addedAssistantMessage := false
 
 		prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 
@@ -60,19 +62,37 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			if cfg.EchoPrefill {
 				spinnerPos = len(s.nextCompletionPrefill) + 1
 			}
-			ch <- s.nextCompletionPrefill + " "
+			select {
+			case ch <- s.nextCompletionPrefill + " ":
+			case <-ctx.Done():
+				prefillCleanup()
+				return
+			}
 			payload.addAssistantMessage(s.nextCompletionPrefill)
+			addedAssistantMessage = true
 			fullResponse.WriteString(s.nextCompletionPrefill)
 		}
 
 		// Start spinner on the last character
 		var spinnerStop func()
 		if cfg.ShowSpinner {
-			// Start spinner on the last character
 			spinnerStop = spin(spinnerPos)
 		}
 
-		_, err := s.model.GenerateContent(ctx, payload.Messages,
+		// Create a cancellable context for the generation
+		genCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		// Handle ctrl-c by cancelling the generation context
+		go func() {
+			select {
+			case <-ctx.Done():
+				cancel()
+			case <-genCtx.Done():
+			}
+		}()
+
+		_, err := s.model.GenerateContent(genCtx, payload.Messages,
 			llms.WithMaxTokens(s.cfg.MaxTokens),
 			llms.WithTemperature(s.cfg.Temperature),
 			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
@@ -85,18 +105,27 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 					firstChunk = false
 				}
 
-				ch <- string(chunk)
-				fullResponse.Write(chunk)
-				return nil
+				select {
+				case ch <- string(chunk):
+					fullResponse.Write(chunk)
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
 			}))
 
-		if err != nil {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("failed to generate content: %v", err)
 		}
 
 		// Clean up spinner if it's still running
 		if spinnerStop != nil {
 			spinnerStop()
+		}
+
+		// Add the assistant message if we haven't already
+		if !addedAssistantMessage {
+			payload.addAssistantMessage(fullResponse.String())
 		}
 
 		s.nextCompletionPrefill = ""
@@ -108,9 +137,16 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 func (s *CompletionService) PerformCompletion(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (string, error) {
 	var stopSpinner func()
 	var spinnerPos int
+	addedAssistantMessage := false
 
 	prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 	defer prefillCleanup()
+
+	if s.nextCompletionPrefill != "" {
+		payload.addAssistantMessage(s.nextCompletionPrefill)
+		addedAssistantMessage = true
+	}
+
 	if cfg.ShowSpinner {
 		stopSpinner = spin(spinnerPos)
 		defer stopSpinner()
@@ -126,7 +162,12 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		return "", fmt.Errorf("no response from model")
 	}
 
-	return response.Choices[0].Content, nil
+	content := response.Choices[0].Content
+	if !addedAssistantMessage {
+		payload.addAssistantMessage(content)
+	}
+
+	return content, nil
 }
 
 // handleAssistantPrefill handles the assistant prefill message.
@@ -135,17 +176,24 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 func (s *CompletionService) handleAssistantPrefill(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (func(), int) {
 	spinnerPos := 0
 	if s.nextCompletionPrefill == "" {
-		return func() {
-		}, spinnerPos
+		return func() {}, spinnerPos
 	}
+
+	// Store the current message count to ensure proper cleanup
+	initialMessageCount := len(payload.Messages)
+
 	if cfg.EchoPrefill {
 		s.Stdout.Write([]byte(s.nextCompletionPrefill))
 		spinnerPos = len(s.nextCompletionPrefill) + 1
 	}
+
 	payload.addAssistantMessage(s.nextCompletionPrefill)
 	s.nextCompletionPrefill = ""
+
 	return func() {
-		// cleanup payload message
-		payload.Messages = payload.Messages[:len(payload.Messages)-1]
+		// Only cleanup if we actually added a message
+		if len(payload.Messages) > initialMessageCount {
+			payload.Messages = payload.Messages[:initialMessageCount]
+		}
 	}, spinnerPos
 }

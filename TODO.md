@@ -5,7 +5,7 @@
 - [x] Fix writing of bad history lines
 - [x] Fix paste flash issue
 - [x] Allow ctrl-c to stop mid-generation
-- [x] Fix concurrent connections rate limit issue
+- [ ] Fix concurrent connections rate limit issue
 - [ ] Add EDITOR support like bash
 - [ ] Enable streaming output functionality
 - [ ] Add retry setup/approach
@@ -602,3 +602,74 @@
   - [ ] Write testing guidelines
   - [ ] Add PR workflow guide
   - [ ] Include style guide
+
+### Hook System & Event Pipeline 🪝
+- [ ] Implement hook system architecture
+  - [ ] Add hook registration mechanism
+  - [ ] Support hook priority levels
+  - [ ] Enable hook chaining
+  - [ ] Add hook error handling
+  - [ ] Support async hooks
+- [ ] Add core lifecycle hooks
+  - [ ] pre-completion: Before sending to model
+  - [ ] post-completion: After receiving model response
+  - [ ] pre-save: Before saving history
+  - [ ] post-save: After saving history
+  - [ ] pre-stream: Before starting stream
+  - [ ] stream-chunk: On each stream chunk
+  - [ ] post-stream: After stream completion
+- [ ] Add session hooks
+  - [ ] session-start: On new session
+  - [ ] session-end: On session termination
+  - [ ] session-fork: On conversation fork
+  - [ ] session-merge: On conversation merge
+- [ ] Add history hooks
+  - [ ] pre-commit: Before git commit
+  - [ ] post-commit: After git commit
+  - [ ] pre-checkout: Before loading history
+  - [ ] post-checkout: After loading history
+- [ ] Implement hook management
+  - [ ] Add hook configuration files
+  - [ ] Support hook scripts in multiple languages
+  - [ ] Enable hook discovery in .cgpt/hooks
+  - [ ] Add hook template system
+  - [ ] Support global and local hooks
+- [ ] Add hook development tools
+  - [ ] Create hook debugging tools
+  - [ ] Add hook testing framework
+  - [ ] Support hook hot-reloading
+  - [ ] Add hook documentation generator
+  - [ ] Enable hook sharing/distribution
+- [ ] Implement hook security
+  - [ ] Add hook signature verification
+  - [ ] Support hook permissions
+  - [ ] Enable hook sandboxing
+  - [ ] Add hook resource limits
+  - [ ] Support hook allow/deny lists
+
+### Hook Examples & Templates 📋
+- [ ] Add message transformation hooks
+  - [ ] Message formatting hooks
+  - [ ] Content filtering hooks
+  - [ ] Token counting hooks
+  - [ ] Cost estimation hooks
+- [ ] Add integration hooks
+  - [ ] Shell command hooks
+  - [ ] API integration hooks
+  - [ ] Database hooks
+  - [ ] File system hooks
+- [ ] Add analytics hooks
+  - [ ] Usage tracking hooks
+  - [ ] Performance monitoring hooks
+  - [ ] Error reporting hooks
+  - [ ] Cost tracking hooks
+- [ ] Add automation hooks
+  - [ ] Auto-backup hooks
+  - [ ] Auto-compression hooks
+  - [ ] Auto-cleanup hooks
+  - [ ] Auto-documentation hooks
+- [ ] Add notification hooks
+  - [ ] Cost alert hooks
+  - [ ] Error notification hooks
+  - [ ] Status update hooks
+  - [ ] Progress tracking hooks

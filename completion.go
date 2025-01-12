@@ -255,7 +255,6 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 		content.WriteString(r)
 		runCfg.Stdout.Write([]byte(r))
 	}
-	s.payload.addAssistantMessage(content.String())
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
 	}
@@ -275,7 +274,6 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 		return err
 	}
 	runCfg.Stdout.Write([]byte(response))
-	s.payload.addAssistantMessage(response)
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
 	}
@@ -334,7 +332,6 @@ func (s *CompletionService) runContinuousCompletion(ctx context.Context, runCfg 
 			return err
 		}
 		runCfg.Stdout.Write([]byte(response))
-		s.payload.addAssistantMessage(response)
 		runCfg.Stdout.Write([]byte("\n"))
 		if err := s.saveHistory(); err != nil {
 			return fmt.Errorf("failed to save history: %w", err)
@@ -380,7 +377,6 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 			runCfg.Stdout.Write([]byte(r))
 		}
 		runCfg.Stdout.Write([]byte("\n"))
-		s.payload.addAssistantMessage(content.String())
 	} else {
 		response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
 			ShowSpinner: runCfg.ShowSpinner,
@@ -390,7 +386,6 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 			return err
 		}
 		runCfg.Stdout.Write([]byte(response))
-		s.payload.addAssistantMessage(response)
 	}
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
