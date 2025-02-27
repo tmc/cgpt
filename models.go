@@ -17,7 +17,8 @@ import (
 type InferenceProviderOption func(*inferenceProviderOptions)
 
 type inferenceProviderOptions struct {
-	httpClient *http.Client
+	httpClient  *http.Client
+	retryConfig *RetryConfig
 
 	openaiCompatUseLegacyMaxTokens bool
 }
@@ -29,10 +30,25 @@ func WithHTTPClient(client *http.Client) InferenceProviderOption {
 	}
 }
 
+// WithRetryConfig sets the retry configuration for API calls
+func WithRetryConfig(cfg *RetryConfig) InferenceProviderOption {
+	return func(mo *inferenceProviderOptions) {
+		mo.retryConfig = cfg
+	}
+}
+
 // WithUseLegacyMaxTokens sets whether to use legacy max tokens behavior for OpenAI compatibility
 func WithUseLegacyMaxTokens(useLegacy bool) InferenceProviderOption {
 	return func(mo *inferenceProviderOptions) {
 		mo.openaiCompatUseLegacyMaxTokens = useLegacy
+	}
+}
+
+// getDefaultOptions returns the default options
+func getDefaultOptions() *inferenceProviderOptions {
+	return &inferenceProviderOptions{
+		httpClient:  http.DefaultClient,
+		retryConfig: DefaultRetryConfig,
 	}
 }
 

@@ -79,6 +79,13 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum tokens to generate")
 	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0.05, "Temperature for sampling")
 
+	// Retry configuration flags
+	fs.IntVar(&opts.Config.RetryMaxAttempts, "retry-max-attempts", 3, "Maximum number of retry attempts")
+	fs.DurationVar(&opts.Config.RetryInitialBackoff, "retry-initial-backoff", 100*time.Millisecond, "Initial backoff duration")
+	fs.DurationVar(&opts.Config.RetryMaxBackoff, "retry-max-backoff", 10*time.Second, "Maximum backoff duration")
+	fs.Float64Var(&opts.Config.RetryBackoffMultiplier, "retry-backoff-multiplier", 2.0, "Backoff multiplier for each retry")
+	fs.Float64Var(&opts.Config.RetryJitterFactor, "retry-jitter-factor", 0.1, "Jitter factor for retry backoff (0-1)")
+
 	// Config file path
 	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
 }

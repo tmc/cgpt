@@ -33,22 +33,42 @@ var tokenLimits = map[string]int{
 }
 
 type Config struct {
+	// Backend configuration
 	Backend     string  `yaml:"backend"`
 	Model       string  `yaml:"model"`
 	Stream      bool    `yaml:"stream"`
 	MaxTokens   int     `yaml:"maxTokens"`
 	Temperature float64 `yaml:"temperature"`
 
-	SystemPrompt string             `yaml:"systemPrompt"`
+	// API Keys
+	AnthropicAPIKey string `yaml:"anthropicAPIKey,omitempty"`
+	OpenAIAPIKey    string `yaml:"openaiAPIKey,omitempty"`
+	GoogleAPIKey    string `yaml:"googleAPIKey,omitempty"`
+
+	// System prompt
+	SystemPrompt string             `yaml:"systemPrompt,omitempty"`
 	LogitBias    map[string]float64 `yaml:"logitBias"`
 
+	// Retry configuration
+	RetryMaxAttempts int           `yaml:"retryMaxAttempts"`
+	RetryDelay       time.Duration `yaml:"retryDelay"`
+
+	// Completion timeout
 	CompletionTimeout time.Duration `yaml:"completionTimeout"`
 
 	Debug bool `yaml:"debug"`
+}
 
-	OpenAIAPIKey    string `yaml:"openaiAPIKey"`
-	AnthropicAPIKey string `yaml:"anthropicAPIKey"`
-	GoogleAPIKey    string `yaml:"googleAPIKey"`
+// GetRetryConfig returns the retry configuration from the config
+func (c *Config) GetRetryConfig() RetryConfig {
+	if c.RetryMaxAttempts == 0 {
+		return DefaultRetryConfig()
+	}
+
+	return RetryConfig{
+		MaxAttempts: c.RetryMaxAttempts,
+		Delay:       c.RetryDelay,
+	}
 }
 
 // LoadConfig loads the configuration from various sources in the following order of precedence:

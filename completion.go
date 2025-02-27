@@ -399,3 +399,136 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 func (s *CompletionService) SetNextCompletionPrefill(content string) {
 	s.nextCompletionPrefill = strings.TrimRight(content, " \t\n")
 }
+
+// PerformCompletionStreaming provides a streaming version of the completion.
+func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
+	ch := make(chan string)
+	go func() {
+		defer close(ch)
+		fullResponse := strings.Builder{}
+		firstChunk := true
+		addedAssistantMessage := false
+
+		prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
+
+		// Send prefill immediately if it exists
+		if s.nextCompletionPrefill != "" {
+			if cfg.EchoPrefill {
+				spinnerPos = len(s.nextCompletionPrefill) + 1
+			}
+			select {
+			case ch <- s.nextCompletionPrefill + " ":
+			case <-ctx.Done():
+				prefillCleanup()
+				return
+			}
+			payload.addAssistantMessage(s.nextCompletionPrefill)
+			addedAssistantMessage = true
+			fullResponse.WriteString(s.nextCompletionPrefill)
+		}
+
+		// Start spinner on the last character
+		var spinnerStop func()
+		if cfg.ShowSpinner {
+			spinnerStop = spin(spinnerPos)
+		}
+
+		// Create a cancellable context for the generation
+		genCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		// Handle ctrl-c by cancelling the generation context
+		go func() {
+			select {
+			case <-ctx.Done():
+				cancel()
+			case <-genCtx.Done():
+			}
+		}()
+
+		// Use WithRetry for the model.GenerateContent call
+		retryCfg := s.cfg.GetRetryConfig()
+		_, err := WithRetry(genCtx, retryCfg, func(retryCtx context.Context) (llms.Response, error) {
+			return s.model.GenerateContent(retryCtx, payload.Messages,
+				llms.WithMaxTokens(s.cfg.MaxTokens),
+				llms.WithTemperature(s.cfg.Temperature),
+				llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+					if firstChunk {
+						prefillCleanup()
+						if spinnerStop != nil {
+							spinnerStop()
+							spinnerStop = nil
+						}
+						firstChunk = false
+					}
+
+					select {
+					case ch <- string(chunk):
+						fullResponse.Write(chunk)
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}))
+		})
+
+		if err != nil && !errors.Is(err, context.Canceled) {
+			s.logger.Errorf("failed to generate content: %v", err)
+		}
+
+		// Clean up spinner if it's still running
+		if spinnerStop != nil {
+			spinnerStop()
+		}
+
+		// Add the assistant message if we haven't already
+		if !addedAssistantMessage {
+			payload.addAssistantMessage(fullResponse.String())
+		}
+
+		s.nextCompletionPrefill = ""
+	}()
+	return ch, nil
+}
+
+// PerformCompletion provides a non-streaming version of the completion.
+func (s *CompletionService) PerformCompletion(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (string, error) {
+	var stopSpinner func()
+	var spinnerPos int
+	addedAssistantMessage := false
+
+	prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
+	defer prefillCleanup()
+
+	if s.nextCompletionPrefill != "" {
+		payload.addAssistantMessage(s.nextCompletionPrefill)
+		addedAssistantMessage = true
+	}
+
+	if cfg.ShowSpinner {
+		stopSpinner = spin(spinnerPos)
+		defer stopSpinner()
+	}
+
+	// Use WithRetry for the model.GenerateContent call
+	retryCfg := s.cfg.GetRetryConfig()
+	response, err := WithRetry(ctx, retryCfg, func(retryCtx context.Context) (llms.Response, error) {
+		return s.model.GenerateContent(retryCtx, payload.Messages,
+			llms.WithMaxTokens(s.cfg.MaxTokens),
+			llms.WithTemperature(s.cfg.Temperature))
+	})
+
+	if err != nil {
+		return "", fmt.Errorf("failed to generate content: %w", err)
+	}
+	if len(response.Choices) == 0 {
+		return "", fmt.Errorf("no response from model")
+	}
+
+	content := response.Choices[0].Content
+	if !addedAssistantMessage {
+		payload.addAssistantMessage(content)
+	}
+
+	return content, nil
+}

@@ -113,8 +113,49 @@ backend: "anthropic"
 model: "claude-3-7-sonnet-20250219"
 stream: true
 maxTokens: 2048
+temperature: 0.05
 systemPrompt: "You are a helpful assistant."
+
+# Retry configuration
+retryMaxAttempts: 3           # Maximum number of retry attempts
+retryInitialBackoff: "100ms"  # Initial backoff duration
+retryMaxBackoff: "10s"        # Maximum backoff duration
+retryBackoffMultiplier: 2.0   # Backoff multiplier for each retry
+retryJitterFactor: 0.1        # Jitter factor for retry backoff (0-1)
+
+# Completion timeout
+completionTimeout: "2m"
 ```
+
+### Command Line Options
+
+- `-b, --backend string`: The backend to use (default "anthropic")
+- `-m, --model string`: The model to use (default "claude-3-5-sonnet-20241022")
+- `-i, --input string`: Direct string input (overrides -f)
+- `-f, --file string`: Input file path. Use '-' for stdin (default "-")
+- `-c, --continuous`: Run in continuous mode (interactive)
+- `-s, --system-prompt string`: System prompt to use
+- `-p, --prefill string`: Prefill the assistant's response
+- `-I, --history-load string`: File to read completion history from
+- `-O, --history-save string`: File to store completion history in
+- `--config string`: Path to the configuration file (default "config.yaml")
+- `-v, --verbose`: Verbose output
+- `--debug`: Debug output
+- `-n, --completions int`: Number of completions (when running non-interactively with history)
+- `-t, --max-tokens int`: Maximum tokens to generate (default 8000)
+- `--completion-timeout duration`: Maximum time to wait for a response (default 2m0s)
+
+### Retry Configuration Options
+
+The retry facility helps handle transient API failures by automatically retrying failed requests with exponential backoff and jitter. You can configure the retry behavior using the following options:
+
+- `--retry-max-attempts int`: Maximum number of retry attempts (default 3)
+- `--retry-initial-backoff duration`: Initial backoff duration (default 100ms)
+- `--retry-max-backoff duration`: Maximum backoff duration (default 10s)
+- `--retry-backoff-multiplier float`: Backoff multiplier for each retry (default 2.0)
+- `--retry-jitter-factor float`: Jitter factor for retry backoff (0-1) (default 0.1)
+
+The retry facility uses exponential backoff with jitter to prevent thundering herd problems. Each retry attempt will wait longer than the previous one, up to the maximum backoff duration. The jitter factor adds randomness to prevent multiple clients from retrying simultaneously.
 
 ## Vim Plugin
 
