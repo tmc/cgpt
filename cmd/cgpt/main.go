@@ -13,7 +13,7 @@
 // Flags:
 //
 //	-b, --backend string             The backend to use (default "anthropic")
-//	-m, --model string               The model to use (default "claude-3-5-sonnet-20240620")
+//	-m, --model string               The model to use (default "claude-3-7-sonnet-20250219")
 //	-i, --input string               Direct string input (can be used multiple times)
 //	-f, --file string                Input file path. Use '-' for stdin (can be used multiple times)
 //	-c, --continuous                 Run in continuous mode (interactive)
@@ -74,7 +74,7 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 
 	// Config flags
 	fs.StringVarP(&opts.Config.Backend, "backend", "b", "anthropic", "The backend to use")
-	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-3-5-sonnet-20240620", "The model to use")
+	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-3-7-sonnet-20250219", "The model to use")
 	fs.StringVarP(&opts.Config.SystemPrompt, "system-prompt", "s", "", "System prompt to use")
 	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum tokens to generate")
 	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0.05, "Temperature for sampling")

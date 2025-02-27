@@ -68,7 +68,7 @@ cgpt [flags]
 ### Flags
 
 - `-b, --backend string`: The backend to use (default "anthropic")
-- `-m, --model string`: The model to use (default "claude-3-5-sonnet-20241022")
+- `-m, --model string`: The model to use (default "claude-3-7-sonnet-20250219")
 - `-i, --input string`: Direct string input (overrides -f)
 - `-f, --file string`: Input file path. Use '-' for stdin (default "-")
 - `-c, --continuous`: Run in continuous mode (interactive)
@@ -110,7 +110,7 @@ Example `config.yaml`:
 
 ```yaml
 backend: "anthropic"
-model: "claude-3-5-sonnet-20241022"
+model: "claude-3-7-sonnet-20250219"
 stream: true
 maxTokens: 2048
 systemPrompt: "You are a helpful assistant."
@@ -129,7 +129,7 @@ cgpt includes a Vim plugin for easy integration. To use it, copy the `vim/plugin
 ### Vim Plugin Configuration
 
 - `g:cgpt_backend`: Set the backend for cgpt (default: 'anthropic')
-- `g:cgpt_model`: Set the model for cgpt (default: 'claude-3-5-sonnet-20241022')
+- `g:cgpt_model`: Set the model for cgpt (default: 'claude-3-7-sonnet-20250219')
 - `g:cgpt_system_prompt`: Set the system prompt for cgpt
 - `g:cgpt_config_file`: Set the path to the cgpt configuration file
 - `g:cgpt_include_filetype`: Include the current filetype in the prompt (default: 0)

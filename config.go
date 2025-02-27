@@ -16,7 +16,7 @@ import (
 var defaultBackend = "anthropic" // Configurable via 'CGPT_BACKEND" (or via configuration files).
 
 var defaultModels = map[string]string{
-	"anthropic": "claude-3-5-sonnet-20241022",
+	"anthropic": "claude-3-7-sonnet-20250219",
 	"openai":    "gpt-4o",
 	"ollama":    "llama3.2",
 	"googleai":  "gemini-pro",
