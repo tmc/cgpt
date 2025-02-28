@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
-# cgpt-meta-swarm.sh
+# cgpt-meta-swarm.sh - Meta-level swarm coordination framework
+#
+# This script implements a sophisticated multi-agent coordination system
+# that enables recursive analysis and self-improvement through agent swarms.
+#
+# Features:
+# - Dynamic agent assembly
+# - Perspective coordination
+# - Meta-analysis capabilities
+# - Self-improvement loops
+#
+# Usage:
+#   ./cgpt-meta-swarm.sh [optional focus area]
+#
+# Example:
+#   ./cgpt-meta-swarm.sh "analyze this codebase"
+#   ./cgpt-meta-swarm.sh "improve these prompts"
+
 set -euo pipefail
 
 ts="$(date +%s)"
