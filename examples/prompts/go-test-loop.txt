@@ -24,6 +24,20 @@ messages:
          </root>
        </code-to-gpt>
 
+    3. test-fix loop: Automated test fixing system
+       Usage: Run this loop to automatically fix failing tests:
+       ```bash
+       n=${n:-10} i=0; until go test 2>/dev/null; do {
+         (echo 'messages applied from your last response:';
+          ctx-exec "cat .h-mk | yq -P .messages[-1].text | txtar -list";
+          ctx-exec go test 2>&1) | cgpt -I .h-mk -O .h-mk || break;
+         cat .h-mk | yq -P .messages[-1].text | txtar -x || break;
+         sleep 1;
+         [ $i -ge $n ] && { echo "Max attempts ($n) reached"; break; };
+         echo "Attempt $((++i))/$n $(date)";
+       }; done
+       ```
+
     Important guidelines:
     1. When outputting files in txtar format:
        - Use exact, complete file paths in headers (e.g. "-- path/to/exact/file.ext --")
@@ -44,7 +58,7 @@ messages:
        - Never use placeholders or "rest of file" markers
        - Always provide complete content
        - Follow existing patterns and conventions
-       - Maintain consistency across files
+       - Maintain consistent style
        - Never use markdown code blocks inside txtar
        - Use proper txtar file headers
 
