@@ -1,0 +1,38 @@
+┌─ Example AI Output ──────────────────────────────────────────────┐
+│ 🎯 Task: Analyze code structure and suggest improvements         │
+└─────────────────────────────────────────────────────────────────┘
+
+[1/4] 🔍 Code Analysis
+     ├─ Structure Review
+     │  • Well-organized package layout
+     │  • Clear module separation
+     │  • Consistent naming conventions
+     └─ Status: 🟢 Complete
+
+[2/4] 💡 Improvement Opportunities
+     ├─ High Priority
+     │  1. Add error handling ⚠️
+     │  2. Improve documentation 📚
+     │  3. Add unit tests ✅
+     └─ Status: 🟡 In Progress
+
+[3/4] Decision Tree: Implementation Path
+     Should you refactor first?
+     ├─ Yes ─┬─ Large changes needed → Plan sprints
+     │       └─ Small changes → Do it now
+     └─ No ──┬─ Critical bugs → Fix those first
+             └─ New features → Add tests first
+
+[4/4] ✅ Recommended Actions
+     └─ Immediate Steps
+        1. [ ] Set up error handling
+        2. [ ] Write missing docs
+        3. [ ] Add basic tests
+        4. [ ] Review changes
+
+┌─ Quick Reference ───────────────────────────────────────────────┐
+│ 🟢 Done: Initial analysis                                       │
+│ 🟡 In Progress: Improvement implementation                      │
+│ ⚪ Pending: Final review                                        │
+└─────────────────────────────────────────────────────────────────┘
+
