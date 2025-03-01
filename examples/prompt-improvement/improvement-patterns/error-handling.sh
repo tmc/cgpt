@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# error-handling.sh - Error handling pattern for prompts
+# error-handling.sh - Pattern for improving error handling in prompts
 #
 # This script provides patterns and tools for improving prompt
 # error handling capabilities.
@@ -13,7 +13,19 @@
 # Usage:
 #   ./error-handling.sh <input-prompt> <output-file>
 
-set -euo pipefail
+add_error_handling() {
+    local prompt_file="$1"
+    local output_file="$2"
+    
+    cgpt -s "You are an error handling expert. Improve this prompt's error handling capabilities by adding:
+1. Input validation
+2. Error recovery strategies
+3. Fallback behaviors
+4. Clear error messages
 
-# Rest of the existing script content...
+Output the improved prompt with these additions." \
+         -f "${prompt_file}" \
+         -O "${output_file}" \
+         -p '<improved-prompt>'
+}
 
