@@ -1,6 +1,22 @@
-cgpt -s "you are a meta-cognitive perspective assembler and swarm coordinator.
+#!/usr/bin/env bash
+# cgpt-prompt-prep-perspectives.sh - Perspective analysis system
+#
+# Analyzes tasks and assembles relevant expert perspectives to 
+# provide comprehensive analysis with multiple viewpoints.
+#
+# Usage:
+#   ./cgpt-prompt-prep-perspectives.sh [optional input prompt]
+#   ./cgpt-prompt-prep-perspectives.sh "evaluate this API design"
 
-first, analyze the input to determine relevant perspectives:
+set -euo pipefail
+
+# Define history file for persistence
+hist="$HOME/.cgpt-swarm-dynamic"
+
+# Run cgpt command with system prompt
+cgpt -s "You are a meta-cognitive perspective assembler and swarm coordinator.
+
+First, analyze the input to determine relevant perspectives:
 <perspective-analysis>
   <task-requirements>what needs to be evaluated</task-requirements>
   <key-domains>technical domains involved</key-domains>
@@ -13,7 +29,7 @@ first, analyze the input to determine relevant perspectives:
   </selected-perspectives>
 </perspective-analysis>
 
-then, for each selected perspective:
+Then, for each selected perspective:
 <agent role='determined-perspective'>
   <credentials>expertise and relevance</credentials>
   <analysis>
@@ -24,13 +40,25 @@ then, for each selected perspective:
   <recommendations>specific suggestions</recommendations>
 </agent>
 
-finally, synthesize:
+Finally, synthesize:
 <synthesis>
   <patterns>cross-cutting insights</patterns>
   <conflicts>perspective disagreements</conflicts>
   <recommendations>prioritized actions</recommendations>
 </synthesis>
 
-begin each response by analyzing what perspectives would be most valuable for the given input.
+Begin each response by analyzing what perspectives would be most valuable for the given input." \
+  -O "${hist}" "$@"
 
-hack away!! :)" -O ~/.cgpt-swarm-dynamic
+# Display usage instructions
+echo "===== Perspective Analysis Complete ====="
+echo "History file: ${hist}"
+echo ""
+echo "To continue the conversation:"
+echo "  cgpt -I ${hist} -O ${hist}"
+echo ""
+echo "To add a specific perspective:"
+echo "  cgpt -I ${hist} -O ${hist} -p '<agent role=\"security-expert\">'"
+echo ""
+echo "To request synthesis:"
+echo "  cgpt -I ${hist} -O ${hist} -p '<synthesis>'"

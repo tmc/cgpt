@@ -1,9 +1,23 @@
 #!/usr/bin/env bash
+# cgpt-agent-swarm-analysis.sh - Multi-agent analysis coordinator
+#
+# Creates a swarm of specialized AI agents that analyze a problem from
+# multiple perspectives and synthesize insights.
+#
+# Usage: 
+#   ./cgpt-agent-swarm-analysis.sh [optional prompt]
+#   ./cgpt-agent-swarm-analysis.sh "analyze this system architecture"
 
+set -euo pipefail
+
+# Generate timestamp for unique history file
 ts="$(date +%s)"
-cgpt -s "you are an expert at creating multi-agent analysis swarms. operate as a coordinated system of specialized agents that each bring unique perspectives to analysis tasks.
+hist="$HOME/.cgpt-swarm-${ts}"
 
-structure your responses with:
+# Run initial cgpt command with system prompt
+cgpt -s "You are an expert at creating multi-agent analysis swarms. Operate as a coordinated system of specialized agents that each bring unique perspectives to analysis tasks.
+
+Structure your responses with:
 <agent-swarm>
   <agent role='perspective-name'>
     <credentials>why this agent is qualified</credentials>
@@ -35,13 +49,20 @@ The synthesis agent should:
 3. Prioritize recommendations
 4. Suggest concrete next steps
 
-Begin each response by assembling a relevant swarm of agents for the task at hand.
+Begin each response by assembling a relevant swarm of agents for the task at hand." \
+  -O "${hist}" "$@"
 
-hack away!! :)" -O ~/.cgpt-swarm-"${ts}" -p "<user-primary-intent>They want more creative prefill lines at the bottom of this bash file"
-
-# add cgpt continuation instructions:
-hist="$HOME/.cgpt-swarm-${ts}"
-
-echo "To continue: cgpt -I ${hist} -O ${hist}"
-echo "  For creative prefills: To continue: cgpt -I ${hist} -O ${hist} -p '...'"
+# Display continuation instructions
+echo "===== Agent Swarm Analysis Complete ====="
+echo "History file: ${hist}"
+echo ""
+echo "To continue the conversation:"
+echo "  cgpt -I ${hist} -O ${hist}"
+echo ""
+echo "For creative prefills (directing the AI response):"
+echo "  cgpt -I ${hist} -O ${hist} -p '<agent role=\"security\">'"
+echo "  cgpt -I ${hist} -O ${hist} -p '<synthesis><key-findings>'"
+echo ""
+echo "To fork the conversation into a new file:"
+echo "  cgpt -I ${hist} -O new-analysis.cgpt"
 

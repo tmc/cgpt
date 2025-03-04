@@ -1,0 +1,41 @@
+## Project Requirements
+
+# Feature: Weather Data Analysis Tool
+
+The goal is to create a simple Python command-line tool that analyzes weather data from CSV files.
+
+## Core Requirements:
+
+1. Create a command-line tool that accepts CSV files containing weather data
+2. Implement data validation to ensure CSV files have the required structure
+3. Calculate basic statistics (min, max, average) for temperature and precipitation
+4. Generate simple reports in both text and JSON formats
+5. Implement error handling for invalid inputs
+6. Add appropriate logging
+7. Write basic tests for core functionality
+
+## CSV Format:
+The tool should expect CSV files with the following columns:
+- date (YYYY-MM-DD)
+- location (string)
+- temperature (float, in Celsius)
+- precipitation (float, in mm)
+- humidity (integer percentage)
+- wind_speed (float, in km/h)
+
+## Command-line Interface:
+```
+weather-analyzer.py --input data.csv [--output report.txt] [--format text|json] [--stats temp|precip|all]
+```
+
+## Expected Output:
+The tool should generate reports containing:
+- Summary of the data (locations, date range)
+- Statistical analysis of selected metrics
+- Any warnings or errors found during processing
+
+## Additional Requirements:
+- Code should follow PEP 8 style guide
+- Include appropriate documentation
+- Handle edge cases gracefully
+- Optimize for performance with larger datasets
