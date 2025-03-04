@@ -9,6 +9,7 @@
 # - Perspective coordination
 # - Meta-analysis capabilities
 # - Self-improvement loops
+# - Command generation suggestions
 #
 # Usage:
 #   ./cgpt-meta-swarm.sh [optional focus area]
@@ -16,14 +17,76 @@
 # Example:
 #   ./cgpt-meta-swarm.sh "analyze this codebase"
 #   ./cgpt-meta-swarm.sh "improve these prompts"
+#   ./cgpt-meta-swarm.sh --no-suggestions "minimal output mode"
 
 set -euo pipefail
 
+# Configuration
+MAX_DEPTH=${MAX_DEPTH:-1}        # Maximum recursion depth
+SHOW_SUGGESTIONS=${SHOW_SUGGESTIONS:-true}  # Show command suggestions
+MAX_TOKENS=${MAX_TOKENS:-500}    # Token limit for meta-prompting
+
+# Parse command line arguments
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --no-suggestions)
+      SHOW_SUGGESTIONS=false
+      shift
+      ;;
+    --depth)
+      MAX_DEPTH="$2"
+      shift 2
+      ;;
+    --tokens)
+      MAX_TOKENS="$2"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: $0 [options] [prompt]"
+      echo ""
+      echo "Options:"
+      echo "  --no-suggestions    Skip command suggestion generation"
+      echo "  --depth NUMBER      Set maximum recursion depth (default: 1)"
+      echo "  --tokens NUMBER     Token limit for meta-prompting (default: 500)"
+      echo "  --help, -h          Show this help message"
+      echo ""
+      echo "Examples:"
+      echo "  $0 \"analyze this system architecture\""
+      echo "  $0 --depth 2 \"recursive analysis of codebase\""
+      echo "  $0 --no-suggestions \"minimal output\""
+      exit 0
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
+
+# Generate timestamp for unique history file
 ts="$(date +%s)"
+hist="$HOME/.cgpt-swarm-${ts}"
+
+# Define color codes for output
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Helper function for formatted output
+print_section() {
+  echo -e "\n${BLUE}=== $1 ===${NC}\n"
+}
+
+# Run initial cgpt command with system prompt
+print_section "Initializing Meta-Swarm Framework"
 
 cgpt -s "You are an expert at creating multi-agent analysis/execution swarms. Operate as a coordinated system of specialized agents that each bring unique perspectives to analysis tasks.
 
-structure your responses with something like:
+Structure your responses with:
 <agent-swarm>
   <agent role='perspective-name'>
     <credentials>why this agent is qualified</credentials>
@@ -55,84 +118,94 @@ The synthesis agent should:
 3. Prioritize recommendations
 4. Suggest concrete next steps
 
-
 Note that this tool is cgpt, a Unix-friendly command line AI tool.
 
 <cgpt-usage>$(cgpt -h 2>&1)</cgpt-usage>
 
-Begin each response by assembling a relevant swarm of agents for the task at hand.
+Begin each response by assembling a relevant swarm of agents for the task at hand." \
+  -O "${hist}" "$@"
 
-hack away!! :)" -O ~/.cgpt-swarm-"${ts}" "$0"
-
-hist=~/.cgpt-swarm-"${ts}"
-
-# Do one recursive pass:
+# Handle recursive analysis if requested
 current_depth=${CGPT_DEPTH:-0}
 next_depth=$((current_depth + 1))
-max_depth=1
 export CGPT_DEPTH=$next_depth
-if [ "$current_depth" -ge "$max_depth" ]; then
-  exit 0
+
+if [ "$current_depth" -ge "$MAX_DEPTH" ]; then
+  echo -e "${YELLOW}Maximum recursion depth reached (${MAX_DEPTH}).${NC}"
+else
+  print_section "Phase 1 Complete"
+  echo -e "${GREEN}Initial analysis complete. Moving to meta-analysis phase...${NC}"
 fi
 
-echo -e "\n\n=== Phase 1 Complete! ===\n\n"
+# Skip suggestions if requested
+if [ "$SHOW_SUGGESTIONS" = false ]; then
+  print_section "Command Suggestions Skipped"
+  echo -e "${CYAN}Command suggestions disabled. Use --suggestions to enable.${NC}"
+else
+  # Generate command suggestions asynchronously
+  print_section "Generating Command Suggestions"
+  
+  # Create a FIFO for async streaming
+  meta_fifo="/tmp/meta_prompts_$$.fifo"
+  mkfifo "$meta_fifo"
+  
+  # Run the suggestion generation in background
+  (
+    cgpt -t "$MAX_TOKENS" -s "You are a meta prompting and agentic toolchain assistant extending the suggested meta-prompts for the user that are AI-enhanced. Output a few prompts that would likely interest the user. Build them up from simple to sophisticated and match the style of what is in the output already. End with one highlight that you think will catch their eye. The value of \${hist}=${hist} -- populate it in your generated commands so they can be directly copy+pasted." \
+      -i 'Please add a few more meta-prompting examples for the user:' \
+      -f <(cat "${hist}") \
+      -O "${hist}-meta-prompt-suggestions" \
+      > "$meta_fifo"
+  ) &
+  meta_pid=$!
+  
+  # Check if pv is available for smoother output
+  lcat="cat"
+  command -v pv >/dev/null 2>&1 && lcat="pv -qL 300"
+  
+  # Display command templates and suggestions
+  echo -e "\n${CYAN}=== Swarm Analysis Framework Command Templates ===${NC}\n"
+  cat << EOT |$lcat
+# Basic Continuation
+cgpt -I ${hist} -O ${hist}
 
-# Create a FIFO for async streaming
-meta_fifo="/tmp/meta_prompts_$$.fifo"
-mkfifo "$meta_fifo"
-(
-    cgpt -t 500 -s "You are a meta prompting and agentic toolchain assistant extending the suggested meta-prompts for the user that are AI-enhacned. Output a few prompts that would likely interest the user. Build them up from simple to sophisticated and match the style of what is  in the output already. Be sure end with one highlight one that you think will catch their eye. The source code of the containner file is file is: $(ctx-exec cat "${BASH_SOURCE[0]}"). The value of \${hist}=${hist} -- populate it in your generated commands so they can then copy+paste them directly." \
-    -i 'Please add a few more meta-prompting examples for the user given this trajectory:' \
-    -f <(ctx-exec cat "${hist}") \
-    -O "${hist}-meta-prompt-suggestionns" \
-      > "$meta_fifo" ) &
-meta_pid=$!
+# Ask Follow-up Question
+cgpt -I ${hist} -O ${hist} -i "Can you add more detail about X?"
 
-lcat="cat"
-command -v pv >/dev/null 2>&1 && lcat="pv -qL 300"
+# Fork Conversation
+cgpt -I ${hist} -O new-analysis.cgpt
 
+# Prefill Responses (Direct AI Output)
+cgpt -I ${hist} -O ${hist} -p '<agent role="security-expert">'
+cgpt -I ${hist} -O ${hist} -i "create a diagram" -p '\`\`\`mermaid'
+cgpt -I ${hist} -O ${hist} -i "dive deeper" -p "<deeper-analysis>"
 
-echo -e "\n=== Follow Swarm Analysis Framework ===\n"
-cat << EOT |$lcat
+# Generate Meta-Commands
+cgpt -I ${hist} -O ${hist} -i "Output 5 cgpt commands for code architecture review"
+cgpt -I ${hist} -O ${hist} -i "Create sequence of commands to analyze our workflow"
+cgpt -I ${hist} -O ${hist} -i "Design cgpt commands that generate better cgpt commands"
 
-# Basic 1-time continuation:
-    cgpt -I ${hist} -O ${hist}" "can you add more detail about a?"
+# Advanced Analysis Patterns
+cgpt -I ${hist} -O ${hist} -i "Generate commands to build analysis framework for X"
+cgpt -I ${hist} -O ${hist} -i "Output commands to implement continuous improvement cycle"
 
-# Basic continuous chat completion:
-    cgpt -I ${hist} -O ${hist}"
-
-# Forking conversation history  continuous chat completion:
-    cgpt -I ${hist} -O new-convo-direction.cgpt
-
-# Assistant prefill
-    cgpt -I ${hist} -O ${hist} -i "output a mermaid diagram" -p '\`\`\`mermaid'
-    cgpt -I ${hist} -O ${hist} -i "go deeper in your examination" -p "<deeper-dives><role1>"
-
-# Command Generation Meta-Prompts
-    cgpt -I ${hist} -O ${hist} -i "Output 10 cgpt commands for systematic code architecture review"
-
-# System Architecture Analysis  
-    cgpt -I ${hist} -O ${hist} -i "Output 10 cgpt commands optimized for analyzing microservice architectures"
-
-# Meta-Learning Framework
-    cgpt -I ${hist} -O ${hist} -i "Create sequence of 5 cgpt commands to analyze and improve our analysis process"
-
-# Toolchain Optimization
-    cgpt -I ${hist} -O ${hist} -i "Generate 7 cgpt commands to systematically evaluate CI/CD pipeline"
-
-# Meta-Command Generation
-    cgpt -I ${hist} -O ${hist} -i "Design cgpt commands that generate better cgpt commands"
-    cgpt -I ${hist} -O ${hist} -i "Create 5 cgpt commands to analyze command history and suggest improvements"
-    cgpt -I ${hist} -O ${hist} -i "Generate cgpt commands to build analysis framework for \${specific_domain}"
-
-# System Evolution Framework
-    cgpt -I ${hist} -O ${hist} -i "Output 8 cgpt commands to implement continuous improvement cycle"
-
-$(cat $meta_fifo & wait $meta_pid)
+# Custom Suggestions
+$(cat "$meta_fifo" & wait "$meta_pid")
 EOT
+fi
 
-echo -e "\n\n=== Meta Swarm Framework Ready ===\n\n"
+print_section "Meta-Swarm Framework Ready"
 
-echo "The simplest way to get started is to now run:
+echo -e "${GREEN}Your meta-swarm analysis is complete!${NC}"
+echo -e "${CYAN}History file: ${YELLOW}${hist}${NC}"
+echo ""
+echo -e "The simplest way to continue is to run:"
+echo -e "    ${YELLOW}cgpt -I ${hist} -O ${hist}${NC}"
+echo ""
+echo -e "For help with more advanced commands, run:"
+echo -e "    ${YELLOW}$0 --help${NC}"
 
-    cgpt -I ${hist} -O ${hist}"
+# Clean up
+if [ -f "$meta_fifo" ]; then
+  rm -f "$meta_fifo"
+fi
