@@ -1,0 +1,46 @@
+-- .summary.txt --
+This txtar file demonstrates the format used by the sophon agent to specify file changes.
+Each file begins with a header (-- filename --) and contains the complete contents of the file.
+The sophon agent uses this format to describe code modifications in a structured way.
+
+-- examples/sophon/hello-world.py --
+#!/usr/bin/env python3
+"""
+A simple hello world example for the sophon agent.
+"""
+
+def main():
+    print("Hello from the Sophon agent!")
+    print("This is a demonstration of the txtar format.")
+    print("Sophon can modify multiple files in a single response.")
+    
+    # Calculate and display something
+    result = calculate_fibonacci(10)
+    print(f"The 10th Fibonacci number is: {result}")
+
+def calculate_fibonacci(n):
+    """Calculate the nth Fibonacci number recursively."""
+    if n <= 1:
+        return n
+    return calculate_fibonacci(n-1) + calculate_fibonacci(n-2)
+
+if __name__ == "__main__":
+    main()
+
+-- examples/sophon/config.json --
+{
+  "agent": "sophon",
+  "version": "0.1.0",
+  "settings": {
+    "max_iterations": 10,
+    "debug": false,
+    "timeout": 300
+  },
+  "capabilities": [
+    "code_generation",
+    "refactoring",
+    "documentation",
+    "testing",
+    "optimization"
+  ]
+}
