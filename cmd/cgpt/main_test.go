@@ -372,15 +372,27 @@ func TestMain(t *testing.T) {
 	}{
 		{
 			name:    "no args",
-			args:    []string{},
+			args:    []string{"cgpt-test"}, // Provide program name as args[0]
 			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var stderr bytes.Buffer
 			ctx := context.Background()
-			opts := cgpt.RunOptions{}
-			fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+			
+			// Similar to how main.go initializes things
+			opts, fs, err := initFlags(tt.args, strings.NewReader(""))
+			if err != nil {
+				// Expected for "no args" test case
+				if tt.wantErr {
+					return
+				}
+				t.Fatalf("initFlags() error = %v", err)
+			}
+			
+			opts.Stderr = &stderr
+			
 			if err := run(ctx, opts, fs); (err != nil) != tt.wantErr {
 				t.Errorf("run() error = %v, wantErr %v", err, tt.wantErr)
 			}

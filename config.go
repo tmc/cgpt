@@ -99,13 +99,13 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 			fmt.Fprintf(stderr, "cgpt: model set by flag: %s\n", flagSet.Lookup("model").Value.String())
 		}
 		hasModel = true
-	} else if isEnvSet("CGPT_MODEL") {
+	} else if isEnvSet("CGPT_MODEL") && os.Getenv("CGPT_MODEL") != "" {
 		if verbose, _ := flagSet.GetBool("verbose"); verbose {
 			fmt.Fprintf(stderr, "cgpt: model set by env: %s\n", os.Getenv("CGPT_MODEL"))
 		}
 		hasModel = true
 		v.Set("model", os.Getenv("CGPT_MODEL"))
-	} else if v.InConfig("model") {
+	} else if v.InConfig("model") && v.GetString("model") != "" {
 		if verbose, _ := flagSet.GetBool("verbose"); verbose {
 			fmt.Fprintf(stderr, "cgpt: model set in config: %s\n", v.GetString("model"))
 		}
@@ -117,10 +117,12 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 		if verbose, _ := flagSet.GetBool("verbose"); verbose {
 			fmt.Fprintln(stderr, "cgpt: no model set, using default")
 		}
-		if defaultModel, ok := defaultModels[backend]; ok {
-			v.Set("model", defaultModel)
-			if verbose, _ := flagSet.GetBool("verbose"); verbose {
-				fmt.Fprintf(stderr, "cgpt: using default model for %s backend: %s\n", backend, defaultModel)
+		if backend != "" {
+			if defaultModel, ok := defaultModels[backend]; ok {
+				v.Set("model", defaultModel)
+				if verbose, _ := flagSet.GetBool("verbose"); verbose {
+					fmt.Fprintf(stderr, "cgpt: using default model for %s backend: %s\n", backend, defaultModel)
+				}
 			}
 		}
 	}
