@@ -1,0 +1,26 @@
+httprr trace v1
+351 937
+POST https://api.anthropic.com/v1/messages HTTP/1.1
+Host: api.anthropic.com
+User-Agent: Go-http-client/1.1
+Content-Length: 155
+Anthropic-Version: 2023-06-01
+Content-Type: application/json
+
+{"model":"claude-3-haiku-20240307","messages":[{"role":"user","content":"Tell me a very short joke about programming."}],"max_tokens":2048,"temperature":0}HTTP/1.1 200 OK
+Content-Length: 438
+Anthropic-Organization-Id: 00000000-0000-0000-0000-000000000000
+Anthropic-Ratelimit-Requests-Limit: 8000
+Anthropic-Ratelimit-Requests-Remaining: 7999
+Anthropic-Ratelimit-Requests-Reset: 2025-03-13T22:03:21Z
+Cf-Cache-Status: DYNAMIC
+Cf-Ray: 91fed21eee24cf2b-SJC
+Connection: keep-alive
+Content-Type: application/json
+Date: Thu, 13 Mar 2025 22:03:21 GMT
+Request-Id: req_01MphyzxpQPbXyziUfegbs7F
+Server: cloudflare
+Via: 1.1 google
+X-Robots-Tag: none
+
+{"type":"message","stop_reason":"end_turn","content":[{"text":"Here's a short programming joke for you:\n\n\"There are 10 types of people in the world: those who understand binary, and those who don't.\"","type":"text"}],"usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":16,"output_tokens":37},"stop_sequence":null,"role":"assistant","model":"claude-3-haiku-20240307","id":"msg_01Rxsi1fg1RLQdoBD6rUn31B"}
