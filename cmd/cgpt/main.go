@@ -81,6 +81,12 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 
 	// Config file path
 	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
+	
+	// Hidden test flags - not included in help output
+	fs.DurationVar(&opts.ArtificialLatency, "artificial-latency", 0, "Add artificial latency to network requests (e.g., 200ms, 1s)")
+	fs.Float64Var(&opts.FailureRate, "failure-rate", 0, "Inject artificial failures at the specified rate (0.0-1.0, where 0.3 = 30% failures)")
+	fs.MarkHidden("artificial-latency")
+	fs.MarkHidden("failure-rate")
 }
 
 func main() {
@@ -117,6 +123,14 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	}
 	if opts.OpenAIUseLegacyMaxTokens {
 		modelOpts = append(modelOpts, cgpt.WithUseLegacyMaxTokens(true))
+	}
+	// Apply artificial latency and failure injection if specified
+	if opts.ArtificialLatency > 0 || opts.FailureRate > 0 {
+		if opts.Verbose {
+			fmt.Fprintf(opts.Stderr, "Adding artificial latency: %v, failure rate: %.2f\n", 
+				opts.ArtificialLatency, opts.FailureRate)
+		}
+		modelOpts = append(modelOpts, cgpt.WithLatencyInjector(opts.ArtificialLatency, opts.FailureRate))
 	}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {

@@ -46,6 +46,10 @@ type RunOptions struct {
 
 	// Backend/Provider-specific options.
 	OpenAIUseLegacyMaxTokens bool `json:"openaiUseLegacyMaxTokens,omitempty"`
+	
+	// Hidden testing options
+	ArtificialLatency time.Duration `json:"-" yaml:"-"` // Hidden flag for artificial network latency
+	FailureRate       float64       `json:"-" yaml:"-"` // Hidden flag for artificial failure rate
 }
 
 // GetCombinedInputReader returns an io.Reader that combines all input sources.

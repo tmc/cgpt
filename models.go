@@ -36,6 +36,7 @@ func WithUseLegacyMaxTokens(useLegacy bool) InferenceProviderOption {
 	}
 }
 
+
 // InitializeModel initializes the model with the given configuration and options.
 func InitializeModel(cfg *Config, opts ...InferenceProviderOption) (llms.Model, error) {
 	mo := &inferenceProviderOptions{}
