@@ -13,25 +13,6 @@ import (
 	"github.com/spf13/viper"
 )
 
-var defaultBackend = "anthropic" // Configurable via 'CGPT_BACKEND" (or via configuration files).
-
-var defaultModels = map[string]string{
-	"anthropic": "claude-3-7-sonnet-20250219",
-	"openai":    "gpt-4o",
-	"ollama":    "llama3.2",
-	"googleai":  "gemini-pro",
-	"dummy":     "dummy",
-}
-
-// tokenLimits is a map of regex patterns to token limits for each backend.
-// The key "*" is a catch-all for any patterns not explicitly defined.
-// The value for each key is the maximum number of tokens allowed for a completion.
-var tokenLimits = map[string]int{
-	"*":                    4096,
-	"google:*":             8192,
-	"anthropic:.*sonnet.*": 8000,
-}
-
 type Config struct {
 	Backend     string  `yaml:"backend"`
 	Model       string  `yaml:"model"`
@@ -49,6 +30,9 @@ type Config struct {
 	OpenAIAPIKey    string `yaml:"openaiAPIKey"`
 	AnthropicAPIKey string `yaml:"anthropicAPIKey"`
 	GoogleAPIKey    string `yaml:"googleAPIKey"`
+
+	// Provider-specific options
+	XAIOptions []string `yaml:"xaiOptions"` // Optional parameters for xAI/Grok provider
 }
 
 // LoadConfig loads the configuration from various sources in the following order of precedence:
