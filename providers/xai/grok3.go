@@ -36,7 +36,8 @@ type grok3 struct {
 	// signature      string // x-signature cookie
 	// ssoRW          string // sso-rw cookie
 	// cfClearance    string // cf_clearance cookie
-	requireHTTP2 bool // Whether to require HTTP/2 for API connections
+	requireHTTP2  bool          // Whether to require HTTP/2 for API connections
+	clientTimeout time.Duration // Timeout for HTTP requests
 }
 
 // GrokOption configures the grok3 instance.
@@ -137,16 +138,26 @@ func WithRequireHTTP2(require bool) GrokOption {
 	}
 }
 
+// WithTimeout sets the timeout for HTTP requests.
+// This is important for reliability with streaming responses.
+func WithTimeout(timeout time.Duration) GrokOption {
+	return func(g *grok3) {
+		// Store timeout to be applied when the client is created
+		g.clientTimeout = timeout
+	}
+}
+
 // NewGrok3 creates a new Grok-3 model instance.
 // It requires HTTP/2 support to work properly with the Grok API.
 func NewGrok3(options ...GrokOption) (*grok3, error) {
 	g := &grok3{
-		baseURL:      "https://grok.com/rest/app-chat/conversations/",
-		modelName:    "grok-3",
-		maxTokens:    4096,
-		temperature:  0.05,
-		stream:       true, // Default to streaming mode for better UX
-		requireHTTP2: true, // Default to requiring HTTP/2 for production use
+		baseURL:       "https://grok.com/rest/app-chat/conversations/",
+		modelName:     "grok-3",
+		maxTokens:     4096,
+		temperature:   0.05,
+		stream:        true, // Default to streaming mode for better UX
+		requireHTTP2:  true, // Default to requiring HTTP/2 for production use
+		clientTimeout: 60 * time.Second, // Default to 60s timeout for streaming responses
 		// apiKey:        os.Getenv("XAI_API_KEY"),
 		sessionCookie: os.Getenv("XAI_SESSION_COOKIE"),
 		// anonUserID:    os.Getenv("XAI_ANON_USERID"),
@@ -199,7 +210,7 @@ func NewGrok3(options ...GrokOption) (*grok3, error) {
 		// Create client with the custom transport
 		g.client = &http.Client{
 			Transport: customTransport,
-			Timeout:   10 * time.Second, // Use a shorter timeout for tests
+			Timeout:   g.clientTimeout, // Use the configured timeout
 		}
 	} else {
 		log.Printf("WARN: Using custom HTTP client for XAI Grok API")

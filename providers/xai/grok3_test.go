@@ -188,3 +188,34 @@ func TestGrokWithHarFiles(t *testing.T) {
 func TestCallIntegration(t *testing.T) {
 	t.Skip("Use TestHttprrXAIBackend for API testing with HTTP recording/replay")
 }
+
+func TestWithTimeout(t *testing.T) {
+	// Skip test if no session cookie
+	if os.Getenv("XAI_SESSION_COOKIE") == "" {
+		t.Skip("XAI_SESSION_COOKIE environment variable not set, skipping test")
+	}
+
+	// Test custom timeout option
+	customTimeout := 120 * time.Second
+	grok, err := NewGrok3(WithTimeout(customTimeout))
+	if err != nil {
+		t.Fatalf("Failed to create Grok-3 instance with custom timeout: %v", err)
+	}
+
+	// Verify timeout was applied
+	if grok.client.Timeout != customTimeout {
+		t.Errorf("Expected client timeout %v, got %v", customTimeout, grok.client.Timeout)
+	}
+
+	// Verify default timeout when creating without options
+	defaultGrok, err := NewGrok3()
+	if err != nil {
+		t.Fatalf("Failed to create default Grok-3 instance: %v", err)
+	}
+
+	// Verify default timeout (should now be 60s)
+	expectedDefault := 60 * time.Second
+	if defaultGrok.client.Timeout != expectedDefault {
+		t.Errorf("Expected default timeout %v, got %v", expectedDefault, defaultGrok.client.Timeout)
+	}
+}
