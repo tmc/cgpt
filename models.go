@@ -3,6 +3,7 @@ package cgpt
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -59,9 +60,7 @@ func WithUseLegacyMaxTokens(useLegacy bool) InferenceProviderOption {
 
 // InitializeModel initializes the model with the given configuration and options.
 func InitializeModel(cfg *Config, opts ...InferenceProviderOption) (llms.Model, error) {
-	mo := &inferenceProviderOptions{
-		httpClient: http.DefaultClient, // Default to http.DefaultClient if not specified
-	}
+	mo := &inferenceProviderOptions{}
 	for _, opt := range opts {
 		opt(mo)
 	}
@@ -121,43 +120,43 @@ var modelConstructors = map[string]modelConstructor{
 		return googleai.New(context.TODO(), options...)
 	},
 	"xai": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
+		// TODO: move some to xai package
 		opts := []xai.GrokOption{
 			xai.WithModel(cfg.Model),
 			// conversationID set dynamically in GenerateContent
 		}
-		
+
 		// Add standard environment variable options
-		if apiKey := os.Getenv("XAI_API_KEY"); apiKey != "" {
-			opts = append(opts, xai.WithAPIKey(apiKey))
-		}
 		if sessionCookie := os.Getenv("XAI_SESSION_COOKIE"); sessionCookie != "" {
 			opts = append(opts, xai.WithSessionCookie(sessionCookie))
 		}
-		
+
 		// Process custom options from config
 		for _, option := range cfg.XAIOptions {
 			parts := strings.SplitN(option, "=", 2)
 			if len(parts) != 2 {
 				continue // Skip malformed options
 			}
-			
+
 			optName, optValue := parts[0], parts[1]
 			switch optName {
 			case "WithRequireHTTP2":
 				if optValue == "false" {
 					opts = append(opts, xai.WithRequireHTTP2(false))
+					log.Println("warning: will not work withoput http2")
 				} else if optValue == "true" {
 					opts = append(opts, xai.WithRequireHTTP2(true))
 				}
 			}
 			// Add more option handlers as needed
 		}
-		
+
 		// Add custom HTTP client if provided
 		if mo.httpClient != nil {
 			opts = append(opts, xai.WithHTTPClient(mo.httpClient))
+			log.Println("warning: will not work withoput http2")
 		}
-		
+
 		return xai.NewGrok3(opts...)
 	},
 	"dummy": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {

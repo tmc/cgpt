@@ -2,6 +2,7 @@ package xai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -29,9 +30,9 @@ func TestResponseParsing(t *testing.T) {
 			return nil
 		}
 		
-		resp, err := grok.parseResponse(response, streamFunc)
+		resp, err := grok.ParseResponse(response, streamFunc)
 		if err != nil {
-			t.Fatalf("parseResponse failed: %v", err)
+			t.Fatalf("ParseResponse failed: %v", err)
 		}
 		
 		// Verify response content
@@ -58,9 +59,9 @@ func TestResponseParsing(t *testing.T) {
 			return nil
 		}
 		
-		resp, err := grok.parseResponse(response, streamFunc)
+		resp, err := grok.ParseResponse(response, streamFunc)
 		if err != nil {
-			t.Fatalf("parseResponse failed: %v", err)
+			t.Fatalf("ParseResponse failed: %v", err)
 		}
 		
 		// Verify response content
@@ -95,9 +96,9 @@ This is not JSON
 			return nil
 		}
 		
-		resp, err := grok.parseResponse(response, streamFunc)
+		resp, err := grok.ParseResponse(response, streamFunc)
 		if err != nil {
-			t.Fatalf("parseResponse failed: %v", err)
+			t.Fatalf("ParseResponse failed: %v", err)
 		}
 		
 		// Verify response content
@@ -132,9 +133,9 @@ This is not JSON
 			return nil
 		}
 		
-		resp, err := grok.parseResponse(response, streamFunc)
+		resp, err := grok.ParseResponse(response, streamFunc)
 		if err != nil {
-			t.Fatalf("parseResponse failed: %v", err)
+			t.Fatalf("ParseResponse failed: %v", err)
 		}
 		
 		// Verify response content
@@ -186,10 +187,31 @@ func TestStreamResponse(t *testing.T) {
 			return nil
 		}
 		
-		// Call streamResponse
-		resp, err := grok.streamResponse(ctx, mockResponseReader, streamFunc)
+		// Create a lineHandler for the test
+		lineHandler := func(ctx context.Context, line string) (token string, additionalData interface{}, err error) {
+			var createResp CreateConversationResponse
+			if err := json.Unmarshal([]byte(line), &createResp); err == nil {
+				if createResp.Result.Response.Token != "" {
+					return createResp.Result.Response.Token, nil, nil
+				}
+			}
+
+			var contResp ContinueConversationResponse
+			if err := json.Unmarshal([]byte(line), &contResp); err == nil {
+				token = contResp.Result.Token
+				if token == "" && contResp.Result.Response.Token != "" {
+					token = contResp.Result.Response.Token
+				}
+				return token, nil, nil
+			}
+
+			return "", nil, fmt.Errorf("skipping line: %w", errSkipLine)
+		}
+		
+		// Call StreamResponse
+		resp, err := grok.StreamResponse(ctx, mockResponseReader, lineHandler, streamFunc)
 		if err != nil {
-			t.Fatalf("streamResponse failed: %v", err)
+			t.Fatalf("StreamResponse failed: %v", err)
 		}
 		
 		// Verify response content
@@ -235,8 +257,29 @@ func TestStreamResponse(t *testing.T) {
 			return nil
 		}
 		
-		// Call streamResponse
-		_, err := grok.streamResponse(ctx, mockResponseReader, streamFunc)
+		// Create a lineHandler for the test
+		lineHandler := func(ctx context.Context, line string) (token string, additionalData interface{}, err error) {
+			var createResp CreateConversationResponse
+			if err := json.Unmarshal([]byte(line), &createResp); err == nil {
+				if createResp.Result.Response.Token != "" {
+					return createResp.Result.Response.Token, nil, nil
+				}
+			}
+
+			var contResp ContinueConversationResponse
+			if err := json.Unmarshal([]byte(line), &contResp); err == nil {
+				token = contResp.Result.Token
+				if token == "" && contResp.Result.Response.Token != "" {
+					token = contResp.Result.Response.Token
+				}
+				return token, nil, nil
+			}
+
+			return "", nil, fmt.Errorf("skipping line: %w", errSkipLine)
+		}
+		
+		// Call StreamResponse
+		_, err := grok.StreamResponse(ctx, mockResponseReader, lineHandler, streamFunc)
 		
 		// Verify we got a context canceled error
 		if err == nil {

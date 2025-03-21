@@ -1,7 +1,6 @@
 package cgpt
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -229,8 +228,8 @@ func handleConfigFile(v *viper.Viper, stderr io.Writer, flagSet *pflag.FlagSet) 
 }
 
 func logConfig(cfg *Config, stderr io.Writer, flagSet *pflag.FlagSet) {
-	if verbose, _ := flagSet.GetBool("verbose"); verbose {
-		fmt.Fprint(stderr, "cgpt-config: ")
-		json.NewEncoder(stderr).Encode(cfg)
-	}
+	// if verbose, _ := flagSet.GetBool("verbose"); verbose {
+	// 	fmt.Fprint(stderr, "cgpt-config: ")
+	// 	json.NewEncoder(stderr).Encode(cfg)
+	// }
 }

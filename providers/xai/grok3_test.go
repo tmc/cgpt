@@ -76,8 +76,8 @@ func TestGrok3Options(t *testing.T) {
 		t.Errorf("Expected stream to be false")
 	}
 
-	if grok.conversationID != "test-conv-id" {
-		t.Errorf("Expected conversation ID 'test-conv-id', got '%s'", grok.conversationID)
+	if grok.conversation == nil || grok.conversation.ConversationID != "test-conv-id" {
+		t.Errorf("Expected conversation ID 'test-conv-id', got '%+v'", grok.conversation)
 	}
 }
 

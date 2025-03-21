@@ -39,9 +39,10 @@ func TestXAIScriptError(t *testing.T) {
 		ctx := context.Background()
 		
 		// 1. Test conversation creation with timeout
-		err = grok.startNewConversation(ctx, "This should time out")
+		opts := &llms.CallOptions{}
+		_, err = grok.StartConversation(ctx, opts, "This should time out")
 		if err == nil {
-			t.Error("Expected timeout error for startNewConversation, got nil")
+			t.Error("Expected timeout error for StartConversation, got nil")
 		} else {
 			t.Logf("Got expected error: %v", err)
 		}
@@ -70,7 +71,7 @@ func TestXAIScriptError(t *testing.T) {
 		cancelCtx, cancel := context.WithCancel(ctx)
 		cancel() // Cancel immediately
 		
-		err = grok.startNewConversation(cancelCtx, "This should be cancelled")
+		_, err = grok.StartConversation(cancelCtx, opts, "This should be cancelled")
 		if err == nil {
 			t.Error("Expected context cancellation error, got nil")
 		} else {
@@ -78,4 +79,3 @@ func TestXAIScriptError(t *testing.T) {
 		}
 	})
 }
-
