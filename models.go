@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/tmc/cgpt/providers/xai"
+	"github.com/tmc/cgpt/providers/exp/xai"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/googleai"

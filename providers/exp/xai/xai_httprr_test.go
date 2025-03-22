@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/tmc/cgpt/internal/httprr"
 	"github.com/tmc/langchaingo/llms"
 )
 
@@ -20,10 +21,8 @@ func TestXAIBackendAPI(t *testing.T) {
 	if os.Getenv("XAI_SESSION_COOKIE") == "" {
 		t.Skip("Skipping test: XAI_SESSION_COOKIE environment variable not set")
 	}
-
 	// Enable debug mode to see request/response details
 	os.Setenv("XAI_DEBUG", "1")
-
 	// Test conversation creation only - this is enough to verify the basic API functionality
 	// Message generation tests can sometimes hit timeouts due to API latency
 	testConversationCreation(t)
@@ -810,7 +809,7 @@ func TestStreamingCancellation(t *testing.T) {
 	}
 
 	// Get a streaming response, which should be interrupted by context expiration
-	_, err = grok.getConversationResponse(streamCtx, opts, "Tell me everything you know about programming languages")
+	_, err = grok.StartConversation(streamCtx, opts, "Tell me everything you know about programming languages")
 
 	// Verify error is from context timeout
 	if err == nil {
