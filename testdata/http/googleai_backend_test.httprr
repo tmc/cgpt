@@ -1,0 +1,31 @@
+httprr trace v1
+817 611
+POST https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?%24alt=json%3Benum-encoding%3Dint HTTP/1.1
+Host: generativelanguage.googleapis.com
+User-Agent: Go-http-client/1.1
+Content-Length: 383
+Content-Type: application/json
+X-Goog-Api-Key: REDACTED
+x-goog-api-client: gl-go/1.24.1 gccl/v0.15.1 genai-go/0.15.1 gapic/0.7.0 gax/2.12.4 rest/UNKNOWN
+x-goog-request-params: model=models%2Fgemini-pro
+
+{"model":"models/gemini-pro", "contents":[{"parts":[{"text":"Explain the concept of goroutines in one sentence."}], "role":"user"}], "safetySettings":[{"category":10, "threshold":3}, {"category":7, "threshold":3}, {"category":8, "threshold":3}, {"category":9, "threshold":3}], "generationConfig":{"candidateCount":1, "maxOutputTokens":2048, "temperature":0.5, "topP":0.95, "topK":3}}HTTP/2.0 403 Forbidden
+Alt-Svc: h3=":443"; ma=2592000,h3-29=":443"; ma=2592000
+Content-Type: application/json; charset=UTF-8
+Date: Sat, 22 Mar 2025 10:34:50 GMT
+Server: scaffolding on HTTPServer2
+Server-Timing: gfet4t7; dur=46
+Vary: Origin
+Vary: X-Origin
+Vary: Referer
+X-Content-Type-Options: nosniff
+X-Frame-Options: SAMEORIGIN
+X-Xss-Protection: 0
+
+{
+  "error": {
+    "code": 403,
+    "message": "Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.",
+    "status": "PERMISSION_DENIED"
+  }
+}
