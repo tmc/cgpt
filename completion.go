@@ -41,6 +41,9 @@ type CompletionService struct {
 	Stdout io.Writer
 	// Stderr is the writer for standard error. If nil, os.Stderr will be used.
 	Stderr io.Writer
+
+	// sessionTimestamp is used to create a consistent history file name for the entire session
+	sessionTimestamp string
 }
 
 type CompletionServiceOption func(*CompletionService)
@@ -80,6 +83,7 @@ func NewCompletionService(cfg *Config, model llms.Model, opts ...CompletionServi
 		completionTimeout: cfg.CompletionTimeout,
 		Stdout:            os.Stdout,
 		Stderr:            os.Stderr,
+		sessionTimestamp:  time.Now().Format("20060102150405"),
 	}
 	for _, opt := range opts {
 		opt(s)

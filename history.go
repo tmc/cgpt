@@ -42,7 +42,9 @@ func (s *CompletionService) saveHistory() error {
 		if err != nil {
 			return fmt.Errorf("failed to get user home directory: %w", err)
 		}
-		defaultSavePath := filepath.Join(home, ".cgpt", "default-history.yaml")
+
+		// Use session timestamp instead of generating a new one each time
+		defaultSavePath := filepath.Join(home, ".cgpt", fmt.Sprintf("default-history-%s.yaml", s.sessionTimestamp))
 		err = createHistoryFile(defaultSavePath, s.cfg.Backend, s.payload, s.payload.Messages)
 		if err != nil {
 			return err
