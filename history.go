@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/tmc/langchaingo/llms"
 	"sigs.k8s.io/yaml"
@@ -35,23 +36,40 @@ func (s *CompletionService) loadHistory() error {
 	return nil
 }
 
-// saveHistory saves the history to the history file (as yaml)
 func (s *CompletionService) saveHistory() error {
 	if s.historyOutFile == "" {
-		return nil
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get user home directory: %w", err)
+		}
+		defaultSavePath := filepath.Join(home, ".cgpt", "default-history.yaml")
+		err = createHistoryFile(defaultSavePath, s.cfg.Backend, s.payload, s.payload.Messages)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := createHistoryFile(s.historyOutFile, s.cfg.Backend, s.payload, s.payload.Messages)
+		if err != nil {
+			return err
+		}
 	}
-	f, err := os.Create(s.historyOutFile)
+	return nil
+}
+
+// saveHistory saves the history to the history file (as yaml)
+func createHistoryFile(historyOutFile string, backend string, payload *ChatCompletionPayload, messages []llms.MessageContent) error {
+	f, err := os.Create(historyOutFile)
 	if err != nil {
-		return fmt.Errorf("failed to create history file %q: %w", s.historyOutFile, err)
+		return fmt.Errorf("failed to create history file %q: %w", historyOutFile, err)
 
 	}
-	if s.payload == nil {
+	if payload == nil {
 		return nil
 	}
 	h := history{
-		Backend:  s.cfg.Backend,
-		Model:    s.payload.Model,
-		Messages: s.payload.Messages,
+		Backend:  backend,
+		Model:    payload.Model,
+		Messages: messages,
 	}
 	// encode with k8s yaml encoder: which doesn't define NewEncoder:
 	ybytes, err := yaml.Marshal(h)
@@ -59,7 +77,7 @@ func (s *CompletionService) saveHistory() error {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}
 	if _, err := f.Write(ybytes); err != nil {
-		return fmt.Errorf("failed to write history file %q: %w", s.historyOutFile, err)
+		return fmt.Errorf("failed to write history file %q: %w", historyOutFile, err)
 	}
 	return nil
 }

@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -106,6 +107,16 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	opts.Config = fileConfig
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Creates the default save path if it doesn't exist
+	if dir, _ := os.UserHomeDir(); dir != "" {
+		err := os.MkdirAll(filepath.Join(dir, ".cgpt"), 0755)
+		if err != nil {
+			fmt.Fprintf(opts.Stderr, "Failed to create default save path: %v\n", err)
+		} else {
+			fmt.Fprintf(opts.Stderr, "Created default save path: %s\n", filepath.Join(dir, ".cgpt"))
+		}
 	}
 
 	// Initialize the model (the llms.Model interface)
