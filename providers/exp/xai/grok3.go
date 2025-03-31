@@ -153,7 +153,7 @@ func WithLogger(logger Logger) GrokOption {
 // It requires HTTP/2 support to work properly with the Grok API.
 func NewGrok3(options ...GrokOption) (*grok3, error) {
 	g := &grok3{
-		callOptions:   &llms.CallOptions{},
+		CallOptions:   CallOptions{CallOptions: &llms.CallOptions{}},
 		baseURL:       "https://grok.com/rest/app-chat/conversations/",
 		modelName:     "grok-3",
 		maxTokens:     4096,
@@ -253,17 +253,16 @@ func (g *grok3) GenerateContent(ctx context.Context, messages []llms.MessageCont
 		opt(opts)
 	}
 
-	newConversationCreateOptions := func() []ConversationResponseOption {
-
-	var createOpts []ConversationResponseOption
-	if md, ok := opts.Metadata["grok3"]; ok {
-		if v, ok := md(GrokCallMetadataCreateOptions); ok {
-
+	// Extract metadata options if available for future use
+	// Currently unused, but prepared for future extensions
+	if opts.Metadata != nil {
+		// Future code to extract metadata options would go here
 	}
 
 	// Set up conversation
 	if g.conversation == nil {
-		g.conversation = g.newConversation(ctx, createOpts...)
+		// Create a new conversation without the options first
+		g.conversation = g.newConversation(ctx)
 	}
 
 	// Handle conversation based on whether it already exists
@@ -284,15 +283,29 @@ func (g *grok3) WithClient(client *http.Client) llms.Model {
 }
 
 // StartConversation creates a new conversation and delegates to the conversation's Create method
-func (g *grok3) StartConversation(ctx context.Context, opts *llms.CallOptions, messages []llms.MessageContent) (*llms.ContentResponse, error) {
-	createOpts, message, err := llmMessagesToCreateOptions(ctx, opts, messages)
+func (g *grok3) StartConversation(ctx context.Context, opts *llms.CallOptions, messages interface{}) (*llms.ContentResponse, error) {
+	var messageArray []llms.MessageContent
+	
+	// Handle both string and message array parameters
+	switch msg := messages.(type) {
+	case string:
+		messageArray = []llms.MessageContent{
+			llms.TextParts(llms.ChatMessageTypeHuman, msg),
+		}
+	case []llms.MessageContent:
+		messageArray = msg
+	default:
+		return nil, fmt.Errorf("unsupported message type: %T", messages)
+	}
+	
+	convOpts, message, err := llmMessagesToCreateOptions(ctx, opts, messageArray)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert messages to create options: %w", err)
 	}
 	if g.conversation == nil {
 		g.conversation = g.newConversation(ctx)
 	}
-	return g.conversation.Create(ctx, opts, message, createOpts...)
+	return g.conversation.Create(ctx, opts, message, convOpts...)
 }
 
 // ParseResponse delegates to the conversation's parseResponse method
@@ -325,8 +338,22 @@ func (g *grok3) GetConversationID() string {
 }
 
 // ContinueConversation delegates to the conversation's getConversationResponse method
-func (g *grok3) ContinueConversation(ctx context.Context, opts *llms.CallOptions, message []llms.MessageContent) (*llms.ContentResponse, error) {
-	opts, message, err := llmMessagesToCreateOptions(ctx, opts, messages)
+func (g *grok3) ContinueConversation(ctx context.Context, opts *llms.CallOptions, messages interface{}) (*llms.ContentResponse, error) {
+	var messageArray []llms.MessageContent
+	
+	// Handle both string and message array parameters
+	switch msg := messages.(type) {
+	case string:
+		messageArray = []llms.MessageContent{
+			llms.TextParts(llms.ChatMessageTypeHuman, msg),
+		}
+	case []llms.MessageContent:
+		messageArray = msg
+	default:
+		return nil, fmt.Errorf("unsupported message type: %T", messages)
+	}
+	
+	_, message, err := llmMessagesToCreateOptions(ctx, opts, messageArray)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert messages to create options: %w", err)
 	}

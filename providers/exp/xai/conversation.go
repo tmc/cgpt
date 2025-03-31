@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -143,13 +142,9 @@ func (g *conversation) Create(ctx context.Context, opts *llms.CallOptions, messa
 		"webpageUrls": []string{},
 		//"systemPromptName":          "grok3_personality_cracked_coder",
 	}
-	fmt.Println(requestBody)
+	// Apply options to the request body
 	for _, opt := range options {
-		fmt.Println(opt, "before")
-		fmt.Println(requestBody)
 		opt(requestBody)
-		fmt.Println(requestBody)
-		fmt.Println(opt, "after")
 	}
 
 	jsonBody, err := json.Marshal(requestBody)
@@ -169,28 +164,31 @@ func (g *conversation) Create(ctx context.Context, opts *llms.CallOptions, messa
 	g.setCookies(req)
 
 	req.Header.Set("Referer", "https://grok.com/")
-
-	logOut := &greyWriter{w: os.Stderr}
-	fmt.Fprintln(logOut, "REQ", string(jsonBody))
 	// Debug dump request
 	if g.dumpRequestResponses {
 		dump, err := httputil.DumpRequestOut(req, true)
 		if err != nil {
-			log.Printf("Error dumping request: %v", err)
+			if g.logger != nil {
+				g.logger.Printf("Error dumping request: %v", err)
+			}
 		} else {
-			log.Printf("Request dump:\n%s", string(dump))
+			if g.logger != nil {
+				g.logger.Printf("Request dump:\n%s", string(dump))
+			}
 		}
 
 		// Log HTTP version info to help debug HTTP/2 issues
 		if transport, ok := g.client.Transport.(*http.Transport); ok {
-			log.Printf("Transport config: ForceAttemptHTTP2=%v, TLSHandshakeTimeout=%v",
-				transport.ForceAttemptHTTP2, transport.TLSHandshakeTimeout)
+			if g.logger != nil {
+				g.logger.Printf("Transport config: ForceAttemptHTTP2=%v, TLSHandshakeTimeout=%v",
+					transport.ForceAttemptHTTP2, transport.TLSHandshakeTimeout)
+			}
 		}
 	}
 
 	// Execute request
 	if g.verbose {
-		log.Printf("Starting new conversation...")
+		if g.logger != nil { g.logger.Printf("Starting new conversation...") }
 	}
 	resp, err := g.client.Do(req)
 	if err != nil {
@@ -202,17 +200,17 @@ func (g *conversation) Create(ctx context.Context, opts *llms.CallOptions, messa
 	if g.dumpRequestResponses {
 		dump, err := httputil.DumpResponse(resp, true)
 		if err != nil {
-			log.Printf("Error dumping response: %v", err)
+			if g.logger != nil { g.logger.Printf("Error dumping response: %v", err) }
 		} else {
-			log.Printf("Response dump:\n%s", string(dump))
+			if g.logger != nil { g.logger.Printf("Response dump:\n%s", string(dump)) }
 		}
 
 		// Log the HTTP protocol version used
-		log.Printf("HTTP Protocol Version: %d.%d", resp.ProtoMajor, resp.ProtoMinor)
+		if g.logger != nil { g.logger.Printf("HTTP Protocol Version: %d.%d", resp.ProtoMajor, resp.ProtoMinor) }
 		if resp.ProtoMajor == 2 {
-			log.Printf("Successfully using HTTP/2")
+			if g.logger != nil { g.logger.Printf("Successfully using HTTP/2") }
 		} else if resp.ProtoMajor == 1 {
-			log.Printf("ERROR: Using HTTP/1.1 instead of HTTP/2")
+			if g.logger != nil { g.logger.Printf("ERROR: Using HTTP/1.1 instead of HTTP/2") }
 		}
 	}
 
@@ -266,8 +264,6 @@ func (c *conversation) getConversationResponse(ctx context.Context, opts *llms.C
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request body: %w", err)
 	}
-	logOut := &greyWriter{w: os.Stderr}
-	fmt.Fprintln(logOut, "REQ", string(jsonBody))
 
 	// Build URL
 	url := fmt.Sprintf("%s%s/responses", c.baseURL, c.ConversationID)
@@ -288,9 +284,9 @@ func (c *conversation) getConversationResponse(ctx context.Context, opts *llms.C
 	if c.dumpRequestResponses {
 		dump, err := httputil.DumpRequestOut(req, true)
 		if err != nil {
-			log.Printf("Error dumping request: %v", err)
+			if c.logger != nil { c.logger.Printf("Error dumping request: %v", err) }
 		} else {
-			log.Printf("Request dump:\n%s", string(dump))
+			if c.logger != nil { c.logger.Printf("Request dump:\n%s", string(dump)) }
 		}
 	}
 
@@ -305,17 +301,17 @@ func (c *conversation) getConversationResponse(ctx context.Context, opts *llms.C
 	if c.dumpRequestResponses {
 		dump, err := httputil.DumpResponse(resp, false) // Don't dump body for streaming
 		if err != nil {
-			log.Printf("Error dumping streaming response headers: %v", err)
+			if c.logger != nil { c.logger.Printf("Error dumping streaming response headers: %v", err) }
 		} else {
-			log.Printf("Streaming response headers:\n%s", string(dump))
+			if c.logger != nil { c.logger.Printf("Streaming response headers:\n%s", string(dump)) }
 		}
 
 		// Log the HTTP protocol version used for streaming
-		log.Printf("Streaming HTTP Protocol Version: %d.%d", resp.ProtoMajor, resp.ProtoMinor)
+		if c.logger != nil { c.logger.Printf("Streaming HTTP Protocol Version: %d.%d", resp.ProtoMajor, resp.ProtoMinor) }
 		if resp.ProtoMajor == 2 {
-			log.Printf("Successfully using HTTP/2 for streaming")
+			if c.logger != nil { c.logger.Printf("Successfully using HTTP/2 for streaming") }
 		} else if resp.ProtoMajor == 1 {
-			log.Printf("ERROR: Using HTTP/1.1 instead of HTTP/2 for streaming")
+			if c.logger != nil { c.logger.Printf("ERROR: Using HTTP/1.1 instead of HTTP/2 for streaming") }
 		}
 	}
 
@@ -426,7 +422,7 @@ func (g *conversation) streamResponse(ctx context.Context, body io.Reader, lineH
 
 	scanner := bufio.NewScanner(body)
 	if g.verbose {
-		log.Println("starting response stream...")
+		if g.logger != nil { g.logger.Printf("starting response stream...") }
 	}
 
 	for scanner.Scan() {
@@ -440,11 +436,11 @@ func (g *conversation) streamResponse(ctx context.Context, body io.Reader, lineH
 		// }
 
 		if !strings.HasPrefix(line, "{") {
-			log.Println("skipping line:", line)
+			if g.logger != nil { g.logger.Printf("skipping line: %s", line) }
 			continue
 		}
 		if g.verbose {
-			log.Printf("Stream data: %s", line)
+			if g.logger != nil { g.logger.Printf("Stream data: %s", line) }
 		}
 
 		token, additionalData, err := lineHandler(ctx, line)
@@ -459,7 +455,7 @@ func (g *conversation) streamResponse(ctx context.Context, body io.Reader, lineH
 			fullResponse.WriteString(token)
 			if streamFunc != nil {
 				if err := streamFunc(ctx, []byte(token)); err != nil {
-					log.Printf("Error in streaming callback: %v", err)
+					if g.logger != nil { g.logger.Printf("Error in streaming callback: %v", err) }
 				}
 			}
 		}
@@ -491,16 +487,16 @@ func (g *conversation) handleAdditionalData(ctx context.Context, additionalData 
 
 	case WebSearchResults:
 		if g.verbose {
-			log.Println("Received web search results:")
+			if g.logger != nil { g.logger.Printf("Received web search results:") }
 			for i, result := range data.Results {
-				log.Printf("Web Result %d: %s - %s", i+1, result.Title, result.URL)
+				if g.logger != nil { g.logger.Printf("Web Result %d: %s - %s", i+1, result.Title, result.URL) }
 			}
 		}
 	case XSearchResults:
 		if g.verbose {
-			log.Println("Received X search results:")
+			if g.logger != nil { g.logger.Printf("Received X search results:") }
 			for i, result := range data.Results {
-				log.Printf("X Result %d: %s (@%s) - %s", i+1, result.Name, result.Username, result.Text)
+				if g.logger != nil { g.logger.Printf("X Result %d: %s (@%s) - %s", i+1, result.Name, result.Username, result.Text) }
 			}
 		}
 	}
@@ -510,7 +506,7 @@ func (g *conversation) handleAdditionalData(ctx context.Context, additionalData 
 func (g *conversation) handleStreamingImageGeneration(ctx context.Context, data StreamingImageGenerationResponse) {
 	// TODO: add conversation graph concept+capabilities.
 	if os.Getenv("XAI_ENABLE_IMAGES") == "1" {
-		log.Printf("Received image data: %s", data.ImageID)
+		if g.logger != nil { g.logger.Printf("Received image data: %s", data.ImageID) }
 		//g.imageSet.AddImage(ctx, data)
 	}
 }
