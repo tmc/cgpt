@@ -422,17 +422,34 @@ func TestMultiTurnConversation(t *testing.T) {
 // TestHttprrXAIBackend tests the Grok API using HTTP recording/replay
 // This allows testing without actual API access by using recorded HTTP interactions
 func TestHttprrXAIBackend(t *testing.T) {
-	// Skip test if recording files don't exist
-	recordingFiles := []string{
-		"testdata/http/xai_create_conversation.httprr",
-		"testdata/http/xai_backend_test.httprr",
-		"testdata/http/xai_backend_streaming_test.httprr",
+	// Directory for recordings
+	dir := "testdata/http"
+	
+	// Check if we're in recording mode
+	xaiCreateFile := dir + "/xai_backend_test.httprr"
+	recording, err := httprr.Recording(xaiCreateFile)
+	if err != nil {
+		t.Fatalf("Failed to check recording mode: %v", err)
 	}
+	
+	// If we're in recording mode, make sure we have an API key
+	if recording && os.Getenv("XAI_SESSION_COOKIE") == "" {
+		t.Skip("Skipping recording: XAI_SESSION_COOKIE environment variable not set")
+		return
+	}
+	
+	// If not recording, check if files exist
+	if !recording {
+		recordingFiles := []string{
+			dir + "/xai_backend_test.httprr",
+			dir + "/xai_backend_streaming_test.httprr",
+		}
 
-	for _, file := range recordingFiles {
-		if _, err := os.Stat(file); os.IsNotExist(err) {
-			t.Skipf("HTTP recording file not found: %s", file)
-			return
+		for _, file := range recordingFiles {
+			if _, err := os.Stat(file); os.IsNotExist(err) {
+				t.Skipf("HTTP recording file not found: %s. Run with -httprecord=\".*\" to create it.", file)
+				return
+			}
 		}
 	}
 
@@ -449,49 +466,66 @@ func testHttprrCreateConversation(t *testing.T) {
 
 	t.Log("Testing conversation creation with httprr")
 
-	// Create a client that will use the recording file
-	// For now we're just marking this as a placeholder until the httprr implementation is available
-	// The real implementation would:
-	// 1. Set up a client that reads from the httprr recording file
-	// 2. Create a Grok3 instance with that client
-	// 3. Use WithRequireHTTP2(false) to bypass HTTP/2 validation during tests
-	// 4. Run the conversation creation flow and verify the results
-
-	// Create dummy client - would be replaced with httprr client
-	client := &http.Client{
-		Timeout: 10 * time.Second,
+	// Create the httprr recorder/replayer
+	dir := "testdata/http"
+	rrFile := dir + "/xai_backend_test.httprr"
+	
+	// Create the recorder/replayer
+	rr, err := httprr.Open(rrFile, http.DefaultTransport)
+	if err != nil {
+		t.Fatalf("Failed to create HTTP recorder: %v", err)
+	}
+	defer rr.Close()
+	
+	// Determine if we're in recording mode
+	recording, _ := httprr.Recording(rrFile)
+	cookieValue := "test-cookie"
+	if recording {
+		// In recording mode, use the real cookie
+		cookieValue = os.Getenv("XAI_SESSION_COOKIE")
+		if cookieValue == "" {
+			t.Skip("Skipping test: XAI_SESSION_COOKIE environment variable not set")
+		}
 	}
 
-	// Create Grok model with test client
+	// Create Grok model with httprr client
 	model, err := NewGrok3(
-		WithHTTPClient(client),
-		WithRequireHTTP2(false),          // Skip HTTP/2 requirements in tests
-		WithSessionCookie("test-cookie"), // Use dummy cookie for tests
+		WithHTTPClient(rr.Client()),
+		WithRequireHTTP2(false),    // Skip HTTP/2 requirements in tests
+		WithSessionCookie(cookieValue),
 	)
 	if err != nil {
 		t.Fatalf("Failed to create test model: %v", err)
 	}
 
-	// Would set up a matching httprr transport here
-	// For now, just test the code pathways
-	t.Log("Would test conversation creation with httprr recordings")
-
 	// Create a new conversation with a test prompt
 	ctx := context.Background()
 	opts := &llms.CallOptions{}
-	_, err = model.StartConversation(ctx, opts, "This is a test prompt for httprr")
+	response, err := model.StartConversation(ctx, opts, "This is a test prompt for httprr")
 
-	// Since we don't have a real httprr implementation yet, we expect an error
-	if err == nil {
-		t.Log("Unexpected success - would fail without httprr implementation")
-	} else {
-		t.Logf("Got expected error without httprr implementation: %v", err)
+	// Handle error based on whether we're recording or replaying
+	if err != nil {
+		if recording {
+			t.Logf("Got error during recording: %v", err)
+		} else {
+			t.Errorf("Got unexpected error during replay: %v", err)
+		}
+		return
 	}
-
-	// In a real implementation, we would verify:
-	// 1. That a conversation ID was successfully set
-	// 2. That the request was properly formatted
-	// 3. That any response details were correctly processed
+	
+	// Check the response
+	if len(response.Choices) == 0 || response.Choices[0].Content == "" {
+		t.Errorf("Unexpected empty response")
+	} else {
+		t.Logf("Got response: %s", response.Choices[0].Content)
+	}
+	
+	// Verify conversation ID was set
+	if model.GetConversationID() == "" {
+		t.Errorf("No conversation ID set after successful call")
+	} else {
+		t.Logf("Got conversation ID: %s", model.GetConversationID())
+	}
 }
 
 func testHttprrCallWithOptions(t *testing.T) {

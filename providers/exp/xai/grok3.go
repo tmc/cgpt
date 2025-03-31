@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/tmc/langchaingo/llms"
@@ -20,12 +19,25 @@ import (
 )
 
 // grok3 represents the Grok-3 model from xAI.
+// Logger defines the interface for logging in the XAI client
+type Logger interface {
+	Printf(format string, v ...any)
+}
+
+// DefaultLogger uses the standard log package
+type DefaultLogger struct{}
+
+func (l *DefaultLogger) Printf(format string, v ...any) {
+	log.Printf(format, v...)
+}
+
 type grok3 struct {
 	client *http.Client
 
 	baseURL   string
 	modelName string
 
+	CallOptions CallOptions
 	maxTokens   int
 	temperature float64
 	stream      bool
@@ -40,7 +52,18 @@ type grok3 struct {
 	clientTimeout time.Duration // Timeout for HTTP requests
 
 	conversation *conversation
+
+	logger Logger // Logger for outputting diagnostic information
 }
+
+// CallOptions defines the options for a call to the Grok-3 model.
+type CallOptions struct {
+	*llms.CallOptions
+	ConversationID string
+	ResponseID     string
+}
+
+type CallOption func(*llms.CallOptions)
 
 // GrokOption configures the grok3 instance.
 type GrokOption func(*grok3)
@@ -99,7 +122,9 @@ func WithSessionCookie(cookie string) GrokOption {
 func WithHTTPClient(client *http.Client) GrokOption {
 	return func(g *grok3) {
 		// TODO: force wrap this in h2
-		log.Println("warning: setting client")
+		if g.logger != nil {
+			g.logger.Printf("warning: setting client")
+		}
 		g.client = client
 	}
 }
@@ -117,10 +142,18 @@ func WithTimeout(timeout time.Duration) GrokOption {
 	}
 }
 
+// WithLogger sets a custom logger for the Grok client
+func WithLogger(logger Logger) GrokOption {
+	return func(g *grok3) {
+		g.logger = logger
+	}
+}
+
 // NewGrok3 creates a new Grok-3 model instance.
 // It requires HTTP/2 support to work properly with the Grok API.
 func NewGrok3(options ...GrokOption) (*grok3, error) {
 	g := &grok3{
+		callOptions:   &llms.CallOptions{},
 		baseURL:       "https://grok.com/rest/app-chat/conversations/",
 		modelName:     "grok-3",
 		maxTokens:     4096,
@@ -129,6 +162,7 @@ func NewGrok3(options ...GrokOption) (*grok3, error) {
 		requireHTTP2:  true,             // Default to requiring HTTP/2 for production use
 		clientTimeout: 60 * time.Second, // Default to 60s timeout for streaming responses
 		sessionCookie: os.Getenv("XAI_SESSION_COOKIE"),
+		logger:        &DefaultLogger{}, // Default logger using standard log package
 	}
 
 	for _, opt := range options {
@@ -219,35 +253,24 @@ func (g *grok3) GenerateContent(ctx context.Context, messages []llms.MessageCont
 		opt(opts)
 	}
 
-	// Validate inputs
-	if len(messages) == 0 || len(messages) > 100 {
-		return nil, fmt.Errorf("invalid message count: %d (must be 1-100)", len(messages))
-	}
+	newConversationCreateOptions := func() []ConversationResponseOption {
 
-	// Get the message content to send to Grok
-	var messageContent string
-	for _, msg := range messages[len(messages)-1:] {
-		for _, part := range msg.Parts {
-			s := fmt.Sprint(part)
-			if len(s) <= 1024 { // Basic sanitization
-				if messageContent != "" {
-					messageContent += " "
-				}
-				messageContent += strings.TrimSpace(s)
-			}
-		}
+	var createOpts []ConversationResponseOption
+	if md, ok := opts.Metadata["grok3"]; ok {
+		if v, ok := md(GrokCallMetadataCreateOptions); ok {
+
 	}
 
 	// Set up conversation
 	if g.conversation == nil {
-		g.conversation = g.newConversation(ctx)
+		g.conversation = g.newConversation(ctx, createOpts...)
 	}
-	
+
 	// Handle conversation based on whether it already exists
 	if g.conversation.ConversationID == "" {
-		return g.StartConversation(ctx, opts, messageContent)
+		return g.StartConversation(ctx, opts, messages)
 	} else {
-		return g.ContinueConversation(ctx, opts, messageContent)
+		return g.ContinueConversation(ctx, opts, messages)
 	}
 }
 
@@ -261,11 +284,15 @@ func (g *grok3) WithClient(client *http.Client) llms.Model {
 }
 
 // StartConversation creates a new conversation and delegates to the conversation's Create method
-func (g *grok3) StartConversation(ctx context.Context, opts *llms.CallOptions, message string) (*llms.ContentResponse, error) {
+func (g *grok3) StartConversation(ctx context.Context, opts *llms.CallOptions, messages []llms.MessageContent) (*llms.ContentResponse, error) {
+	createOpts, message, err := llmMessagesToCreateOptions(ctx, opts, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert messages to create options: %w", err)
+	}
 	if g.conversation == nil {
 		g.conversation = g.newConversation(ctx)
 	}
-	return g.conversation.Create(ctx, opts, message)
+	return g.conversation.Create(ctx, opts, message, createOpts...)
 }
 
 // ParseResponse delegates to the conversation's parseResponse method
@@ -298,7 +325,11 @@ func (g *grok3) GetConversationID() string {
 }
 
 // ContinueConversation delegates to the conversation's getConversationResponse method
-func (g *grok3) ContinueConversation(ctx context.Context, opts *llms.CallOptions, message string) (*llms.ContentResponse, error) {
+func (g *grok3) ContinueConversation(ctx context.Context, opts *llms.CallOptions, message []llms.MessageContent) (*llms.ContentResponse, error) {
+	opts, message, err := llmMessagesToCreateOptions(ctx, opts, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert messages to create options: %w", err)
+	}
 	if g.conversation == nil {
 		g.conversation = g.newConversation(ctx)
 	}
@@ -338,19 +369,20 @@ func (g *grok3) setRequestHeaders(req *http.Request) {
 	setRequestHeaders(req)
 }
 
-type ConversationOption func(*conversation)
+type NewConverationOption func(*conversation)
 
 // newConversation creates a new conversation instance with options
-func (g *grok3) newConversation(ctx context.Context, options ...ConversationOption) *conversation {
+func (g *grok3) newConversation(ctx context.Context, options ...NewConverationOption) *conversation {
 	c := &conversation{
-		client:              g.client,
-		modelName:           g.modelName,
-		baseURL:             g.baseURL,
-		verbose:             g.verbose,
-		veryVerbose:         g.veryVerbose,
+		client:               g.client,
+		modelName:            g.modelName,
+		baseURL:              g.baseURL,
+		verbose:              g.verbose,
+		veryVerbose:          g.veryVerbose,
 		dumpRequestResponses: g.dumpRequestResponses,
-		setRequestHeaders:   setRequestHeaders,
-		setCookies:          g.setCookies,
+		setRequestHeaders:    setRequestHeaders,
+		setCookies:           g.setCookies,
+		logger:               g.logger,
 	}
 	for _, opt := range options {
 		opt(c)

@@ -2,6 +2,7 @@ package cgpt
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -34,6 +35,7 @@ var tokenLimits = map[string]int{
 	"*":                    4096,
 	"googleai:*":           8192,
 	"anthropic:.*sonnet.*": 8000,
+	"xai:*":                8192,
 }
 
 // InferenceProviderOption configures model initialization.
@@ -125,6 +127,9 @@ var modelConstructors = map[string]modelConstructor{
 			xai.WithModel(cfg.Model),
 			// conversationID set dynamically in GenerateContent
 		}
+
+		fs := flag.NewFlagSet("xai", flag.ContinueOnError)
+		_ = fs.String("xai", "", "dummy")
 
 		// Add standard environment variable options
 		if sessionCookie := os.Getenv("XAI_SESSION_COOKIE"); sessionCookie != "" {

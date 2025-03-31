@@ -32,6 +32,8 @@ type conversation struct {
 	verbose              bool // Enable verbose logging
 	veryVerbose          bool // Enable very verbose logging
 	dumpRequestResponses bool // Enable dumping of request and response bodies
+
+	logger Logger // Logger for outputting diagnostic information
 }
 
 type responseRenderer struct {
@@ -108,12 +110,14 @@ func (c *conversation) fetchImage(ctx context.Context, url string) ([]byte, erro
 }
 
 // Create creates a new conversation and sets the conversation ID
-func (g *conversation) Create(ctx context.Context, opts *llms.CallOptions, message string) (*llms.ContentResponse, error) {
+func (g *conversation) Create(ctx context.Context, opts *llms.CallOptions, message llms.MessageContent, options ...ConversationResponseOption) (*llms.ContentResponse, error) {
+
+	userMessage := partsToString(message.Parts)
 	// Create request body
 	requestBody := map[string]any{
 		"temporary":        false, // TODO; parmeterize
 		"modelName":        g.modelName,
-		"message":          message,
+		"message":          userMessage,
 		"fileAttachments":  []string{},
 		"imageAttachments": []string{},
 		"disableSearch":    false, // TODO: parameterize
@@ -129,9 +133,23 @@ func (g *conversation) Create(ctx context.Context, opts *llms.CallOptions, messa
 		"enableSideBySide":          true,
 		"isPreset":                  false,
 		"sendFinalMetadata":         true,
-		"isReasoning":               false,
-		"webpageUrls":               []string{},
+
+		//"deepsearchPreset":          "default",
+		"isReasoning": false,
+
+		//"customPersonality": "",
+		//"customInstructions": "",
+
+		"webpageUrls": []string{},
 		//"systemPromptName":          "grok3_personality_cracked_coder",
+	}
+	fmt.Println(requestBody)
+	for _, opt := range options {
+		fmt.Println(opt, "before")
+		fmt.Println(requestBody)
+		opt(requestBody)
+		fmt.Println(requestBody)
+		fmt.Println(opt, "after")
 	}
 
 	jsonBody, err := json.Marshal(requestBody)
@@ -209,11 +227,16 @@ func (g *conversation) Create(ctx context.Context, opts *llms.CallOptions, messa
 	return g.streamResponseNewConversation(ctx, resp.Body, opts.StreamingFunc)
 }
 
-func (g *conversation) getConversationResponse(ctx context.Context, opts *llms.CallOptions, message string) (*llms.ContentResponse, error) {
+func (c *conversation) getConversationResponse(ctx context.Context, opts *llms.CallOptions, message llms.MessageContent) (*llms.ContentResponse, error) {
+	if c.LastResponseID == "" {
+		return nil, errors.New("grok: missing LastResponseID")
+	}
+
+	userMessage := partsToString(message.Parts)
 	// Create request body
 	requestBody := map[string]any{
-		"message":       message, // Include message content for follow-up prompts
-		"modelName":     g.modelName,
+		"message":       userMessage, // Include message content for follow-up prompts
+		"modelName":     c.modelName,
 		"disableSearch": false, // TODO: parameterize
 
 		"enableImageGeneration": true,
@@ -224,17 +247,19 @@ func (g *conversation) getConversationResponse(ctx context.Context, opts *llms.C
 		"returnImageBytes":          false,
 		"returnRawGrokInXaiRequest": false,
 		"fileAttachments":           []string{},
-		"forceConcise":              false,
-		"toolOverrides":             map[string]bool{},
-		"enableSideBySide":          true,
-		"sendFinalMetadata":         true,
+
+		"forceConcise": false,
+
+		"toolOverrides":     map[string]bool{},
+		"enableSideBySide":  true,
+		"sendFinalMetadata": true,
 		//"deepsearchPreset":          "default",
 		//"isReasoning": true,
 		"webpageUrls": []string{},
 		// "maxTokens":   g.maxTokens,
 		// "temperature": g.temperature,
 
-		"parentResponseId": g.LastResponseID,
+		"parentResponseId": c.LastResponseID,
 	}
 
 	jsonBody, err := json.Marshal(requestBody)
@@ -245,8 +270,8 @@ func (g *conversation) getConversationResponse(ctx context.Context, opts *llms.C
 	fmt.Fprintln(logOut, "REQ", string(jsonBody))
 
 	// Build URL
-	url := fmt.Sprintf("%s%s/responses", g.baseURL, g.ConversationID)
-	referer := fmt.Sprintf("https://grok.com/chat/%s", g.ConversationID)
+	url := fmt.Sprintf("%s%s/responses", c.baseURL, c.ConversationID)
+	referer := fmt.Sprintf("https://grok.com/chat/%s", c.ConversationID)
 
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
@@ -255,12 +280,12 @@ func (g *conversation) getConversationResponse(ctx context.Context, opts *llms.C
 	}
 
 	// Set headers and cookies
-	g.setRequestHeaders(req)
-	g.setCookies(req)
+	c.setRequestHeaders(req)
+	c.setCookies(req)
 	req.Header.Set("Referer", referer)
 
 	// Debug dump request
-	if g.dumpRequestResponses {
+	if c.dumpRequestResponses {
 		dump, err := httputil.DumpRequestOut(req, true)
 		if err != nil {
 			log.Printf("Error dumping request: %v", err)
@@ -270,14 +295,14 @@ func (g *conversation) getConversationResponse(ctx context.Context, opts *llms.C
 	}
 
 	// Streaming mode
-	resp, err := g.client.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("network error in streaming mode: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Debug headers for streaming response
-	if g.dumpRequestResponses {
+	if c.dumpRequestResponses {
 		dump, err := httputil.DumpResponse(resp, false) // Don't dump body for streaming
 		if err != nil {
 			log.Printf("Error dumping streaming response headers: %v", err)
@@ -301,7 +326,7 @@ func (g *conversation) getConversationResponse(ctx context.Context, opts *llms.C
 		return nil, fmt.Errorf("streaming request failed with status: %s", resp.Status)
 	}
 
-	return g.streamResponseConversationContinuation(ctx, resp.Body, opts.StreamingFunc)
+	return c.streamResponseConversationContinuation(ctx, resp.Body, opts.StreamingFunc)
 }
 
 // make a writer wrapper that adds grey color to the output:
@@ -329,6 +354,9 @@ func (g *conversation) streamResponseNewConversation(ctx context.Context, body i
 		}
 		if response.Result.Response.StreamingImageGenerationResponse.ImageID != "" {
 			return response.Result.Response.Token, response.Result.Response.StreamingImageGenerationResponse, nil
+		}
+		if response.Result.Response.ModelResponse.ResponseID != "" {
+			g.LastResponseID = response.Result.Response.ModelResponse.ResponseID
 		}
 		return response.Result.Response.Token, nil, nil
 	}, streamFunc)
@@ -494,25 +522,14 @@ func (c *conversation) AddResponse(ctx context.Context, messages []llms.MessageC
 	for _, opt := range options {
 		opt(opts)
 	}
-
-	// Get the message content from the last message
-	var messageContent string
-	if len(messages) > 0 {
-		lastMsg := messages[len(messages)-1]
-		for _, part := range lastMsg.Parts {
-			s := fmt.Sprint(part)
-			if len(s) <= 1024 { // Basic sanitization
-				if messageContent != "" {
-					messageContent += " "
-				}
-				messageContent += strings.TrimSpace(s)
-			}
-		}
+	createOptions, messageContent, err := llmMessagesToCreateOptions(ctx, opts, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert messages to create options: %w", err)
 	}
 
 	// Create a new conversation if we don't have one yet
 	if c.ConversationID == "" {
-		return c.Create(ctx, opts, messageContent)
+		return c.Create(ctx, opts, messageContent, createOptions...)
 	}
 
 	// Continue the existing conversation
