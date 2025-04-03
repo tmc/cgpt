@@ -59,6 +59,9 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.StringVarP(&opts.Prefill, "prefill", "p", "", "Prefill the assistant's response")
 	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
 
+	fs.BoolVar(&opts.PrintUsage, "print-usage", false, "Print token usage information")
+
+	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
 	fs.BoolVar(&opts.OpenAIUseLegacyMaxTokens, "openai-use-max-tokens", false, "If true, uses 'max_tokens' vs 'max_output_tokens' for openai backends")
 
 	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")

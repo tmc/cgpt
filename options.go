@@ -23,6 +23,7 @@ type RunOptions struct {
 	StreamOutput bool `json:"streamOutput,omitempty" yaml:"streamOutput,omitempty"`
 	ShowSpinner  bool `json:"showSpinner,omitempty" yaml:"showSpinner,omitempty"`
 	EchoPrefill  bool `json:"echoPrefill,omitempty" yaml:"echoPrefill,omitempty"`
+	PrintUsage   bool
 
 	// Verbosity options
 	Verbose   bool `json:"verbose,omitempty" yaml:"verbose,omitempty"`
@@ -50,11 +51,16 @@ type RunOptions struct {
 
 // GetCombinedInputReader returns an io.Reader that combines all input sources.
 func (ro *RunOptions) GetCombinedInputReader(ctx context.Context) (io.Reader, error) {
+	return GetInputReader(ctx, ro.InputFiles, ro.InputStrings, ro.PositionalArgs, ro.Stdin)
+}
+
+// GetInputReader returns a reader for the given input strings and files.
+func GetInputReader(ctx context.Context, files []string, strings []string, args []string, stdin io.Reader) (io.Reader, error) {
 	handler := &InputHandler{
-		Files:   ro.InputFiles,
-		Strings: ro.InputStrings,
-		Args:    ro.PositionalArgs,
-		Stdin:   ro.Stdin,
+		Files:   files,
+		Strings: strings,
+		Args:    args,
+		Stdin:   stdin,
 	}
 	return handler.Process(ctx)
 }
