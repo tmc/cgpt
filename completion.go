@@ -71,6 +71,13 @@ func WithLogger(l *zap.SugaredLogger) CompletionServiceOption {
 	}
 }
 
+// WithDisableHistory sets whether history saving is disabled
+func WithDisableHistory(disable bool) CompletionServiceOption {
+	return func(s *CompletionService) {
+		s.disableHistory = disable
+	}
+}
+
 // NewCompletionService creates a new CompletionService with the given configuration.
 func NewCompletionService(cfg *Config, model llms.Model, opts ...CompletionServiceOption) (*CompletionService, error) {
 	if cfg == nil {
@@ -477,6 +484,9 @@ func (s *CompletionService) generateHistoryTitle(ctx context.Context) (string, e
 
 // renameChatHistory generates a title and renames the history file
 func (s *CompletionService) renameChatHistory(ctx context.Context) error {
+	if s.disableHistory {
+		return nil
+	}
 	if s.historyOutFile == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

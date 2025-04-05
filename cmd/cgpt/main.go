@@ -112,11 +112,14 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 
 	// Creates the default save path if it doesn't exist
 	if dir, _ := os.UserHomeDir(); dir != "" {
-		err := os.MkdirAll(filepath.Join(dir, ".cgpt"), 0755)
-		if err != nil {
-			fmt.Fprintf(opts.Stderr, "Failed to create default save path: %v\n", err)
-		} else {
-			fmt.Fprintf(opts.Stderr, "Created default save path: %s\n", filepath.Join(dir, ".cgpt"))
+		cgptDir := filepath.Join(dir, ".cgpt")
+		if _, err := os.Stat(cgptDir); os.IsNotExist(err) {
+			err := os.MkdirAll(cgptDir, 0755)
+			if err != nil {
+				fmt.Fprintf(opts.Stderr, "Failed to create default save path: %v\n", err)
+			} else {
+				fmt.Fprintf(opts.Stderr, "Created default save path: %s\n", cgptDir)
+			}
 		}
 	}
 
@@ -147,6 +150,7 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	s, err := cgpt.NewCompletionService(opts.Config, model,
 		cgpt.WithStdout(opts.Stdout),
 		cgpt.WithStderr(opts.Stderr),
+		cgpt.WithDisableHistory(opts.DisableHistory),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create completion service: %w", err)
