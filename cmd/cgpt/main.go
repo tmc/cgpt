@@ -69,6 +69,7 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.StringVarP(&opts.HistoryOut, "history-out", "O", "", "File to store completion history in")
 	fs.StringVar(&opts.HistoryIn, "history-load", "", "File to read completion history from (deprecated)")
 	fs.StringVar(&opts.HistoryOut, "history-save", "", "File to store completion history in (deprecated)")
+	fs.BoolVar(&opts.DisableHistory, "no-history", false, "Disable saving chat history")
 
 	fs.StringVar(&opts.ReadlineHistoryFile, "readline-history-file", "~/.cgpt_history", "File to store readline history in")
 	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of completions (when running non-interactively with history)")
@@ -111,11 +112,14 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 
 	// Creates the default save path if it doesn't exist
 	if dir, _ := os.UserHomeDir(); dir != "" {
-		err := os.MkdirAll(filepath.Join(dir, ".cgpt"), 0755)
-		if err != nil {
-			fmt.Fprintf(opts.Stderr, "Failed to create default save path: %v\n", err)
-		} else {
-			fmt.Fprintf(opts.Stderr, "Created default save path: %s\n", filepath.Join(dir, ".cgpt"))
+		cgptDir := filepath.Join(dir, ".cgpt")
+		if _, err := os.Stat(cgptDir); os.IsNotExist(err) {
+			err := os.MkdirAll(cgptDir, 0755)
+			if err != nil {
+				fmt.Fprintf(opts.Stderr, "Failed to create default save path: %v\n", err)
+			} else {
+				fmt.Fprintf(opts.Stderr, "Created default save path: %s\n", cgptDir)
+			}
 		}
 	}
 
@@ -146,6 +150,7 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	s, err := cgpt.NewCompletionService(opts.Config, model,
 		cgpt.WithStdout(opts.Stdout),
 		cgpt.WithStderr(opts.Stderr),
+		cgpt.WithDisableHistory(opts.DisableHistory),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create completion service: %w", err)
