@@ -34,6 +34,7 @@ type CompletionService struct {
 	historyIn           io.Reader
 	historyOutFile      string
 	readlineHistoryFile string
+	disableHistory      bool
 
 	performCompletionConfig PerformCompletionConfig
 

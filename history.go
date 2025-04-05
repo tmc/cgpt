@@ -37,6 +37,9 @@ func (s *CompletionService) loadHistory() error {
 }
 
 func (s *CompletionService) saveHistory() error {
+	if s.disableHistory {
+		return nil
+	}
 	if s.historyOutFile == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

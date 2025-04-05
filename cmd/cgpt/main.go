@@ -69,6 +69,7 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.StringVarP(&opts.HistoryOut, "history-out", "O", "", "File to store completion history in")
 	fs.StringVar(&opts.HistoryIn, "history-load", "", "File to read completion history from (deprecated)")
 	fs.StringVar(&opts.HistoryOut, "history-save", "", "File to store completion history in (deprecated)")
+	fs.BoolVar(&opts.DisableHistory, "no-history", false, "Disable saving chat history")
 
 	fs.StringVar(&opts.ReadlineHistoryFile, "readline-history-file", "~/.cgpt_history", "File to store readline history in")
 	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of completions (when running non-interactively with history)")

@@ -33,6 +33,7 @@ type RunOptions struct {
 	HistoryOut          string `json:"historyOut,omitempty" yaml:"historyOut,omitempty"`
 	ReadlineHistoryFile string `json:"readlineHistoryFile,omitempty" yaml:"readlineHistoryFile,omitempty"`
 	NCompletions        int    `json:"nCompletions,omitempty" yaml:"nCompletions,omitempty"`
+	DisableHistory      bool   `json:"disableHistory,omitempty" yaml:"disableHistory,omitempty"`
 
 	// I/O
 	Stdout io.Writer `json:"-" yaml:"-"`
