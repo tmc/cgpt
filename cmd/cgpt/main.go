@@ -39,20 +39,25 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/pflag"
-	"github.com/tmc/cgpt"
+	"github.com/tmc/cgpt/backends"
+	"github.com/tmc/cgpt/completion"
+	"github.com/tmc/cgpt/input"
+	"github.com/tmc/cgpt/options"
 	"github.com/tmc/langchaingo/httputil"
 	"golang.org/x/term"
 )
 
 // defineFlags defines the command line flags for the cgpt command
-func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
+func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 	// Runtime flags
 	fs.StringArrayVarP(&opts.InputStrings, "input", "i", nil, "Direct string input (can be used multiple times)")
-	fs.StringArrayVarP(&opts.InputFiles, "file", "f", []string{"-"}, "Input file path. Use '-' for stdin (can be used multiple times)")
+	fs.StringArrayVarP(&opts.InputFiles, "file", "f", nil, "Input file path. Use '-' for stdin (can be used multiple times)")
 	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Run in continuous mode (interactive)")
+	fs.BoolVar(&opts.UseTUI, "tui", false, "Use terminal UI mode (BubbleTea) for interactive sessions")
 	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
 	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
@@ -61,7 +66,6 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 
 	fs.BoolVar(&opts.PrintUsage, "print-usage", false, "Print token usage information")
 
-	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
 	fs.BoolVar(&opts.OpenAIUseLegacyMaxTokens, "openai-use-max-tokens", false, "If true, uses 'max_tokens' vs 'max_output_tokens' for openai backends")
 
 	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
@@ -104,62 +108,217 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) error {
-	// Load the config file
-	fileConfig, err := cgpt.LoadConfig(opts.ConfigPath, opts.Stderr, flagSet)
-	opts.Config = fileConfig
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
+func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) error {
+	// Ensure we have stderr output even if uninitialized
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
 	}
 
+	// Load the config file
+	fileConfig, err := options.LoadConfig(opts.ConfigPath, stderr, flagSet)
+	if err != nil {
+		fmt.Fprintf(stderr, "Warning: failed to load config: %v. Proceeding with defaults/flags.\n", err)
+	}
+	opts.Config = fileConfig
+
+	// TODO: move to history
 	// Creates the default save path if it doesn't exist
 	if dir, _ := os.UserHomeDir(); dir != "" {
 		err := os.MkdirAll(filepath.Join(dir, ".cgpt"), 0755)
 		if err != nil {
-			fmt.Fprintf(opts.Stderr, "Failed to create default save path: %v\n", err)
+			fmt.Fprintf(stderr, "Failed to create default save path: %v\n", err)
+		}
+	}
+
+	// Process input using the new input package
+	isStdinTerminal := term.IsTerminal(int(os.Stdin.Fd())) // Check TTY status *once*
+
+	// Store the flags that were explicitly set, in order they appeared on the command line
+	var inputFileOrder, inputStringOrder []string
+	flagSet.Visit(func(flag *pflag.Flag) {
+		if flag.Name == "file" || flag.Name == "f" {
+			inputFileOrder = append(inputFileOrder, flag.Value.String())
+		} else if flag.Name == "input" || flag.Name == "i" {
+			inputStringOrder = append(inputStringOrder, flag.Value.String())
+		}
+	})
+
+	// Pass the continuous flag to the processor for TTY reattachment decision
+	inputProcessor := input.NewProcessor(
+		opts.InputFiles,
+		opts.InputStrings,
+		opts.PositionalArgs,
+		opts.Stdin,
+		isStdinTerminal,
+		opts.Continuous, // Let the input processor know if -c flag was used
+	).WithFileOrder(inputFileOrder).WithStringOrder(inputStringOrder)
+
+	inputReader, _, tryReattachTTY, err := inputProcessor.GetCombinedReader(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to prepare input reader: %w", err) // Error opening files etc.
+	}
+
+	inputBytes, err := io.ReadAll(inputReader)
+	if err != nil {
+		return fmt.Errorf("failed to read input: %w", err)
+	}
+	initialPrompt := strings.TrimSpace(string(inputBytes))
+
+	// --- TTY Handling ---
+	// If we need to reattach to TTY (continuous mode with piped input)
+	var ttyFile *os.File
+	// Skip debug message to keep output clean
+	if tryReattachTTY {
+		// This flag implies opts.Continuous is true and stdin was piped
+		var errTTY error
+		ttyFile, errTTY = os.OpenFile("/dev/tty", os.O_RDWR, 0)
+
+		if errTTY != nil {
+			// Don't fail hard, but log prominently - future TTY operations will likely fail
+			fmt.Fprintf(stderr, "Error: Could not reattach to terminal for interactive mode.\n")
+			ttyFile = nil // Ensure ttyFile is nil if open failed
 		} else {
-			fmt.Fprintf(opts.Stderr, "Created default save path: %s\n", filepath.Join(dir, ".cgpt"))
+			// *** CRITICAL: Defer close until the run function exits ***
+			defer func() {
+				if ttyFile != nil {
+					ttyFile.Close()
+				}
+			}()
 		}
 	}
 
 	// Initialize the model (the llms.Model interface)
-	modelOpts := []cgpt.InferenceProviderOption{}
+	modelOpts := []backends.InferenceProviderOption{}
 	// if debug mode is on, attach the debug http client:
 	if opts.DebugMode {
-		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
-		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.DebugHTTPClient))
+		fmt.Fprintln(stderr, "Debug mode enabled")
+		modelOpts = append(modelOpts, backends.WithHTTPClient(httputil.DebugHTTPClient))
 	}
 	if opts.OpenAIUseLegacyMaxTokens {
-		modelOpts = append(modelOpts, cgpt.WithUseLegacyMaxTokens(true))
+		modelOpts = append(modelOpts, backends.WithUseLegacyMaxTokens(true))
 	}
-	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
+	model, err := backends.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize model: %w", err)
 	}
 
-	// If stdin is a tty, and no input files, strings, or args are provided,
-	// then we should run in continuous mode:
-	if term.IsTerminal(int(os.Stdin.Fd())) && len(opts.InputFiles) == 0 && len(opts.InputStrings) == 0 && len(opts.PositionalArgs) == 0 {
+	// Check if user *explicitly* provided input via args, -i, or -f (excluding '-')
+	hasExplicitFileInput := false
+	for _, f := range opts.InputFiles {
+		if f != "-" {
+			hasExplicitFileInput = true
+			break
+		}
+	}
+	hasExplicitInputOtherThanStdin := hasExplicitFileInput || len(opts.InputStrings) > 0 || len(opts.PositionalArgs) > 0
+
+	// Launch implicitly into continuous mode if:
+	// 1. No other input sources were given (args, -i, -f other than '-')
+	// 2. Stdin is available and is a terminal (not piped/redirected)
+	// 3. The user didn't already specify -c
+	if opts.Stdin != nil && isStdinTerminal && !hasExplicitInputOtherThanStdin && !opts.Continuous {
 		opts.Continuous = true
 	}
+	// --- End Continuous Mode ---
+
 	// Only have spinner on if stdout is a tty:
 	opts.ShowSpinner = opts.ShowSpinner && term.IsTerminal(int(os.Stdout.Fd()))
 
-	// Create the completion service
-	s, err := cgpt.NewCompletionService(opts.Config, model,
-		cgpt.WithStdout(opts.Stdout),
-		cgpt.WithStderr(opts.Stderr),
-	)
+	// Create the completion service config & service
+	compCfg := NewCompletionConfig(opts)
+	
+	// Create service options
+	svcOpts := completion.NewOptions()
+	
+	// Copy over relevant options
+	svcOpts.Stdout = opts.Stdout
+	svcOpts.Stderr = opts.Stderr
+	svcOpts.ShowSpinner = opts.ShowSpinner
+	svcOpts.EchoPrefill = opts.EchoPrefill
+	svcOpts.PrintUsage = opts.PrintUsage
+	svcOpts.StreamOutput = opts.StreamOutput
+	svcOpts.Continuous = opts.Continuous
+	svcOpts.UseTUI = opts.UseTUI
+	svcOpts.Verbose = opts.Verbose
+	svcOpts.DebugMode = opts.DebugMode
+	svcOpts.HistoryIn = opts.HistoryIn
+	svcOpts.HistoryOut = opts.HistoryOut
+	svcOpts.ReadlineHistoryFile = opts.ReadlineHistoryFile
+	svcOpts.Prefill = opts.Prefill
+	if opts.CompletionTimeout > 0 {
+		svcOpts.CompletionTimeout = opts.CompletionTimeout
+	}
+	
+	// If we need to use the TTY, use it for stdout in the completion service
+	if ttyFile != nil && opts.Continuous {
+		svcOpts.Stdout = ttyFile
+	}
+
+	s, err := completion.New(compCfg, model, completion.WithOptions(svcOpts))
 	if err != nil {
 		return fmt.Errorf("failed to create completion service: %w", err)
 	}
-	// Run the completion service
-	return s.Run(ctx, opts)
+
+	// Add initial prompt if we read one
+	if initialPrompt != "" {
+		s.AddUserMessage(initialPrompt)
+	}
+
+	// Handle case where we are NOT continuous and have NO initial prompt (even after loading history)
+	// The completion service's Run should handle history loading via Options
+	if !opts.Continuous && initialPrompt == "" && opts.HistoryIn == "" {
+		return fmt.Errorf("no input provided for non-continuous mode (use -i, -f, args, or pipe stdin)")
+	}
+
+	// Add prefill if provided
+	if opts.Prefill != "" {
+		s.SetNextCompletionPrefill(opts.Prefill)
+	}
+
+	// When running in continuous mode with a reattached TTY - no need for special messaging
+
+	// Run the completion service - this now handles all cases including TTY reattachment
+	runOpts := completion.RunOptions{
+		Config: compCfg,
+		InputStrings: opts.InputStrings,
+		InputFiles: opts.InputFiles,
+		PositionalArgs: opts.PositionalArgs,
+		Prefill: opts.Prefill,
+		Continuous: opts.Continuous,
+		StreamOutput: opts.StreamOutput,
+		ShowSpinner: opts.ShowSpinner,
+		EchoPrefill: opts.EchoPrefill,
+		UseTUI: opts.UseTUI,
+		PrintUsage: opts.PrintUsage,
+		Verbose: opts.Verbose,
+		DebugMode: opts.DebugMode,
+		HistoryIn: opts.HistoryIn,
+		HistoryOut: opts.HistoryOut,
+		ReadlineHistoryFile: opts.ReadlineHistoryFile,
+		NCompletions: opts.NCompletions,
+		Stdout: opts.Stdout,
+		Stderr: opts.Stderr,
+		Stdin: opts.Stdin,
+		MaximumTimeout: opts.CompletionTimeout,
+		ConfigPath: opts.ConfigPath,
+		OpenAIUseLegacyMaxTokens: opts.OpenAIUseLegacyMaxTokens,
+	}
+	return s.Run(ctx, runOpts)
 }
 
-func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet, error) {
-	opts := cgpt.RunOptions{
-		Config: &cgpt.Config{},
+func NewCompletionConfig(cfg options.RunOptions) *completion.Config {
+	return &completion.Config{
+		MaxTokens:         cfg.Config.MaxTokens,
+		Temperature:       cfg.Config.Temperature,
+		SystemPrompt:      cfg.Config.SystemPrompt,
+		CompletionTimeout: cfg.CompletionTimeout,
+	}
+}
+
+func initFlags(args []string, stdin io.Reader) (options.RunOptions, *pflag.FlagSet, error) {
+	opts := options.RunOptions{
+		Config: &options.Config{},
 		Stdin:  stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
@@ -172,9 +331,8 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	fs.SortFlags = false
 	defineFlags(fs, &opts)
 
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		opts.InputFiles = nil
-	}
+	// We no longer reset InputFiles based on stdin being a terminal
+	// This is now handled by the input processor
 
 	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples (comma separated list of sections, or 'all')")
 	help := fs.BoolP("help", "h", false, "Display help information")
@@ -214,4 +372,19 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	opts.PositionalArgs = fs.Args()
 
 	return opts, fs, nil
+}
+
+// These functions are implemented in usage_examples.go
+// Ensuring we don't have duplicate implementations
+
+// Expand ~ to home directory
+func expandTilde(path string) string {
+	if path == "" || path[0] != '~' {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[1:])
 }

@@ -1,5 +1,5 @@
 // Package config provides configuration management for the cgpt CLI
-package config
+package options
 
 import (
 	"encoding/json"
