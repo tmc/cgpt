@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
@@ -168,24 +167,8 @@ func SetupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
 	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath != nil && flagConfigFilePath.Changed {
 		v.SetConfigFile(flagConfigFilePath.Value.String())
 	}
-}
 
-// LogConfigSources logs where each configuration value came from
-func LogConfigSources(v *viper.Viper, stderr io.Writer) {
-	for _, key := range []string{"backend", "model"} {
-		var source string
-		switch {
-		case v.InConfig(key):
-			source = "config file"
-		case os.Getenv("CGPT_"+strings.ToUpper(key)) != "":
-			source = "environment"
-		case v.IsSet(key):
-			source = "flag"
-		default:
-			source = "default"
-		}
-		fmt.Fprintf(stderr, "cgpt: using %s from %s: %s\n", key, source, v.GetString(key))
-	}
+	_setupViper(v, flagSet)
 }
 
 // SetupFlagNormalization configures flag normalization to handle dashes in flag names
@@ -196,26 +179,6 @@ func SetupFlagNormalization(flagSet *pflag.FlagSet) {
 		name = strings.ReplaceAll(string(result), "-", "")
 		return pflag.NormalizedName(name)
 	})
-}
-
-// SetMaxTokens sets the max tokens based on the backend and model
-func SetMaxTokens(cfg *Config) {
-	maxTokens := TokenLimits["*"]
-	backendModel := cfg.Backend + ":" + cfg.Model
-
-	for pattern, limit := range TokenLimits {
-		if pattern == "*" {
-			continue
-		}
-		if matched, _ := regexp.MatchString(pattern, backendModel); matched {
-			maxTokens = limit
-			break
-		}
-	}
-
-	if cfg.MaxTokens == 0 || cfg.MaxTokens > maxTokens {
-		cfg.MaxTokens = maxTokens
-	}
 }
 
 // HandleConfigFile handles loading the configuration file

@@ -37,6 +37,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,8 +58,8 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 	// Runtime flags
 	fs.StringArrayVarP(&opts.InputStrings, "input", "i", nil, "Direct string input (can be used multiple times)")
 	fs.StringArrayVarP(&opts.InputFiles, "file", "f", nil, "Input file path. Use '-' for stdin (can be used multiple times)")
-	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Run in continuous mode (interactive)")
-	fs.BoolVar(&opts.UseTUI, "tui", false, "Use terminal UI mode (BubbleTea) for interactive sessions")
+	fs.BoolVarP(&opts.Continuous, "continuous", "c", true, "Run in continuous mode (interactive)")
+	fs.BoolVar(&opts.UseTUI, "tui", true, "Use terminal UI mode (BubbleTea) for interactive sessions")
 	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
 	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
@@ -101,6 +103,10 @@ func main() {
 		os.Exit(2)
 	}
 
+	// start pprof:
+	go func() {
+		http.ListenAndServe("localhost:6060", nil)
+	}()
 	ctx := context.Background()
 	if err := run(ctx, opts, flagSet); err != nil {
 		fmt.Fprintf(os.Stderr, "cgpt: error: %v\n", err)
@@ -190,6 +196,16 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 
 	// Initialize the model (the llms.Model interface)
 	modelOpts := []backends.InferenceProviderOption{}
+
+	modelOpts = append(modelOpts, backends.WithEnvLookupFunc(func(key string) string {
+		fmt.Println("EnvLookupFunc called for key:", key)
+		v, _ := flagSet.GetString(key)
+		if v != "" {
+			return v
+		}
+		return options.Getenv(key)
+	}),
+	)
 	// if debug mode is on, attach the debug http client:
 	if opts.DebugMode {
 		fmt.Fprintln(stderr, "Debug mode enabled")
@@ -227,10 +243,10 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 
 	// Create the completion service config & service
 	compCfg := NewCompletionConfig(opts)
-	
+
 	// Create service options
 	svcOpts := completion.NewOptions()
-	
+
 	// Copy over relevant options
 	svcOpts.Stdout = opts.Stdout
 	svcOpts.Stderr = opts.Stderr
@@ -249,7 +265,7 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 	if opts.CompletionTimeout > 0 {
 		svcOpts.CompletionTimeout = opts.CompletionTimeout
 	}
-	
+
 	// If we need to use the TTY, use it for stdout in the completion service
 	if ttyFile != nil && opts.Continuous {
 		svcOpts.Stdout = ttyFile
@@ -280,28 +296,28 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 
 	// Run the completion service - this now handles all cases including TTY reattachment
 	runOpts := completion.RunOptions{
-		Config: compCfg,
-		InputStrings: opts.InputStrings,
-		InputFiles: opts.InputFiles,
-		PositionalArgs: opts.PositionalArgs,
-		Prefill: opts.Prefill,
-		Continuous: opts.Continuous,
-		StreamOutput: opts.StreamOutput,
-		ShowSpinner: opts.ShowSpinner,
-		EchoPrefill: opts.EchoPrefill,
-		UseTUI: opts.UseTUI,
-		PrintUsage: opts.PrintUsage,
-		Verbose: opts.Verbose,
-		DebugMode: opts.DebugMode,
-		HistoryIn: opts.HistoryIn,
-		HistoryOut: opts.HistoryOut,
-		ReadlineHistoryFile: opts.ReadlineHistoryFile,
-		NCompletions: opts.NCompletions,
-		Stdout: opts.Stdout,
-		Stderr: opts.Stderr,
-		Stdin: opts.Stdin,
-		MaximumTimeout: opts.CompletionTimeout,
-		ConfigPath: opts.ConfigPath,
+		Config:                   compCfg,
+		InputStrings:             opts.InputStrings,
+		InputFiles:               opts.InputFiles,
+		PositionalArgs:           opts.PositionalArgs,
+		Prefill:                  opts.Prefill,
+		Continuous:               opts.Continuous,
+		StreamOutput:             opts.StreamOutput,
+		ShowSpinner:              opts.ShowSpinner,
+		EchoPrefill:              opts.EchoPrefill,
+		UseTUI:                   opts.UseTUI,
+		PrintUsage:               opts.PrintUsage,
+		Verbose:                  opts.Verbose,
+		DebugMode:                opts.DebugMode,
+		HistoryIn:                opts.HistoryIn,
+		HistoryOut:               opts.HistoryOut,
+		ReadlineHistoryFile:      opts.ReadlineHistoryFile,
+		NCompletions:             opts.NCompletions,
+		Stdout:                   opts.Stdout,
+		Stderr:                   opts.Stderr,
+		Stdin:                    opts.Stdin,
+		MaximumTimeout:           opts.CompletionTimeout,
+		ConfigPath:               opts.ConfigPath,
 		OpenAIUseLegacyMaxTokens: opts.OpenAIUseLegacyMaxTokens,
 	}
 	return s.Run(ctx, runOpts)
@@ -376,15 +392,3 @@ func initFlags(args []string, stdin io.Reader) (options.RunOptions, *pflag.FlagS
 
 // These functions are implemented in usage_examples.go
 // Ensuring we don't have duplicate implementations
-
-// Expand ~ to home directory
-func expandTilde(path string) string {
-	if path == "" || path[0] != '~' {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	return filepath.Join(home, path[1:])
-}

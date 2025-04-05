@@ -44,7 +44,7 @@ type Service struct {
 
 	// sessionTimestamp is used to create a consistent history file name for the entire session
 	sessionTimestamp string
-	
+
 	// activeSession is the interactive session being used (for controlling UI state)
 	activeSession interactive.Session
 }
@@ -71,31 +71,31 @@ type Options struct {
 	EchoPrefill bool
 	ShowSpinner bool
 	PrintUsage  bool
-	
+
 	// CompletionTimeout is the timeout for the completion.
 	CompletionTimeout time.Duration
-	
+
 	// History options
 	HistoryIn           string
 	HistoryOut          string
 	ReadlineHistoryFile string
-	
+
 	// Completion prefill
 	Prefill string
-	
+
 	// Verbosity options
 	Verbose   bool
 	DebugMode bool
-	
+
 	// StreamOutput controls whether to stream the output.
 	StreamOutput bool
-	
+
 	// Continuous controls whether to run in continuous mode.
 	Continuous bool
-	
+
 	// UseTUI controls whether to use BubbleTea UI for interactive mode.
 	UseTUI bool
-	
+
 	// Interactive mode placeholder text
 	SingleLineHint string // Placeholder text for single line input
 	MultiLineHint  string // Placeholder text for multi-line input
@@ -121,83 +121,6 @@ func WithStdout(w io.Writer) ServiceOption {
 func WithStderr(w io.Writer) ServiceOption {
 	return func(s *Service) {
 		s.opts.Stderr = w
-	}
-}
-
-// WithShowSpinner enables or disables the spinner
-func WithShowSpinner(show bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.ShowSpinner = show
-	}
-}
-
-// WithEchoPrefill enables or disables echoing the prefill
-func WithEchoPrefill(echo bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.EchoPrefill = echo
-	}
-}
-
-// WithHistoryIn sets the history input file
-func WithHistoryIn(path string) ServiceOption {
-	return func(s *Service) {
-		s.opts.HistoryIn = path
-	}
-}
-
-// WithHistoryOut sets the history output file
-func WithHistoryOut(path string) ServiceOption {
-	return func(s *Service) {
-		s.opts.HistoryOut = path
-	}
-}
-
-// WithReadlineHistoryFile sets the readline history file
-func WithReadlineHistoryFile(path string) ServiceOption {
-	return func(s *Service) {
-		s.opts.ReadlineHistoryFile = path
-	}
-}
-
-// WithPrefill sets the prefill content
-func WithPrefill(prefill string) ServiceOption {
-	return func(s *Service) {
-		s.opts.Prefill = prefill
-	}
-}
-
-// WithContinuous enables or disables continuous mode
-func WithContinuous(continuous bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.Continuous = continuous
-	}
-}
-
-// WithStreamOutput enables or disables streaming output
-func WithStreamOutput(stream bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.StreamOutput = stream
-	}
-}
-
-// WithVerbose enables or disables verbose logging
-func WithVerbose(verbose bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.Verbose = verbose
-	}
-}
-
-// WithDebugMode enables or disables debug mode
-func WithDebugMode(debug bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.DebugMode = debug
-	}
-}
-
-// WithCompletionTimeout sets the completion timeout
-func WithCompletionTimeout(timeout time.Duration) ServiceOption {
-	return func(s *Service) {
-		s.opts.CompletionTimeout = timeout
 	}
 }
 
@@ -229,12 +152,12 @@ func New(cfg *Config, model llms.Model, opts ...ServiceOption) (*Service, error)
 		opts:              &defaultOpts,
 		sessionTimestamp:  time.Now().Format("20060102150405"),
 	}
-	
+
 	// Apply options
 	for _, opt := range opts {
 		opt(s)
 	}
-	
+
 	// Setup logger
 	s.loggerCfg = zap.NewDevelopmentConfig()
 	if s.logger == nil {
@@ -252,7 +175,7 @@ func New(cfg *Config, model llms.Model, opts ...ServiceOption) (*Service, error)
 		logger := zap.New(core)
 		s.logger = logger.Sugar()
 	}
-	
+
 	// Configure log level
 	s.loggerCfg.Level.SetLevel(zap.WarnLevel)
 	if s.opts.Verbose {
@@ -261,12 +184,12 @@ func New(cfg *Config, model llms.Model, opts ...ServiceOption) (*Service, error)
 	if s.opts.DebugMode {
 		s.loggerCfg.Level.SetLevel(zap.DebugLevel)
 	}
-	
+
 	// Handle history files
 	if err := s.handleHistory(s.opts.HistoryIn, s.opts.HistoryOut); err != nil {
 		fmt.Fprintln(s.opts.Stderr, err)
 	}
-	
+
 	// Set prefill if needed
 	if s.opts.Prefill != "" {
 		s.SetNextCompletionPrefill(s.opts.Prefill)
@@ -277,16 +200,16 @@ func New(cfg *Config, model llms.Model, opts ...ServiceOption) (*Service, error)
 // NewOptions creates a new Options with defaults.
 func NewOptions() Options {
 	return Options{
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		ShowSpinner: true,
-		EchoPrefill: false,
-		PrintUsage:  false,
-		UseTUI:      false, // Default to classic readline UI
-		CompletionTimeout: 30 * time.Second,
+		Stdout:              os.Stdout,
+		Stderr:              os.Stderr,
+		ShowSpinner:         true,
+		EchoPrefill:         false,
+		PrintUsage:          false,
+		UseTUI:              false, // Default to classic readline UI
+		CompletionTimeout:   30 * time.Second,
 		ReadlineHistoryFile: "~/.cgpt_history",
-		SingleLineHint: "Enter your prompt (press Enter twice to submit, or \"\"\" for multi-line)",
-		MultiLineHint: "(\"\"\" to end multi-line input, or Ctrl+D to submit)",
+		SingleLineHint:      "Enter your prompt (press Enter twice to submit, or \"\"\" for multi-line)",
+		MultiLineHint:       "(\"\"\" to end multi-line input, or Ctrl+D to submit)",
 	}
 }
 
@@ -332,33 +255,12 @@ type RunOptions struct {
 	OpenAIUseLegacyMaxTokens bool
 }
 
-// OptionsToRunOptions converts Options to RunOptions
-func OptionsToRunOptions(opts Options) RunOptions {
-	return RunOptions{
-		Stdout:             opts.Stdout,
-		Stderr:             opts.Stderr,
-		ShowSpinner:        opts.ShowSpinner,
-		EchoPrefill:        opts.EchoPrefill,
-		PrintUsage:         opts.PrintUsage,
-		StreamOutput:       opts.StreamOutput,
-		Continuous:         opts.Continuous,
-		UseTUI:             opts.UseTUI,
-		Verbose:            opts.Verbose,
-		DebugMode:          opts.DebugMode,
-		HistoryIn:          opts.HistoryIn,
-		HistoryOut:         opts.HistoryOut,
-		ReadlineHistoryFile: opts.ReadlineHistoryFile,
-		Prefill:            opts.Prefill,
-		MaximumTimeout:     opts.CompletionTimeout,
-	}
-}
-
 // Run executes a completion using the service's options
 func (s *Service) Run(ctx context.Context, runCfg RunOptions) error {
-	// Update Options from RunOptions 
+	// Update Options from RunOptions
 	// (this will eventually go away when we fully migrate to Options)
 	tempOpts := RunOptionsToOptions(runCfg)
-	
+
 	// Apply input handling from RunOptions (this will go away too)
 	if err := s.setupSystemPrompt(); err != nil {
 		return fmt.Errorf("system prompt setup error: %w", err)
@@ -366,7 +268,7 @@ func (s *Service) Run(ctx context.Context, runCfg RunOptions) error {
 	if err := s.handleInput(ctx, runCfg); err != nil {
 		return fmt.Errorf("input handling error: %w", err)
 	}
-	
+
 	// Execute the completion based on options
 	if tempOpts.Continuous {
 		if tempOpts.StreamOutput {
@@ -384,7 +286,7 @@ func (s *Service) Run(ctx context.Context, runCfg RunOptions) error {
 // RunOptionsToOptions converts RunOptions to Options
 func RunOptionsToOptions(runOpts RunOptions) Options {
 	options := NewOptions()
-	
+
 	// Only override non-nil/non-zero values
 	if runOpts.Stdout != nil {
 		options.Stdout = runOpts.Stdout
@@ -392,7 +294,7 @@ func RunOptionsToOptions(runOpts RunOptions) Options {
 	if runOpts.Stderr != nil {
 		options.Stderr = runOpts.Stderr
 	}
-	
+
 	options.ShowSpinner = runOpts.ShowSpinner
 	options.EchoPrefill = runOpts.EchoPrefill
 	options.PrintUsage = runOpts.PrintUsage
@@ -401,16 +303,16 @@ func RunOptionsToOptions(runOpts RunOptions) Options {
 	options.UseTUI = runOpts.UseTUI
 	options.Verbose = runOpts.Verbose
 	options.DebugMode = runOpts.DebugMode
-	
+
 	options.HistoryIn = runOpts.HistoryIn
 	options.HistoryOut = runOpts.HistoryOut
 	options.ReadlineHistoryFile = runOpts.ReadlineHistoryFile
 	options.Prefill = runOpts.Prefill
-	
+
 	if runOpts.CompletionTimeout > 0 {
 		options.CompletionTimeout = runOpts.CompletionTimeout
 	}
-	
+
 	return options
 }
 
@@ -616,43 +518,6 @@ func (s *Service) handleInput(ctx context.Context, runCfg RunOptions) error {
 	return nil
 }
 
-// ExecuteCompletionWithOptions runs the completion with the given options
-// This is a cleaner version that doesn't rely on RunOptions
-func (s *Service) ExecuteCompletionWithOptions(ctx context.Context, opts Options) error {
-	if opts.Continuous {
-		if opts.StreamOutput {
-			return s.runContinuousCompletionStreaming(ctx, RunOptions{
-				Stdout: opts.Stdout,
-				Stderr: opts.Stderr,
-				StreamOutput: opts.StreamOutput,
-				ReadlineHistoryFile: opts.ReadlineHistoryFile,
-				ShowSpinner: opts.ShowSpinner,
-				EchoPrefill: opts.EchoPrefill,
-			})
-		}
-		return s.runContinuousCompletion(ctx, RunOptions{
-			Stdout: opts.Stdout,
-			Stderr: opts.Stderr,
-			ReadlineHistoryFile: opts.ReadlineHistoryFile,
-			ShowSpinner: opts.ShowSpinner,
-			EchoPrefill: opts.EchoPrefill,
-		})
-	}
-
-	if opts.StreamOutput {
-		return s.runOneShotCompletionStreaming(ctx, RunOptions{
-			Stdout: opts.Stdout,
-			ShowSpinner: opts.ShowSpinner,
-			EchoPrefill: opts.EchoPrefill,
-		})
-	}
-	return s.runOneShotCompletion(ctx, RunOptions{
-		Stdout: opts.Stdout,
-		ShowSpinner: opts.ShowSpinner,
-		EchoPrefill: opts.EchoPrefill,
-	})
-}
-
 func (s *Service) loadedWithHistory() bool {
 	return s.historyIn != nil
 }
@@ -672,7 +537,9 @@ func (s *Service) handleHistory(historyIn, historyOut string) error {
 		return fmt.Errorf("failed to load history: %w", err)
 	}
 	if err := s.saveHistory(); err != nil {
-		return fmt.Errorf("failed to save history: %w", err)
+		fmt.Println("")
+		fmt.Println("issue in save history:", err)
+		// return fmt.Errorf("failed to save history: %w", err) // TODO: handle
 	}
 	return nil
 }
@@ -703,7 +570,9 @@ func (s *Service) runOneShotCompletionStreaming(ctx context.Context, runCfg RunO
 		runCfg.Stdout.Write([]byte(r))
 	}
 	if err := s.saveHistory(); err != nil {
-		return fmt.Errorf("failed to save history: %w", err)
+		fmt.Println("")
+		fmt.Println("issue in save history:", err)
+		// return fmt.Errorf("failed to save history: %w", err) // TODO: handle
 	}
 	return nil
 }
@@ -732,60 +601,22 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 	ctxWithCancel, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Set up shutdown handler to catch ctrl+c and generate title
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	
-	// Track interrupt state
-	interruptedOnce := false
-	
-	go func() {
-		<-c
-		// If this is first interrupt during streaming, stop the streaming
-		if !interruptedOnce {
-			interruptedOnce = true
-			// Only cancel if we're not already exiting
-			return
-		}
-		
-		// Second interrupt or direct exit - start shutdown sequence
-		// Add a line break if needed
-		fmt.Fprintf(s.opts.Stderr, "\n\033[38;5;240mcgpt: Exiting...\033[0m\n")
-
-		// Create a new timeout context for title generation
-		titleCtx, titleCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer titleCancel()
-
-		// Save history first before generating title
-		if err := s.saveHistory(); err != nil {
-			fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Failed to save history: %v\033[0m\n", err)
-		}
-
-		// Generate a title and rename the history file
-		if err := s.renameChatHistory(titleCtx); err != nil {
-			fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Failed to rename history: %v\033[0m\n", err)
-		}
-
-		// Now cancel the main context
-		cancel()
-	}()
-
 	// If we have processed inputs, generate an initial response
 	if len(s.payload.Messages) > 0 && s.payload.Messages[len(s.payload.Messages)-1].Role == llms.ChatMessageTypeHuman {
 		if err := s.generateResponse(ctxWithCancel, runCfg); err != nil {
 			return fmt.Errorf("failed to generate initial response: %w", err)
 		}
 	}
-	
+
 	// Track the last user message for editing with up arrow
 	var lastUserMessage string
-	
+
 	processFn := func(ctx context.Context, input string) error {
 		input = strings.TrimSpace(input)
 		if input == "" {
 			return interactive.ErrEmptyInput
 		}
-		
+
 		// Special command handling
 		if input == "/last" {
 			// Get the last user message, if available
@@ -795,17 +626,17 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 			fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mNo previous message to edit.\033[0m\n")
 			return interactive.ErrEmptyInput
 		}
-		
+
 		// Store this message for potential future edit
 		lastUserMessage = input
-		
+
 		// Add message to payload and generate response
 		s.payload.addUserMessage(input)
 		err := s.generateResponse(ctxWithCancel, runCfg)
-		
+
 		// Reset the interrupted flag after generating a response
-		interruptedOnce = false
-		
+		//interruptedOnce = false
+
 		if err != nil && ctxWithCancel.Err() != nil {
 			// Context was canceled, return without error
 			return nil
@@ -825,34 +656,32 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 
 	// Add commands to the history for up arrow
 	sessionConfig.LastInput = lastUserMessage
-	
+
 	// Check if we should use the TUI interface
 	var session interactive.Session
 	var err error
-	
-	if runCfg.UseTUI {
-		// Use BubbleTea UI
-		fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Using Terminal UI mode\033[0m\n")
-		session, err = interactive.NewBubbleSession(sessionConfig)
-	} else {
-		// Use traditional readline UI
-		session, err = interactive.NewSession(sessionConfig)
+
+	// Use the platform-agnostic NewSession which will select the appropriate implementation
+	// (BubbleSession for native, potentially WASM-compatible BubbleSession for js)
+	session, err = interactive.NewSession(sessionConfig)
+	if err == nil && runCfg.UseTUI {
+		// Log if TUI was requested, even if NewSession might return a non-TUI version for WASM
+		fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Using Terminal UI mode (if supported by platform)\033[0m\n")
 	}
-	
+
 	if err != nil {
 		return err
 	}
 
+	// Store session in the service to allow the generateResponse to manipulate prompt visibility
+	s.activeSession = session
+
 	// Pass the last user message to the session
 	if lastUserMessage != "" {
-		if readlineSession, ok := session.(*interactive.InteractiveSession); ok {
-			readlineSession.SetLastInput(lastUserMessage)
-		} else if bubbleSession, ok := session.(*interactive.BubbleSession); ok {
-			bubbleSession.SetLastInput(lastUserMessage)
-		}
+		session.SetLastInput(lastUserMessage)
 	}
 
-	err = session.Run(ctxWithCancel)
+	err = s.activeSession.Run(ctxWithCancel)
 
 	// If context was canceled, just return nil (clean exit)
 	if ctxWithCancel.Err() != nil {
@@ -865,17 +694,14 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 	if renameErr := s.renameChatHistory(rctx); renameErr != nil {
 		fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Failed to rename history: %v\033[0m\n", renameErr)
 	}
-	
-	// Store session in the service to allow the generateResponse to manipulate prompt visibility
-	s.activeSession = session
-	
+
 	return err
 }
 
 // Non-streaming version of continuous completion.
 func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions) error {
 	fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Running in continuous mode. Press ctrl+c to exit.\033[0m\n")
-	
+
 	// Setup context with cancellation
 	ctxWithCancel, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -923,7 +749,9 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 		runCfg.Stdout.Write([]byte(response))
 		runCfg.Stdout.Write([]byte("\n"))
 		if err := s.saveHistory(); err != nil {
-			return fmt.Errorf("failed to save history: %w", err)
+			fmt.Println("")
+			fmt.Println("issue in save history:", err)
+			// return fmt.Errorf("failed to save history: %w", err) // TODO: handle
 		}
 		return nil
 	}
@@ -941,30 +769,28 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 	// Check if we should use the TUI interface
 	var session interactive.Session
 	var err error
-	
-	if runCfg.UseTUI {
-		// Use BubbleTea UI
-		fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Using Terminal UI mode\033[0m\n")
-		session, err = interactive.NewBubbleSession(sessionConfig)
-	} else {
-		// Use traditional readline UI
-		session, err = interactive.NewSession(sessionConfig)
+
+	// Use the platform-agnostic NewSession which will select the appropriate implementation
+	session, err = interactive.NewSession(sessionConfig)
+	if err == nil && runCfg.UseTUI {
+		// Log if TUI was requested
+		fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Using Terminal UI mode (if supported by platform)\033[0m\n")
 	}
-	
+
 	if err != nil {
 		return err
 	}
 
 	// Store session in the service to allow the generateResponse to manipulate prompt visibility
 	s.activeSession = session
-	
+
 	err = session.Run(ctxWithCancel)
 
 	// If context was canceled, just return nil (clean exit)
 	if ctxWithCancel.Err() != nil {
 		return nil
 	}
-	
+
 	return err
 }
 
@@ -977,19 +803,19 @@ func expandTilde(path string) string {
 
 func (s *Service) generateResponse(ctx context.Context, runCfg RunOptions) error {
 	s.payload.Stream = runCfg.StreamOutput
-	
+
 	// Hide the prompt during streaming if we have an active session
 	if s.activeSession != nil {
 		s.activeSession.SetStreaming(true)
 	}
-	
+
 	// Make sure we re-enable the prompt when done
 	defer func() {
 		if s.activeSession != nil {
 			s.activeSession.SetStreaming(false)
 		}
 	}()
-	
+
 	if runCfg.StreamOutput {
 		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload)
 		if err != nil {
@@ -999,10 +825,10 @@ func (s *Service) generateResponse(ctx context.Context, runCfg RunOptions) error
 			}
 			return fmt.Errorf("failed to perform completion streaming: %w", err)
 		}
-		
+
 		content := strings.Builder{}
 		wasInterrupted := false
-		
+
 		for r := range streamPayloads {
 			// Check for context cancellation in the middle of streaming
 			if ctx.Err() != nil {
@@ -1011,31 +837,34 @@ func (s *Service) generateResponse(ctx context.Context, runCfg RunOptions) error
 				break
 			}
 			content.WriteString(r)
+			if s.activeSession != nil { // Add nil check
+				s.activeSession.AddResponsePart(r)
+			}
 			runCfg.Stdout.Write([]byte(r))
 		}
-		
+
 		// Handle interruption or normal completion
 		if wasInterrupted || ctx.Err() != nil {
 			// Print a newline first to ensure clean output
 			runCfg.Stdout.Write([]byte("\n"))
 			fmt.Fprintf(runCfg.Stderr, "\033[38;5;240mResponse interrupted. Press Ctrl+C again to discard, or continue typing to keep partial response.\033[0m\n")
-			
+
 			// Store the partial response in the message history
 			if content.Len() > 0 {
 				s.payload.addAssistantMessage(content.String())
-				
+
 				// Save this partial response to history
 				if err := s.saveHistory(); err != nil {
 					fmt.Fprintf(runCfg.Stderr, "\033[38;5;240mWarning: Failed to save partial response: %v\033[0m\n", err)
 				}
 			}
-			
+
 			return ctx.Err()
 		}
-		
+
 		// Normal completion - add newline and save response
 		runCfg.Stdout.Write([]byte("\n"))
-		
+
 		// Add completed response to message history
 		if content.Len() > 0 {
 			s.payload.addAssistantMessage(content.String())
@@ -1050,18 +879,20 @@ func (s *Service) generateResponse(ctx context.Context, runCfg RunOptions) error
 			return err
 		}
 		runCfg.Stdout.Write([]byte(response))
-		
+
 		// Add response to message history
 		if response != "" {
 			s.payload.addAssistantMessage(response)
 		}
 	}
-	
+
 	// Save history after successful completion
 	if err := s.saveHistory(); err != nil {
-		return fmt.Errorf("failed to save history: %w", err)
+		s.logger.Error("failed to save history", zap.Error(err))
+		return nil
+		//return fmt.Errorf("failed to save history: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -1125,7 +956,8 @@ func (s *Service) renameChatHistory(ctx context.Context) error {
 
 		// Rename the file
 		if err := os.Rename(currentPath, newPath); err != nil {
-			return fmt.Errorf("failed to rename history file: %w", err)
+			s.logger.Error("failed to rename history file", zap.Error(err))
+			return nil
 		}
 
 		fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Renamed history to: %s\033[0m\n", filepath.Base(newPath))
@@ -1259,7 +1091,7 @@ func (s *Service) saveHistory() error {
 		// Set default history file
 		s.historyOutFile = filepath.Join(home, ".cgpt", fmt.Sprintf("default-history-%s.yaml", s.sessionTimestamp))
 	}
-	
+
 	// TODO: Actually implement saving history to file
 	// Placeholder for saving history
 	return nil

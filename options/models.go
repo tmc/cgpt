@@ -11,6 +11,9 @@ type InferenceProviderOptions struct {
 
 	// UseLegacyMaxTokens controls whether to use max_tokens vs max_output_tokens for openai backends
 	UseLegacyMaxTokens bool
+
+	// EnvLookupFunc is a function that looks up environment variables.
+	EnvLookupFunc func(string) string
 }
 
 // InferenceProviderOption is a function that modifies the model options.
