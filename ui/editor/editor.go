@@ -384,16 +384,6 @@ func (m *Model) navigateHistory(down bool) (Model, tea.Cmd) {
 	return *m, nil
 }
 
-// applyCompletion inserts the chosen completion.
-func (m *Model) applyCompletion(candidate Candidate) {
-	// m.textarea.CursorRight(candidate.MoveRight()) // Method likely unavailable
-	// m.textarea.DeleteCharactersBackward(candidate.DeleteLeft()) // Method likely unavailable
-	// m.textarea.InsertString(candidate.Replacement()) // Method likely unavailable
-	// // Optionally add a space, or let user type it
-	// // m.textarea.InsertRune(' ')
-	m.Err = nil // Clear potential selection error
-}
-
 // launchExternalEditor prepares and returns the command to launch $EDITOR.
 func (m *Model) launchExternalEditor() (Model, tea.Cmd) {
 	if !m.externalEditorEnabled {
@@ -454,9 +444,6 @@ func (m Model) View() string {
 
 // --- Command Creators ---
 func InputCompletionCmd() tea.Msg { return InputCompleteMsg{} }
-func RequestCompletionsCmd(r [][]rune, l, c int) tea.Cmd {
-	return func() tea.Msg { return RequestCompletionsMsg{Runes: r, Line: l, Col: c} }
-}
 
 // runesFromString converts a string to [][]rune, handling newlines.
 // Note: This might not perfectly replicate internal textarea state for complex inputs.

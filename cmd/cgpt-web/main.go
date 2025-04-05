@@ -9,9 +9,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -176,24 +174,5 @@ func main() {
 	log.Println("Starting cgpt-serve on :8081")
 	if err := http.ListenAndServe(":8081", nil); err != nil {
 		log.Fatal(err)
-	}
-}
-
-func openBrowser(url string) {
-	var err error
-
-	switch runtime.GOOS {
-	case "linux":
-		err = exec.Command("xdg-open", url).Start()
-	case "windows":
-		err = exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
-	case "darwin":
-		err = exec.Command("open", url).Start()
-	default:
-		err = exec.Command("xdg-open", url).Start()
-	}
-
-	if err != nil {
-		log.Println("Error opening browser:", err)
 	}
 }

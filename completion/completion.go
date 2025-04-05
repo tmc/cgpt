@@ -124,83 +124,6 @@ func WithStderr(w io.Writer) ServiceOption {
 	}
 }
 
-// WithShowSpinner enables or disables the spinner
-func WithShowSpinner(show bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.ShowSpinner = show
-	}
-}
-
-// WithEchoPrefill enables or disables echoing the prefill
-func WithEchoPrefill(echo bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.EchoPrefill = echo
-	}
-}
-
-// WithHistoryIn sets the history input file
-func WithHistoryIn(path string) ServiceOption {
-	return func(s *Service) {
-		s.opts.HistoryIn = path
-	}
-}
-
-// WithHistoryOut sets the history output file
-func WithHistoryOut(path string) ServiceOption {
-	return func(s *Service) {
-		s.opts.HistoryOut = path
-	}
-}
-
-// WithReadlineHistoryFile sets the readline history file
-func WithReadlineHistoryFile(path string) ServiceOption {
-	return func(s *Service) {
-		s.opts.ReadlineHistoryFile = path
-	}
-}
-
-// WithPrefill sets the prefill content
-func WithPrefill(prefill string) ServiceOption {
-	return func(s *Service) {
-		s.opts.Prefill = prefill
-	}
-}
-
-// WithContinuous enables or disables continuous mode
-func WithContinuous(continuous bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.Continuous = continuous
-	}
-}
-
-// WithStreamOutput enables or disables streaming output
-func WithStreamOutput(stream bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.StreamOutput = stream
-	}
-}
-
-// WithVerbose enables or disables verbose logging
-func WithVerbose(verbose bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.Verbose = verbose
-	}
-}
-
-// WithDebugMode enables or disables debug mode
-func WithDebugMode(debug bool) ServiceOption {
-	return func(s *Service) {
-		s.opts.DebugMode = debug
-	}
-}
-
-// WithCompletionTimeout sets the completion timeout
-func WithCompletionTimeout(timeout time.Duration) ServiceOption {
-	return func(s *Service) {
-		s.opts.CompletionTimeout = timeout
-	}
-}
-
 // WithLogger sets the logger for the completion service.
 func WithLogger(l *zap.SugaredLogger) ServiceOption {
 	return func(s *Service) {
@@ -330,27 +253,6 @@ type RunOptions struct {
 
 	// Backend/Provider-specific options.
 	OpenAIUseLegacyMaxTokens bool
-}
-
-// OptionsToRunOptions converts Options to RunOptions
-func OptionsToRunOptions(opts Options) RunOptions {
-	return RunOptions{
-		Stdout:              opts.Stdout,
-		Stderr:              opts.Stderr,
-		ShowSpinner:         opts.ShowSpinner,
-		EchoPrefill:         opts.EchoPrefill,
-		PrintUsage:          opts.PrintUsage,
-		StreamOutput:        opts.StreamOutput,
-		Continuous:          opts.Continuous,
-		UseTUI:              opts.UseTUI,
-		Verbose:             opts.Verbose,
-		DebugMode:           opts.DebugMode,
-		HistoryIn:           opts.HistoryIn,
-		HistoryOut:          opts.HistoryOut,
-		ReadlineHistoryFile: opts.ReadlineHistoryFile,
-		Prefill:             opts.Prefill,
-		MaximumTimeout:      opts.CompletionTimeout,
-	}
 }
 
 // Run executes a completion using the service's options
@@ -614,43 +516,6 @@ func (s *Service) handleInput(ctx context.Context, runCfg RunOptions) error {
 	}
 
 	return nil
-}
-
-// ExecuteCompletionWithOptions runs the completion with the given options
-// This is a cleaner version that doesn't rely on RunOptions
-func (s *Service) ExecuteCompletionWithOptions(ctx context.Context, opts Options) error {
-	if opts.Continuous {
-		if opts.StreamOutput {
-			return s.runContinuousCompletionStreaming(ctx, RunOptions{
-				Stdout:              opts.Stdout,
-				Stderr:              opts.Stderr,
-				StreamOutput:        opts.StreamOutput,
-				ReadlineHistoryFile: opts.ReadlineHistoryFile,
-				ShowSpinner:         opts.ShowSpinner,
-				EchoPrefill:         opts.EchoPrefill,
-			})
-		}
-		return s.runContinuousCompletion(ctx, RunOptions{
-			Stdout:              opts.Stdout,
-			Stderr:              opts.Stderr,
-			ReadlineHistoryFile: opts.ReadlineHistoryFile,
-			ShowSpinner:         opts.ShowSpinner,
-			EchoPrefill:         opts.EchoPrefill,
-		})
-	}
-
-	if opts.StreamOutput {
-		return s.runOneShotCompletionStreaming(ctx, RunOptions{
-			Stdout:      opts.Stdout,
-			ShowSpinner: opts.ShowSpinner,
-			EchoPrefill: opts.EchoPrefill,
-		})
-	}
-	return s.runOneShotCompletion(ctx, RunOptions{
-		Stdout:      opts.Stdout,
-		ShowSpinner: opts.ShowSpinner,
-		EchoPrefill: opts.EchoPrefill,
-	})
 }
 
 func (s *Service) loadedWithHistory() bool {

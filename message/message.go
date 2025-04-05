@@ -1,8 +1,6 @@
 package message
 
 import (
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
@@ -77,85 +75,3 @@ var (
 )
 
 // --- Message Rendering ---
-
-// Render formats a message for display, considering terminal width.
-func Render(msg Msg, width int) string {
-	timeStr := msg.Time.Format("15:04") // Shorter time format
-	timeDisplay := TimestampStyle.Render(timeStr)
-	timeWidth := lipgloss.Width(timeDisplay)
-
-	var prefix string
-	var content string
-	var baseStyle lipgloss.Style // Style for the main content text
-
-	switch msg.Type {
-	case MsgTypeUser:
-		if msg.ToolUseResult != nil {
-			prefix = ToolResultStyle.Render("↳ Tool: ")
-			content = msg.ToolUseResult.Content
-			if msg.ToolUseResult.IsError {
-				baseStyle = ErrorStyle
-			} else {
-				baseStyle = ToolResultStyle // Keep dim for success too
-			}
-		} else {
-			prefix = UserStyle.Bold(true).Render("You:") // Bold prefix only
-			content = msg.Content
-			baseStyle = UserStyle // Regular style for content
-		}
-	case MsgTypeAssistant:
-		if msg.IsApiErrorMsg {
-			prefix = ErrorStyle.Bold(true).Render("Error:")
-			content = msg.Content
-			baseStyle = ErrorStyle
-		} else if len(msg.ToolUses) > 0 {
-			prefix = ToolUseStyle.Bold(true).Render("Tool Call:")
-			var toolDescs []string
-			for _, tu := range msg.ToolUses {
-				// TODO: Improve tool rendering if needed (e.g., show args concisely)
-				toolDescs = append(toolDescs, fmt.Sprintf("%s(...)", tu.Name))
-			}
-			content = strings.Join(toolDescs, ", ")
-			baseStyle = ToolUseStyle
-		} else {
-			prefix = AssistantStyle.Bold(true).Render("Assistant:")
-			content = msg.Content // TODO: Apply markdown rendering here if desired
-			baseStyle = AssistantStyle
-		}
-	case MsgTypeSystem:
-		prefix = SystemStyle.Render("System:")
-		content = msg.Content
-		baseStyle = SystemStyle
-	default:
-		// Fallback for unknown types
-		prefix = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Render("Unknown:")
-		content = msg.Content
-		baseStyle = lipgloss.NewStyle()
-	}
-
-	// Calculate available width for content rendering
-	prefixWidth := lipgloss.Width(prefix)
-	// Available width = Total Width - Time Width - Space - Prefix Width - Base Padding
-	availableWidth := width - timeWidth - 1 - prefixWidth - MessagePadding.GetPaddingLeft()
-	if availableWidth < 10 {
-		availableWidth = 10
-	} // Minimum content width
-
-	// Render content with wrapping, applying base style and width limit
-	// Using Width() on the style handles wrapping automatically.
-	renderedContent := baseStyle.Width(availableWidth).Render(content)
-
-	// Combine parts, handling multi-line content indentation
-	lines := strings.Split(renderedContent, "\n")
-	firstLine := timeDisplay + " " + prefix + MessagePadding.Render(lines[0])
-	subsequentLines := ""
-	if len(lines) > 1 {
-		// Indent subsequent lines relative to the start of the content on the first line
-		// Indentation = Time Width + Space + Prefix Width + Base Padding
-		indentWidth := timeWidth + 1 + prefixWidth + MessagePadding.GetPaddingLeft()
-		indent := strings.Repeat(" ", indentWidth)
-		subsequentLines = "\n" + indent + strings.Join(lines[1:], "\n"+indent)
-	}
-
-	return firstLine + subsequentLines
-}

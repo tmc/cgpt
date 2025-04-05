@@ -21,12 +21,6 @@ func Register(name string, constructor BackendConstructor) {
 	registry[name] = constructor
 }
 
-// Get returns a backend constructor by name
-func Get(name string) (BackendConstructor, bool) {
-	constructor, ok := registry[name]
-	return constructor, ok
-}
-
 // WithHTTPClient returns an option to set the HTTP client for the inference provider
 func WithHTTPClient(client *http.Client) options.InferenceProviderOption {
 	return func(opts *options.InferenceProviderOptions) {
@@ -57,7 +51,7 @@ func InitializeModel(cfg *options.Config, providerOpts ...options.InferenceProvi
 	for _, option := range providerOpts {
 		option(opts)
 	}
-	fmt.Println("Using environment variable lookup function:", opts.EnvLookupFunc)
+	// fmt.Println("Using environment variable lookup function:", opts.EnvLookupFunc) // Commented out debug print
 
 	constructor, ok := registry[cfg.Backend]
 	if !ok {

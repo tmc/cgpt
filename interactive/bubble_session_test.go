@@ -57,18 +57,27 @@ func setupTestModel(cfg Config) (*BubbleSession, *bubbleModel) {
 	debugView := debug.NewView()
 
 	model := &bubbleModel{
-		session:      session,
-		editor:       editorModel, // Use editor field
-		commandInput: cmdInput,    // Use commandInput field
-		spinner:      sp,
-		help:         helpModel,            // Use help field
-		ctx:          context.Background(), // Use background context for tests
-		handlers:     createEventHandlers(),
-		debug:        debugView, // Use debug field
-		keyMap:       keymap.DefaultKeyMap(),
-		width:        80, // Default size
-		height:       24,
-		mode:         modeInsert, // Default to insert mode
+		session: session,
+		ctx:     context.Background(), // Use background context for tests
+		input: InputModel{
+			editor:       editorModel,
+			commandInput: cmdInput,
+			mode:         modeInsert, // Default to insert mode
+			keyMap:       keymap.DefaultKeyMap(),
+		},
+		conversationVM: ConversationViewModel{
+			// conversation initialized empty
+			respBuffer: strings.Builder{},
+		},
+		status: StatusModel{
+			spinner: sp,
+			help:    helpModel,
+			// other fields default to zero
+		},
+		debug:    debugView,
+		handlers: createEventHandlers(),
+		width:    80, // Default size
+		height:   24,
 	}
 	session.model = model // Link model back to session
 	return session, model
@@ -79,14 +88,14 @@ func TestBubbleSession_Submit(t *testing.T) {
 	_, model := setupTestModel(Config{ProcessFn: processor.Process})
 
 	// 1. Type some input into the editor
-	model.editor.SetValue("hello world")
+	model.input.editor.SetValue("hello world")
 
 	// 2. Send Enter key
 	updatedModelIntf, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updatedModelIntf.(*bubbleModel) // Update our model pointer
 
 	// 3. Check state: editor should signal completion, command sent
-	if !model.editor.InputIsComplete() {
+	if !model.input.editor.InputIsComplete() {
 		t.Errorf("Expected editor InputIsComplete to be true")
 	}
 	// The bubbleModel itself doesn't clear the editor directly, it sends a message
@@ -133,17 +142,17 @@ func TestBubbleSession_Submit(t *testing.T) {
 
 	// 4. Simulate Update cycle receiving the submitBufferMsg
 	// Manually reset editor here as the test bypasses the editor's internal reset on completion signal
-	model.editor.Reset()
+	model.input.editor.Reset()
 	updatedModelIntf, cmd = model.Update(submitBufferMsg{input: "hello world", clearEditor: false}) // clearEditor flag might be redundant now
 	model = updatedModelIntf.(*bubbleModel)
 
 	// 5. Check state: should be processing
-	if !model.isProcessing {
+	if !model.status.isProcessing { // Check status model
 		t.Errorf("Expected isProcessing to be true after submitBufferMsg")
 	}
 	// Check editor value after manual reset and message processing
-	if model.editor.Value() != "" {
-		t.Errorf("Expected editor to be cleared after manual reset and submit msg, got '%s'", model.editor.Value())
+	if model.input.editor.Value() != "" { // Check input model
+		t.Errorf("Expected editor to be cleared after manual reset and submit msg, got '%s'", model.input.editor.Value())
 	}
 
 	// 6. Simulate processing completion
@@ -171,10 +180,10 @@ func TestBubbleSession_Submit(t *testing.T) {
 	if processor.lastInput != "hello world" {
 		t.Errorf("Expected ProcessFn lastInput to be 'hello world', got '%s'", processor.lastInput)
 	}
-	if model.isProcessing {
+	if model.status.isProcessing { // Check status model
 		t.Errorf("Expected isProcessing to be false after completion")
 	}
-	if model.lastInput != "hello world" {
+	if model.input.lastInput != "hello world" { // Check input model
 		t.Errorf("Expected lastInput to be updated")
 	}
 }
@@ -185,7 +194,7 @@ func TestBubbleSession_MultilineSubmit(t *testing.T) {
 
 	// Simulating multiline input via editor.Model
 	multilineInput := "line 1\nline 2\nline 3"
-	model.editor.SetValue(multilineInput)
+	model.input.editor.SetValue(multilineInput) // Use input model
 
 	// Instead of directly signaling completion, bypass by directly submitting
 	// the input via the submitBufferMsg message
@@ -193,7 +202,7 @@ func TestBubbleSession_MultilineSubmit(t *testing.T) {
 	model = updatedModelIntf.(*bubbleModel)
 
 	// Check that processing started
-	if !model.isProcessing {
+	if !model.status.isProcessing { // Check status model
 		t.Errorf("Expected isProcessing to be true after multiline submit")
 	}
 
@@ -224,12 +233,12 @@ func TestBubbleSession_CommandMode(t *testing.T) {
 	model = updatedModelIntf.(*bubbleModel)
 
 	// Check if we're in command mode
-	if model.mode != modeCommand {
+	if model.input.mode != modeCommand { // Check input model
 		t.Fatalf("Expected to be in command mode after Escape")
 	}
 
 	// Type a command
-	model.commandInput.SetValue("test")
+	model.input.commandInput.SetValue("test") // Use input model
 
 	// Submit the command with Enter
 	updatedModelIntf, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -255,7 +264,7 @@ func TestBubbleSession_CommandMode(t *testing.T) {
 	model = updatedModelIntf.(*bubbleModel)
 
 	// Verify we're back in insert mode after command execution
-	if model.mode != modeInsert {
+	if model.input.mode != modeInsert { // Check input model
 		t.Errorf("Expected to return to insert mode after command execution")
 	}
 
@@ -275,19 +284,19 @@ func TestBubbleSession_CtrlC(t *testing.T) {
 	if model.quitting {
 		t.Fatal("Should not quit on first Ctrl+C")
 	}
-	if model.currentErr == nil || !strings.Contains(model.currentErr.Error(), "Press Ctrl+C again") {
+	if model.status.currentErr == nil || !strings.Contains(model.status.currentErr.Error(), "Press Ctrl+C again") { // Check status model
 		t.Fatal("Should show exit hint message in error")
 	}
 
 	// 2. Type something, then Ctrl+C
-	model.currentErr = nil              // Clear hint
-	model.editor.SetValue("some input") // Use editor
+	model.status.currentErr = nil             // Clear hint in status model
+	model.input.editor.SetValue("some input") // Use input model
 	updatedModelIntf, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	model = updatedModelIntf.(*bubbleModel)
-	if model.editor.Value() != "" {
+	if model.input.editor.Value() != "" { // Check input model
 		t.Fatal("Editor input should be cleared")
-	} // Check editor
-	if model.currentErr != nil {
+	}
+	if model.status.currentErr != nil { // Check status model
 		t.Fatal("Error should be nil after clearing input")
 	}
 	if model.quitting {
@@ -296,9 +305,9 @@ func TestBubbleSession_CtrlC(t *testing.T) {
 
 	// 3. Ctrl+C on empty prompt (second time, quickly)
 	// Modified expectations to match current implementation
-	model.editor.SetValue("")                                                  // Ensure editor is empty
-	model.interruptCount = 1                                                   // Set as if first Ctrl+C was already pressed
-	model.lastCtrlCTime = time.Now().Add(-500 * time.Millisecond)              // Simulate rapid second press
+	model.input.editor.SetValue("")                                            // Ensure editor is empty in input model
+	model.status.interruptCount = 1                                            // Set in status model
+	model.status.lastCtrlCTime = time.Now().Add(-500 * time.Millisecond)       // Set in status model
 	updatedModelIntf, ctrlCCmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC}) // Capture cmd
 	model = updatedModelIntf.(*bubbleModel)                                    // Update model pointer
 
@@ -314,18 +323,18 @@ func TestBubbleSession_CtrlC(t *testing.T) {
 	// 4. Ctrl+C during processing (needs a running process simulation)
 	// Reset state for processing test
 	_, model = setupTestModel(Config{ProcessFn: processor.Process}) // Reset state
-	model.isProcessing = true                                       // Simulate processing started
-	model.currentErr = nil
+	model.status.isProcessing = true                                // Simulate processing started in status model
+	model.status.currentErr = nil
 
 	updatedModelIntf, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	model = updatedModelIntf.(*bubbleModel) // Update model pointer
-	if model.isProcessing {
+	if model.status.isProcessing {          // Check status model
 		t.Fatal("Should stop processing on Ctrl+C")
 	}
-	if model.isStreaming {
+	if model.status.isStreaming { // Check status model
 		t.Fatal("Should stop streaming on Ctrl+C")
 	}
-	if model.respBuffer.Len() != 0 {
+	if model.conversationVM.respBuffer.Len() != 0 { // Check conversationVM
 		t.Fatal("Response buffer should be cleared")
 	}
 	// if !model.editor.Focused() { // Focused method likely doesn't exist on editor.Model

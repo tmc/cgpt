@@ -53,12 +53,3 @@ func extractSection(sectionName string) string {
 
 	return strings.TrimSpace(strings.Join(sectionContent, "\n"))
 }
-func listSections() {
-	fmt.Println("Available sections:")
-	lines := strings.Split(usageExamplesFile, "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "## ") {
-			fmt.Println("-", strings.TrimPrefix(line, "## "))
-		}
-	}
-}

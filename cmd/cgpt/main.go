@@ -94,7 +94,6 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 }
 
 func main() {
-	fmt.Println("cgpt: Generative AI CLI Tool")
 	opts, flagSet, err := initFlags(os.Args, os.Stdin)
 	if err != nil {
 		if err == pflag.ErrHelp {
@@ -393,15 +392,3 @@ func initFlags(args []string, stdin io.Reader) (options.RunOptions, *pflag.FlagS
 
 // These functions are implemented in usage_examples.go
 // Ensuring we don't have duplicate implementations
-
-// Expand ~ to home directory
-func expandTilde(path string) string {
-	if path == "" || path[0] != '~' {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	return filepath.Join(home, path[1:])
-}
