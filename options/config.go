@@ -168,6 +168,8 @@ func SetupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
 	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath != nil && flagConfigFilePath.Changed {
 		v.SetConfigFile(flagConfigFilePath.Value.String())
 	}
+
+	_setupViper(v, flagSet)
 }
 
 // LogConfigSources logs where each configuration value came from

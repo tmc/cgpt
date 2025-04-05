@@ -4,6 +4,7 @@ package registry
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/tmc/cgpt/options"
 	"github.com/tmc/langchaingo/llms"
@@ -40,13 +41,23 @@ func WithUseLegacyMaxTokens(useLegacy bool) options.InferenceProviderOption {
 	}
 }
 
+// WithEnvLookupFunc returns an option to set the environment variable lookup function
+func WithEnvLookupFunc(lookup func(string) string) options.InferenceProviderOption {
+	return func(opts *options.InferenceProviderOptions) {
+		opts.EnvLookupFunc = lookup
+	}
+}
+
 // InitializeModel initializes the model based on the given configuration
 func InitializeModel(cfg *options.Config, providerOpts ...options.InferenceProviderOption) (llms.Model, error) {
 	// Apply provider options
-	opts := &options.InferenceProviderOptions{}
+	opts := &options.InferenceProviderOptions{
+		EnvLookupFunc: os.Getenv,
+	}
 	for _, option := range providerOpts {
 		option(opts)
 	}
+	fmt.Println("Using environment variable lookup function:", opts.EnvLookupFunc)
 
 	constructor, ok := registry[cfg.Backend]
 	if !ok {

@@ -2,8 +2,11 @@ package options
 
 import (
 	"io"
+	"os"
 	"time"
 )
+
+var Getenv = os.Getenv
 
 // RunOptions contains all the options that are relevant to run cgpt.
 type RunOptions struct {

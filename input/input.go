@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -75,15 +76,12 @@ func (p *Processor) GetCombinedReader(ctx context.Context) (reader io.Reader, wa
 
 	// --- Auto-include Piped Stdin Logic ---
 	stdinIsExplicitlyUsed := false
-	for _, f := range p.files {
-		if f == "-" {
-			stdinIsExplicitlyUsed = true
-			break
-		}
+	if slices.Contains(p.files, "-") {
+		stdinIsExplicitlyUsed = true
 	}
 
 	// If stdin is NOT a terminal (piped/redirected) AND '-' was not explicitly used
-	autoincludeStdin := !p.isStdinTerminal && !stdinIsExplicitlyUsed && p.stdin != nil
+	autoincludeStdin := !p.isStdinTerminal && !stdinIsExplicitlyUsed && p.stdin != nil && stdinAvailable(p.stdin)
 	// --- End Auto-include ---
 
 	// Handle auto-including stdin
