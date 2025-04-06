@@ -196,16 +196,6 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 
 	// Initialize the model (the llms.Model interface)
 	modelOpts := []backends.InferenceProviderOption{}
-
-	modelOpts = append(modelOpts, backends.WithEnvLookupFunc(func(key string) string {
-		fmt.Println("EnvLookupFunc called for key:", key)
-		v, _ := flagSet.GetString(key)
-		if v != "" {
-			return v
-		}
-		return options.Getenv(key)
-	}),
-	)
 	// if debug mode is on, attach the debug http client:
 	if opts.DebugMode {
 		fmt.Fprintln(stderr, "Debug mode enabled")

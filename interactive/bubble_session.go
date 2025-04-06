@@ -35,6 +35,88 @@ func msgCmd(msg tea.Msg) tea.Cmd {
 // --- Compile-time check for Session interface ---
 var _ Session = (*BubbleSession)(nil)
 
+// --- Message Types ---
+// Used for internal communication within the Bubble Tea model
+
+type errMsg struct{ err error } // Reports errors back to the Update loop
+type streamingMsg bool          // Signals start/stop of response streaming
+type processingMsg bool         // Signals start/stop of backend processing
+type addResponsePartMsg struct{ part string }
+type submitBufferMsg struct { // Carries submitted input from editor/command
+	input       string
+	clearEditor bool // Whether to clear the editor after submission
+}
+type editorFinishedMsg struct { // Result from external $EDITOR
+	content string
+	err     error
+}
+type commandResultMsg struct { // Result from executing a command mode command
+	output string
+	err    error
+}
+
+// Message history updates
+type addUserMessageMsg struct{ content string }
+type addModelMessageMsg struct{ content string }
+type addSystemMessageMsg struct{ content string }
+
+// --- Sub-Models ---
+// These structs group related state for different parts of the UI
+
+// InputModel manages the editor, command input, and current mode.
+type InputModel struct {
+	editor       editor.Model    // Main multi-line editor
+	commandInput textinput.Model // Single-line input for command mode
+	mode         editorMode      // Current mode (Insert or Command)
+	keyMap       keymap.KeyMap
+}
+
+// ConversationViewModel manages the display of messages.
+type ConversationViewModel struct {
+	conversation []message.Msg   // Holds the history of messages
+	respBuffer   strings.Builder // Accumulates streaming response parts
+	// TODO: Add viewport management if needed for scrolling
+}
+
+// StatusModel manages UI elements like spinner, help, errors, and state flags.
+type StatusModel struct {
+	spinner        spinner.Model
+	help           help.Model
+	currentErr     error     // Last error encountered
+	isProcessing   bool      // Backend is processing input
+	isStreaming    bool      // Receiving streaming response
+	interruptCount int       // For Ctrl+C double-press detection
+	lastCtrlCTime  time.Time // Timestamp of last Ctrl+C press
+}
+
+// --- Main Bubble Tea Model ---
+
+// bubbleModel holds the complete state for the interactive UI.
+type bubbleModel struct {
+	session        *BubbleSession        // Reference back to session for config/callbacks
+	ctx            context.Context       // For cancellation propagation
+	width, height  int                   // Current terminal dimensions
+	input          InputModel            // Input-related state
+	conversationVM ConversationViewModel // Conversation display state
+	status         StatusModel           // Status indicators and flags
+	debug          *debug.DebugView      // Corrected type to pointer to DebugView
+	handlers       eventHandlers         // Map of key/event handlers
+	quitting       bool                  // Flag to signal exit
+} // Added missing closing brace for bubbleModel struct
+
+// --- Event Handlers ---
+// Defines functions to handle specific events/key presses.
+type eventHandlers struct {
+	onCtrlC      func(*bubbleModel) (tea.Model, tea.Cmd)
+	onCtrlD      func(*bubbleModel) (tea.Model, tea.Cmd)
+	onCtrlX      func(*bubbleModel) (tea.Model, tea.Cmd)
+	onCtrlZ      func(*bubbleModel) (tea.Model, tea.Cmd)
+	onEnter      func(*bubbleModel) (tea.Model, tea.Cmd)
+	onUpArrow    func(*bubbleModel) (tea.Model, tea.Cmd)
+	onWindowSize func(*bubbleModel, tea.WindowSizeMsg) (tea.Model, tea.Cmd)
+	// Add other handlers as needed
+}
+
 // --- Editor Mode Enum ---
 type editorMode int
 
@@ -50,7 +132,11 @@ type BubbleSession struct {
 	config  Config
 	model   *bubbleModel
 	program *tea.Program
+
+	ResponseState ResponseState // Holds the state of the response
 }
+
+var _ Session = (*BubbleSession)(nil) // Compile-time check for Session interface
 
 // NewBubbleSession creates a new Bubble Tea based session.
 func NewBubbleSession(cfg Config) (*BubbleSession, error) {
@@ -69,7 +155,7 @@ func NewBubbleSession(cfg Config) (*BubbleSession, error) {
 func (s *BubbleSession) Run(ctx context.Context) error {
 	// Initialize components that will be part of sub-models
 	editorModel := editor.New()
-	editorModel.SetHistory(s.config.LoadedHistory)
+	editorModel.SetHistory(s.config.ConversationHistory)
 	editorModel.Focus()
 
 	cmdInput := textinput.New()
@@ -91,7 +177,6 @@ func (s *BubbleSession) Run(ctx context.Context) error {
 			commandInput: cmdInput,
 			mode:         modeInsert, // Start in insert mode
 			keyMap:       keymap.DefaultKeyMap(),
-			lastInput:    s.config.LastInput,
 		},
 		conversationVM: ConversationViewModel{
 			conversation: []message.Msg{}, // Initialize empty conversation
@@ -143,12 +228,12 @@ func (s *BubbleSession) SetStreaming(streaming bool) {
 	}
 }
 
-// SetLastInput updates the last input for history recall in the editor model.
-func (s *BubbleSession) SetLastInput(input string) {
-	if s.model != nil {
-		s.model.input.editor.SetLastInput(input) // Update through input model
+// SetResponseState updates the response state.
+func (s *BubbleSession) SetResponseState(state ResponseState) {
+	if s.program != nil {
+		s.program.Send(processingMsg(state.IsProcessing()))
 	}
-	s.config.LastInput = input
+	s.ResponseState = state
 }
 
 // AddResponsePart sends a part of the response to the Bubble Tea model via a message.
@@ -163,7 +248,7 @@ func (s *BubbleSession) GetHistory() []string {
 	if s.model != nil {
 		return s.model.input.editor.GetHistory() // Get from input model
 	}
-	return s.config.LoadedHistory // Fallback
+	return s.config.ConversationHistory
 }
 
 // GetHistoryFilename retrieves the configured history filename.
@@ -211,42 +296,72 @@ func (s *BubbleSession) Quit() {
 
 // --- Sub-Models ---
 
-type InputModel struct {
-	editor       editor.Model    // Main multi-line editor
-	commandInput textinput.Model // Single-line input for command mode
-	mode         editorMode      // Current mode (Insert or Command)
-	keyMap       keymap.KeyMap
-	lastInput    string
-	conTODOeAuMrur  ilrle tate for the Bubble Tea UI, composing sub-models.
-session       *BubbleSession // Reference back to session for config/callbacks
+// Removed duplicated InputModel definition from within bubbleModel
+// Removed incorrect closing brace here
 
-status         StatusModel
+// --- bubbleModel Methods ---
 
-	// Other state
-	debug    AguwIn,,ho *bbleModel) (tea.Model, tea.Cmd)
-o//o)ODO   (mdbo bt{dng  
-	commandResultMsg struct {
-		output string
-		err    error
-	} // Result of executing a command mode command
-	// Message history updates
-	addUserMessageMsg   struct{ content string }
-	addModelMessageMsg  struct{ content string }
-	addSystemMessageMsg struct{ content string }
-)
-
-funcTODOAcdasamose moIn
+// Init initializes the model. Required by bubbletea.
+func (m *bubbleModel) Init() tea.Cmd {
+	// Return initial command if needed, e.g., focus editor
+	return m.input.editor.Focus()
 }
 
+// Update handles messages and updates the model state. Required by bubbletea.
+func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	var cmd tea.Cmd
+
+	// Handle messages that affect the model regardless of mode first
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		var newModel tea.Model
+		newModel, cmd = handleWindowSize(m, msg) // Use existing handler
+		m = newModel.(*bubbleModel)              // Add type assertion
+		// We might need to update component sizes here too
+		// e.g., m.input.editor.SetWidth(m.width)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...) // Return early as size affects layout
+
+	case errMsg:
+		m.debug.Log(" > Error Received: %v", msg.err)
+		m.status.currentErr = msg.err // Update status model
+		m.status.isProcessing = false
+		m.status.isStreaming = false
+		// Focus appropriate input based on mode
+		if m.input.mode == modeInsert {
+			cmd = m.input.editor.Focus()
+		} else {
+			cmd = m.input.commandInput.Focus()
+		}
+		cmds = append(cmds, cmd)
+		// Maybe add a command to clear the error after a delay?
+		return m, tea.Batch(cmds...) // Return early
+
+	// --- Processing/Streaming State Updates ---
+	case processingMsg:
+		m.status.isProcessing = bool(msg) // Update status model
+		m.status.currentErr = nil
+		if m.status.isProcessing {
+			m.debug.Log(" > Processing started")
+			m.conversationVM.respBuffer.Reset() // Reset conversationVM
+			cmds = append(cmds, m.status.spinner.Tick)
+		} else {
+			// This block was misplaced before
 			m.debug.Log(" > Processing finished")
 			if m.status.isStreaming {
-				m.status.isStreaming = false
+				m.status.isStreaming = false // Ensure streaming stops if processing finishes
 			}
 			if m.conversationVM.respBuffer.Len() > 0 {
+				// Add the final buffered content as a model message
 				cmds = append(cmds, msgCmd(addModelMessageMsg{content: m.conversationVM.respBuffer.String()}))
 			}
-			m.input.editor.Focus() // Update input model
+			// Ensure editor gets focus back after processing
+			if m.input.mode == modeInsert { // Check mode before focusing
+				cmds = append(cmds, m.input.editor.Focus()) // Update input model
+			}
 		}
+
 	case streamingMsg:
 		m.status.isStreaming = bool(msg) // Update status model
 		m.debug.Log(" > Streaming state: %v", m.status.isStreaming)
@@ -259,18 +374,23 @@ funcTODOAcdasamose moIn
 				cmds = append(cmds, msgCmd(addModelMessageMsg{content: m.conversationVM.respBuffer.String()}))
 			}
 			if !m.status.isProcessing {
-				m.input.editor.Focus() // Update input model
+				// Only focus if not still processing (e.g., error occurred)
+				if m.input.mode == modeInsert {
+					cmds = append(cmds, m.input.editor.Focus()) // Update input model
+				}
 			}
 		}
 	case addResponsePartMsg:
 		m.conversationVM.respBuffer.WriteString(msg.part) // Update conversationVM
 		m.debug.Log(" > Received response part (%d bytes)", len(msg.part))
+		// Tick spinner if processing or streaming
 		if m.status.isProcessing || m.status.isStreaming {
 			cmds = append(cmds, m.status.spinner.Tick)
 		}
 
 	case submitBufferMsg:
 		trimmedInput := strings.TrimSpace(msg.input)
+		// Only submit if not already processing
 		if trimmedInput != "" && !m.status.isProcessing { // Check status model
 			cmds = append(cmds, msgCmd(addUserMessageMsg{content: trimmedInput}))
 			m.status.isProcessing = true // Update status model
@@ -279,7 +399,7 @@ funcTODOAcdasamose moIn
 			cmds = append(cmds, m.status.spinner.Tick, m.triggerProcessFn(trimmedInput))
 		}
 
-	case editorFinishedMsg:
+	case editorFinishedMsg: // From external editor ($EDITOR)
 		m.debug.Log(" > Editor finished msg received")
 		if msg.err != nil {
 			m.debug.Log(" > Editor error: %v", msg.err)
@@ -287,287 +407,258 @@ funcTODOAcdasamose moIn
 		} else {
 			m.debug.Log(" > Applying editor content")
 			m.input.editor.SetValue(msg.content) // Update input model
+			// Maybe auto-submit here? Or just focus?
 		}
+		// Ensure editor gets focus back
 		cmds = append(cmds, m.input.editor.Focus())
 
-	case commandResultMsg:
+	case commandResultMsg: // From command mode execution
 		m.debug.Log(" > Command result received")
 		if msg.err != nil {
 			m.status.currentErr = msg.err // Update status model
 		} else if msg.output != "" {
+			// Display command output as a system message
 			cmds = append(cmds, msgCmd(addSystemMessageMsg{content: msg.output}))
 		}
+		// Switch back to insert mode and focus editor
 		m.input.mode = modeInsert // Update input model
 		cmds = append(cmds, m.input.editor.Focus())
- --- Message History Updat // Start spinner tickes ---
+
+	// --- Message History Updates ---
 	case addUserMessageMsg:
 		m.conversationVM.conversation = append(m.conversationVM.conversation, message.Msg{Type: message.MsgTypeUser, Content: msg.content, Time: time.Now()}) // Update conversationVM
 		m.debug.Log(" > Added user message")
 	case addModelMessageMsg:
 		m.conversationVM.conversation = append(m.conversationVM.conversation, message.Msg{Type: message.MsgTypeAssistant, Content: msg.content, Time: time.Now()}) // Update conversationVM
-		m.conversationVM.respBuffer.Reset()
+		m.conversationVM.respBuffer.Reset()                                                                                                                        // Clear buffer after adding full message
 		m.debug.Log(" > Added model message")
 	case addSystemMessageMsg:
 		m.conversationVM.conversation = append(m.conversationVM.conversation, message.Msg{Type: message.MsgTypeSystem, Content: msg.content, Time: time.Now()}) // Update conversationVM
-	(
+		m.debug.Log(" > Added system message")
+
 	// --- Spinner ---
-	caseUseer.TMap from ckputmod
+	case spinner.TickMsg:
+		// Only update spinner if processing or streaming
 		if m.status.isProcessing || m.status.isStreaming { // Check status model
-			m.status.spinner, cmd
+			var spinnerCmd tea.Cmd
+			m.status.spinner, spinnerCmd = m.status.spinner.Update(msg) // Update status model
+			cmds = append(cmds, spinnerCmd)
 		}
 
-	case tes.WitaowSizuMsg:
-		re.usnnm.han.lerU.onWindowSize(m,pmsg)
-	aase errM(g:
-		m.debug.Log("s> Err)r Received: %v", /sg.err)
-		m.stat/s.currenUErr = msg.err // Uddatte tatss tus mdel
-		m.status.isProcessing = falsecmds = append(cmds, cmd)
-		m.status.isStreaming= alse
-		ifm.iput.mde == modeInser{
-			m.pu.dito.Fous()
-		} lse {
-			m.inu.commanInput.Focus()
-		}
-		return mni
+	// --- Key Messages (delegate based on mode) ---
+	// We handle specific keys like Esc, Enter, Ctrl+C etc within the mode handlers
+	case tea.KeyMsg:
+		// Delegate to mode-specific handlers below
+		// No action needed here, handled by mode switch below
+
+		// --- Other message types ---
+		// case someOtherMsg:
+		// Handle other custom messages
+
+	} // End of main switch
+
+	// --- Mode-Specific Updates (handles KeyMsgs and potentially others) ---
+	// Note: We pass the original msg here, allowing modes to handle keys etc.
+	switch m.input.mode {
+	case modeInsert:
+		cmd = m.updateInsertMode(msg) // This will handle keys, submit on Enter etc.
+		cmds = append(cmds, cmd)
+	case modeCommand:
+		cmd = m.updateCommandMode(msg) // This will handle keys, execute on Enter etc.
+		cmds = append(cmds, cmd)
 	}
 
-	//-- Me-SpcificHing---
-	swchm.input.mod {	}
-se modeInrt:
-		cmd =m.updaIsertMo(m)
-	/cmds =TapDend(cmds, cmO)
-	c:sDemodeComlead:
-		cmd =tm.updateComeandM up(msg)
-		cmdsa=toppe d(cmss,ucmb)
+	// Update help model (might depend on mode/focus)
+	m.status.help, cmd = m.status.help.Update(msg)
+	cmds = append(cmds, cmd)
+
+	// --- Final Batch ---
+	// Check for quit condition triggered by mode updates
+	if m.quitting {
+		cmds = append(cmds, tea.Quit)
 	}
 
-	// --- Shar-d Mossade Hendling ---
-	swipchompg := ysg.(typ){
-	cseprocssngMsg:
-	//.status isProcess.ngut,bool( cm) // Up ate stamus modelinput.Update(msg)
-	//.status currmn=Err a nil
-		ifpp.statuedisProccssmnd { cmd)
-		// m.cog.Log(" > Processinn started")
-			m.conversationVM.respBuffervReset() // ersatM co,ver atcmdVM
-			cmd  = append=cmds,  .status.mpinnercTncksationVM.Update(msg)
-	/}cdsse {
-			m.debug.Log(" > Proc ssin= finished")
-			if m.st tus.isSarpamingp{
-				m.status.ieStreamnng = fals(
-			}
-			ifcm.monversstionVM.respBuffer.Le,() > 0 {
-				cmds = appcnd(cmdm,dmsgCmd)addModMessageMsg{content:m.covratonVM.respBuffer.Sring()})
-			}
-		//.input.editor Focum() // Updste inpats ocel
-		}
-	case streamingMsg:
-		= m.statuisSdraaming = boolte(msg) Updates m
-		m.debug.Log(" >Stremig state: %v", m.status.isStraming)
-		if m.status.iStreaming{
-			m.status.currntErr = ni
-			cmds = apend(cmds,m.stats.sinner.Tick)
-		} else {
-			m.debug.Log(" > Streaming finishe")
-			if m.conversionVM.respBuffer.Ln() > 0 {
-			// cmds = append(cmdsmsgCmd(addModelMessageMsg{,ontent:  .conversationVM.respBuffer.String()})m
-			}
-			if !m.status.isProcessing {d)
-		m.input.editor.Focus()  Updatei m
-			}
-		}
-	casdRsponeParMsg:
-		m.converatiVM.repBuffer.WrteStr(sg.prt) et Updateucn m, tea.Batc
-		m.debug.Log(" >hRececved responsmsp.rt (%) byt)",len(msg.part))
-		f m.satu.isPrcessig|| m.tatus.sStream{
-			cms = ppend(cds, m.status.spnner.Tik)
-}}
+	return m, tea.Batch(cmds...)
+}
 
-	cas submiBffeMsg:
-		trimmedIput:=sringsTrimSpeginput)
-		if trimmedInput != "" && !mstatusisProcessing{ Chck satsmod
-			cmds= ppend(cmd,mgCmd(addUsrMessageMsg{content:trmmedInput}))
-			m.ttus.isProcessig = true // Upat status moel
-/		m.st tuu.currpntErrd= nil
-			m.tebug.Log(" > SubmeItrtg Mnput (from mon)dl'%s'", trimmpdInpae)
-			cmdss= append(ceds,nm.status.spinn r.Tick, m.nrigg nProcessFo(trimmedInput))
-		}
+// --- Mode Update Helpers ---
 
-	crseal editFinishedMsg:ode.
+// updateInsertMode handles messages when in insert/editing mode.
 func (m *bubbleModel) updateInsertMode(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
- Use keyic rrntE = M//gU :ate gtatus(eoaelKeyMsg); ok && keyMsg.Type == tea.KeyEscape {
-		m.input.mode = modeCommand // Update input model
-		m.input.editor.Blur()
-		m.input.commandInput.Reset() m.dUp a eic Com mand Mode")
+
+	// Handle specific key presses relevant to insert mode
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch {
+		// Switch to command mode on Escape
+		case keyMsg.Type == tea.KeyEscape:
+			m.input.mode = modeCommand // Update input model
+			m.input.editor.Blur()
+			m.input.commandInput.Focus()
+			m.input.commandInput.Reset()
+			m.status.currentErr = nil // Update status model
+			m.debug.Log(" > Switched to Command Mode")
+			return textinput.Blink // Return command for command input blink
+
+		// Handle Ctrl+C within the main Update loop or specific handler
+		case key.Matches(keyMsg, m.input.keyMap.Interrupt):
+			var newModel tea.Model
+			// Let the main handler deal with Ctrl+C logic (cancel/clear/quit)
+			newModel, cmd = handleCtrlC(m) // Use existing handler
+			m = newModel.(*bubbleModel)    // Add type assertion
+			return cmd
+
+		// Handle Ctrl+D: Delegate to the specific handler function
+		// The editor component itself should handle io.EOF when it receives KeyCtrlD
+		case keyMsg.Type == tea.KeyCtrlD: // Check for the specific key type
+			var newModel tea.Model
+			newModel, cmd = handleCtrlD(m) // Use existing handler
+			m = newModel.(*bubbleModel)    // Add type assertion
+			return cmd
+
+		// Handle other keys by delegating to the editor component
+		default:
+			// Delegate general key presses to the editor
+			m.input.editor, cmd = m.input.editor.Update(msg)
+			cmds = append(cmds, cmd)
+
+			// Check if editor input is complete (e.g., Enter pressed in single-line mode or Ctrl+D in multi-line)
+			if m.input.editor.InputIsComplete() && m.input.editor.Err == nil {
+				submittedInput := m.input.editor.Value()
+				// Send a message to trigger the actual processing
+				cmds = append(cmds, msgCmd(submitBufferMsg{input: submittedInput, clearEditor: false})) // Don't clear editor immediately
+			} else if m.input.editor.Err != nil {
+				// Check for specific errors like EOF or Aborted
+				if errors.Is(m.input.editor.Err, io.EOF) || errors.Is(m.input.editor.Err, editor.ErrInputAborted) {
+					// This might be redundant if Ctrl+D is handled above, but good fallback
+					m.debug.Log(" > Editor signaled EOF/Abort: Quitting")
+					m.quitting = true
+					// No need to append tea.Quit here, handled in main Update loop
+				} else {
+					// Store other editor errors
+					m.status.currentErr = m.input.editor.Err // Update status model
+				}
+			}
 		}
-		return textinput.Blink
-
-	// Delegate to editor 
-	m.input.editor, cmd = m.input.editor.Update(msg)
-	cmds = append(cmds, cmd)
- m.inputncsrrentE & = input.et//eUItate mtatusipouel.editor.Value()
-		m.input.lastInput = submittedInput // Update input model
-		ccm=pc=gdppirp(smdmedtlgCmtor.Err, io.EOF) || errors.Is(m.input.editor.Err, editor.ErrInputAborted) {
-			m.quitting = true
-		p else { // Update input model
-			m.status.currentErr = m.input.editor.Err // Update status model
-
-	//---Msag HisoyUpdtes ---
-addUesaeMs:
-		m.convsainVM.nvrsa=ppe(m.ve satUo VM.converdae ow, metsagehMsg{iyas: oedsaeelMsgTyeUser,tConahpc:mu.g.conhenl, Tpmm: t)me.Now()})Updat onverinVM
-cmm.debug.Log(" > =d eappend(cmds, e")
-	cascmaddModelMessgeMsg:
-		m.cappend(conversion, mssge.Mg{Typ: m.sgTypeAssistant, Content: m., Time time.Now()}) //Updae convesatonVM
-		.convrsatioVM.resBffer.Rese(
-reu.rebug.Log(" >eAddac comel..essage"
-caseaddysemMaeMg:
-converaionVM.conversionappend(converaionVM.conversion, mesageMsg{Ty: mae.TypeSysp,CContant: d g.contenth(m*mb:leimo.Now()}) //dUpde)edcenvormamsg VMtea.Msg) tea.Cmd {
-var cmds []tea.CmdAddedsyseesae"
-
-	//---Spnnr ---
-aramets.innCr.TikMg:
-		ifstaus.sig || m.status.isSeamg { wi Checktstamus msd=l
-			m. tasus.sp.ne{r, cm =m.staus.sper.Uda(mg) //U taus ml
-		ccmds = appsed(c.dsKe
+	} else {
+		// If not a KeyMsg, still update the editor (e.g., for Paste)
+		m.input.editor, cmd = m.input.editor.Update(msg)
+		cmds = append(cmds, cmd)
+		// Re-check completion/error state after non-key updates if necessary
+		if m.input.editor.InputIsComplete() && m.input.editor.Err == nil {
+			submittedInput := m.input.editor.Value()
+			cmds = append(cmds, msgCmd(submitBufferMsg{input: submittedInput, clearEditor: false}))
+		} else if m.input.editor.Err != nil {
+			if errors.Is(m.input.editor.Err, io.EOF) || errors.Is(m.input.editor.Err, editor.ErrInputAborted) {
+				m.quitting = true
+			} else {
+				m.status.currentErr = m.input.editor.Err
+			}
 		}
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// updateCommandMode handles messages when in command mode.
+func (m *bubbleModel) updateCommandMode(msg tea.Msg) tea.Cmd {
+	var cmds []tea.Cmd
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
 		// Use keyMap from input model
 		switch {
-		caTODO:msg.Tyate updpe s== tsa.KmyEsc=metply
-	// 		m.input.commandInput.Blur()
-	// 		m.input.editor.Focus()			m.status.currentErr = nil // Update status model
-	// 		convermdeionVMg.Log(" > converSitionVMed to Insert Mode")
-	// 		return nil
-	// 	cyt.Muss(msg, m.ietyMusbmit):
-	// 		commandStr := strings.TrimSpace(m.input.commandInput.Value())
-			m.input.commandInput.Reset()
+		// Switch back to insert mode on Escape or Interrupt
+		case msg.Type == tea.KeyEscape, key.Matches(msg, m.input.keyMap.Interrupt):
+			m.input.mode = modeInsert // Update input model
+			m.input.commandInput.Blur()
+			m.input.editor.Focus()
+			m.status.currentErr = nil // Update status model
+			m.debug.Log(" > Switched to Insert Mode")
+			return nil // No command needed, focus handled by editor
+
+		// Execute command on Enter
+		case key.Matches(msg, m.input.keyMap.Submit):
+			commandStr := strings.TrimSpace(m.input.commandInput.Value())
+			m.input.commandInput.Reset() // Clear command input
 			if commandStr != "" {
 				m.debug.Log(" > Executing command: :%s", commandStr)
+				// Create a command to execute the function and return a result message
 				cmd = executeCommandCmd(commandStr, m)
 				cmds = append(cmds, cmd)
+				// Switch back to insert mode *after* command execution (handled by commandResultMsg)
+			} else {
+				// If Enter pressed on empty command, just switch back to insert mode
 				m.input.mode = modeInsert // Update input model
 				m.input.editor.Focus()
 				m.debug.Log(" > Empty command, switching to Insert Mode")
 			}
-			 Use keyMap from input model
-	if keyMsg,rokr:=amsg.(tea.Key.sg);(okd&&.keyMsg.ype ==tea.KeyEscape{
-		m.i.mode = mCommand //  inputmodel
-		m.input.ditor.Bur()
-		m.input.commandInput.Fcus()
-		m.nput.ommandInut.Reset()
-		m.status.curntErr = nl // Update stat mode
-		m.debug.Log(" >SwitcdtoCommad Mde")
-		returntextpu.Blink
-	}
-
-	// Dleto edrcomponent within 
-	minput.editor, cmd = m.input.editor.(msg)
-	cmds= append(cmd,cmd)
-
-	i m.inpt.editor.IpuIsComplete() && m.nput.editr.Err == il{
-		sumitteInput:= m.input.editor.Vlue()
-		m.iput.lastInput= sumittdInput// Updat input dl
-		cms= ppend(cmds, msgCmd(submiBuffMsg{input:submittedInput, learEditr: alse}))
-	} else f .put.editor.Err!= nil {
-		if errors.s(m.i.editr.Err, io.EOF) || errors.Is(m.input.eitor.Err, ditorErrInutAborte) {
-			m.quiting = tru
-			cmds= ppe(cmd,eaQuit)
-	} else {
-			m.sttus.curretErr = m.npt.editor.Err // U atus ml
+			return tea.Batch(cmds...) // Return command(s)
 		}
 	}
 
-	//Update ep moelwithi StatusMdel
-	m.satus.hlp,md = m.sttus.hep.Update(msg)
-	cmds = appnd(cms,cm)
-
-	urntea.Btch(cds...
-	// Delegate to command text input within InputModel
-	m.input.commandInput, cmd = m.input.commandInput.Update(msg)
+	// Delegate other messages (like typing) to the command text input
+	m.input.commandInput, cmd = m.input.commandInput.Update(msg) // Update input model's commandInput
 	cmds = append(cmds, cmd)
+
 	return tea.Batch(cmds...)
 }
 
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:// triggerProcessFn creates a tea.Cmd to run the session's ProcessFn.
-	fun Use keyMap from input model
-		switchc{
-		case msg.*ype == tea.KeyEscape,bkey.latches(msg,lm.input.keyMap.)nterrupt):
-			m.input.mode =tmodeInsertg//oUpdatesiFn(i mputl
-			m.input.commandInput.B ur()
-			msinrut.eiitor.Focus()
-			m.stngus.curr)ntErr = nil retUpdatn status modef
-			m.debug.Lun(" > Swct(hed)tM IngertMod")
-			turnnl
-
-		case key.Matches(mg,m.iput.keyMap.Submit):
-			cmmandStr :=strs.TimSpc(m.pu.cmmand.Valu())
-			minut.commanInpu.Rest()
-			if commandStr !=r"" {
-				m.deb.g.Log(" > Exeeussognccmmano: :%s",fiommg.dStr)
-				cmd =PexocutsComsanmCmd(commcndSx ,im)
-				nmds = appeud(cds, cmd)
-			} else {
-				m..m = modeInsert // iput moe
-				m.input.dorFocus()
-				m.debug.Log(" > Em	ty commifd, sw tehing to Insert Moder)
-			}
-			retorn tea.Batch(cmss...)
-		}
-	}
-
-	// Deleg.Is te corr, c text input within Inputontel
-	m.input.cCmmandInpat, cmce= m.ilput.cemmandInpud.Updat|(msg)
-	 mds = mpptnx(cmds,.cmE)
-
-	r( urn ten.Batch(c ds...
+// triggerProcessFn creates a tea.Cmd to run the session's ProcessFn.
+func (m *bubbleModel) triggerProcessFn(input string) tea.Cmd {
+	return func() tea.Msg {
+		m.debug.Log(" > Starting ProcessFn for: '%s'", input)
+		err := m.session.config.ProcessFn(m.ctx, input)
+		m.debug.Log(" > ProcessFn finished.")
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			m.debug.Log(" > Processing cancelled by context")
-			return processingMsg(false)
+			return processingMsg(false) // Return message indicating processing stopped
+		}
+		// Handle other errors from ProcessFn
 		if err != nil {
-		return tea.Batch(
+			m.debug.Log(" > ProcessFn error: %v", err)
+			// Return both an error message and a processing finished message
+			return tea.Batch(
 				msgCmd(errMsg{err}),
 				msgCmd(processingMsg(false)),
-		
-		mm.debug.Lu"(" >cP") cnceld by context"
-		return processingMsg(false)
-	}
-}
-m.bu.Ldg("c>tPs a teF.murror: %v", srr)ion's CommandFn.
-func executeCommandC
-				md(command string, m
-				*bubbleModel) tea.Cmd {,
-			
-	return func() tea.Msg {
-		m.debug.Lon(" > P oc.ssFncfifismmdasucn = uly"
-			return errMsg{errors.New(")}
+			)
 		}
+		// If no error, just signal processing is finished
+		return processingMsg(false)
+	} // Close the inner anonymous function
+} // Close triggerProcessFn
+// executeCommandCmd creates a tea.Cmd to run the session's CommandFn.
+func executeCommandCmd(command string, m *bubbleModel) tea.Cmd {
+	return func() tea.Msg {
+		m.debug.Log(" > Executing CommandFn for: :%s", command)
+		// TODO: How should command output be captured?
+		// For now, assume CommandFn might return an error but not direct output.
+		// If CommandFn needs to return output, its signature and this handler need adjustment.
 		err := m.session.config.CommandFn(m.ctx, command)
-		output := ""
+		output := "" // Placeholder for potential future output capture
+		if err != nil {
+			m.debug.Log(" > CommandFn error: %v", err)
+		} else {
+			m.debug.Log(" > CommandFn executed successfully.")
+		}
 		return commandResultMsg{output: output, err: err}
+	}
 }
 
-// View renders the UI based on the current mode. {
+// View renders the UI based on the current mode.
+func (m *bubbleModel) View() string {
 	if m.quitting {
-		r
-
-		output := ""
-	vreturn ciew stResultMsg{output:rings.B, err: err}
-	}
-}
-
-//uView renderldtee UI brs onth curmode.
-fucm *bubbleModl)Vew()ring {
-	if.quittin {
-""
+		return "" // Don't render if quitting
 	}
 
-	vr view strigs.Builr
+	var view strings.Builder // Corrected variable declaration
 
-	// --- Calcate Heighs ---
-	tasBarHeigh =1
-	spinnHeight = 0
-	ifm.status.isProcssing&&!m.stas.isSteamig { //Us tatsodl	if m.status.isProcessing && !m.status.isStreaming { // Use status model
+	// --- Calculate Heights --- // Corrected comment typo
+	statusBarHeight := 1                                // Corrected variable name
+	spinnerHeight := 0                                  // Corrected variable name
+	if m.status.isProcessing && !m.status.isStreaming { // Corrected if statement
 		spinnerHeight = 1
 	}
 	errorHeight := 0
@@ -815,7 +906,6 @@ func handleEnter(m *bubbleModel) (tea.Model, tea.Cmd) {
 
 	if m.input.editor.InputIsComplete() && m.input.editor.Err == nil { // Check input model
 		submittedInput := m.input.editor.Value()
-		m.input.lastInput = submittedInput // Update input model
 		cmd = tea.Batch(cmd, msgCmd(submitBufferMsg{input: submittedInput, clearEditor: false}))
 	}
 	return m, cmd

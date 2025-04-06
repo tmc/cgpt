@@ -2,7 +2,7 @@
 package anthropic
 
 import (
-	"net/http"
+	"os"
 
 	"github.com/tmc/cgpt/backends/registry"
 	"github.com/tmc/cgpt/options"
@@ -16,7 +16,7 @@ func init() {
 
 // Constructor creates a new Anthropic backend
 func Constructor(cfg *options.Config, opts *options.InferenceProviderOptions) (llms.Model, error) {
-	apiKey := opts.EnvLookupFunc("ANTHROPIC_API_KEY")
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if cfg.AnthropicAPIKey != "" {
 		apiKey = cfg.AnthropicAPIKey
 	}
@@ -27,12 +27,7 @@ func Constructor(cfg *options.Config, opts *options.InferenceProviderOptions) (l
 
 	if opts.HTTPClient != nil {
 		anthropicOpts = append(anthropicOpts, anthropic.WithHTTPClient(opts.HTTPClient))
-	} else {
-		anthropicOpts = append(anthropicOpts, anthropic.WithHTTPClient(antHTTPClient))
 	}
-	anthropicOpts = append(anthropicOpts, anthropic.WithToken(opts.EnvLookupFunc("ANTHROPIC_API_KEY")))
+
 	return anthropic.New(anthropicOpts...)
 }
-
-// antHTTPClient is a placeholder for the JavaScript HTTP client
-var antHTTPClient = http.DefaultClient

@@ -95,10 +95,6 @@ type Options struct {
 
 	// UseTUI controls whether to use BubbleTea UI for interactive mode.
 	UseTUI bool
-
-	// Interactive mode placeholder text
-	SingleLineHint string // Placeholder text for single line input
-	MultiLineHint  string // Placeholder text for multi-line input
 }
 
 type ServiceOption func(*Service)
@@ -208,8 +204,6 @@ func NewOptions() Options {
 		UseTUI:              false, // Default to classic readline UI
 		CompletionTimeout:   30 * time.Second,
 		ReadlineHistoryFile: "~/.cgpt_history",
-		SingleLineHint:      "Enter your prompt (press Enter twice to submit, or \"\"\" for multi-line)",
-		MultiLineHint:       "(\"\"\" to end multi-line input, or Ctrl+D to submit)",
 	}
 }
 
@@ -608,9 +602,6 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 		}
 	}
 
-	// Track the last user message for editing with up arrow
-	var lastUserMessage string
-
 	processFn := func(ctx context.Context, input string) error {
 		input = strings.TrimSpace(input)
 		if input == "" {
@@ -627,35 +618,25 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 			return interactive.ErrEmptyInput
 		}
 
-		// Store this message for potential future edit
-		lastUserMessage = input
-
 		// Add message to payload and generate response
 		s.payload.addUserMessage(input)
-		err := s.generateResponse(ctxWithCancel, runCfg)
-
-		// Reset the interrupted flag after generating a response
-		//interruptedOnce = false
-
-		if err != nil && ctxWithCancel.Err() != nil {
-			// Context was canceled, return without error
-			return nil
+		if err := s.generateResponse(ctxWithCancel, runCfg); err != nil {
+			return fmt.Errorf("issue with response: %w", err)
 		}
-		return err
+		if err := s.saveHistory(); err != nil {
+			fmt.Println("")
+			fmt.Println("issue in saving history:", err)
+		}
+		return nil
 	}
 
+	// Configure the interactive session
 	sessionConfig := interactive.Config{
 		Prompt:      ">>> ",
 		AltPrompt:   "... ",
-		HistoryFile: expandTilde(s.readlineHistoryFile),
+		HistoryFile: expandTilde(s.readlineHistoryFile), // TODO: decouple and tease apart history concerns.
 		ProcessFn:   processFn,
-		// Use the hints from our options if they're provided
-		SingleLineHint: s.opts.SingleLineHint,
-		MultiLineHint:  s.opts.MultiLineHint,
 	}
-
-	// Add commands to the history for up arrow
-	sessionConfig.LastInput = lastUserMessage
 
 	// Check if we should use the TUI interface
 	var session interactive.Session
@@ -664,22 +645,12 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 	// Use the platform-agnostic NewSession which will select the appropriate implementation
 	// (BubbleSession for native, potentially WASM-compatible BubbleSession for js)
 	session, err = interactive.NewSession(sessionConfig)
-	if err == nil && runCfg.UseTUI {
-		// Log if TUI was requested, even if NewSession might return a non-TUI version for WASM
-		fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Using Terminal UI mode (if supported by platform)\033[0m\n")
-	}
-
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create interactive session: %w", err)
 	}
 
 	// Store session in the service to allow the generateResponse to manipulate prompt visibility
 	s.activeSession = session
-
-	// Pass the last user message to the session
-	if lastUserMessage != "" {
-		session.SetLastInput(lastUserMessage)
-	}
 
 	err = s.activeSession.Run(ctxWithCancel)
 
@@ -761,9 +732,6 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 		AltPrompt:   "... ",
 		HistoryFile: expandTilde(s.readlineHistoryFile),
 		ProcessFn:   processFn,
-		// Use the hints from our options if they're provided
-		SingleLineHint: s.opts.SingleLineHint,
-		MultiLineHint:  s.opts.MultiLineHint,
 	}
 
 	// Check if we should use the TUI interface
@@ -803,18 +771,6 @@ func expandTilde(path string) string {
 
 func (s *Service) generateResponse(ctx context.Context, runCfg RunOptions) error {
 	s.payload.Stream = runCfg.StreamOutput
-
-	// Hide the prompt during streaming if we have an active session
-	if s.activeSession != nil {
-		s.activeSession.SetStreaming(true)
-	}
-
-	// Make sure we re-enable the prompt when done
-	defer func() {
-		if s.activeSession != nil {
-			s.activeSession.SetStreaming(false)
-		}
-	}()
 
 	if runCfg.StreamOutput {
 		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload)

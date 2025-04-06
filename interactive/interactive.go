@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/tmc/cgpt/ui/completion" // Use local completion package
-	// "github.com/tmc/cgpt/ui/computil" // Removed unused import
 )
 
 var ErrEmptyInput = errors.New("empty input")
@@ -46,18 +45,22 @@ type CommandFn func(ctx context.Context, command string) error
 
 // Config defines parameters for creating an interactive session.
 type Config struct {
-	Prompt             string
-	AltPrompt          string
-	HistoryFile        string                                        // Path for loading/saving history
-	LoadedHistory      []string                                      // Pre-loaded history
-	ProcessFn          func(ctx context.Context, input string) error // Handles normal input submission
-	CommandFn          CommandFn                                     // Handles command mode submission
+	Stdin io.ReadCloser
+
+	ConversationHistory []string
+	ProcessFn           func(ctx context.Context, input string) error // Handles normal input submission
+
+	HistoryFile string // Disk path for loading/saving history
+
+	Prompt    string
+	AltPrompt string
+
+	CommandFn          CommandFn // Handles command mode submission
 	AutoCompleteFn     AutoCompleteFn
 	CheckInputComplete func(entireInput [][]rune, line, col int) bool // Optional: Custom submit logic
-	Stdin              io.ReadCloser
-	SingleLineHint     string
-	MultiLineHint      string
-	LastInput          string
+
+	SingleLineHint string
+	MultiLineHint  string
 }
 
 // InteractiveState (remains internal)
@@ -66,6 +69,18 @@ type InteractiveState int
 const (
 	StateSingleLine InteractiveState = iota
 	StateMultiLine
+)
+
+type ResponseState int
+
+const (
+	ResponseStateUndefined ResponseState = iota
+	ResponseStateReady
+	ResponseStateSubmitting
+	ResponseStateSubmitted
+	ResponseStateStreaming
+	ResponseStateSInterrupted
+	ResponseStateError
 )
 
 // Defaults
@@ -78,21 +93,50 @@ var (
 // Session defines the interface for an interactive session implementation.
 type Session interface {
 	Run(ctx context.Context) error
-	SetStreaming(streaming bool)
-	SetLastInput(input string)
+	SetResponseState(state ResponseState)
 	AddResponsePart(part string)
+}
+
+type historyManager interface { // TODO: move history concepts elsewhere.
 	GetHistory() []string              // Retrieve current history
 	GetHistoryFilename() string        // Get the configured history filename
 	LoadHistory(filename string) error // Load history from a file
 	SaveHistory(filename string) error // Save history to a file
-	Quit()                             // Add a method to signal quitting
 }
 
-// NewSession is defined in platform-specific files
-// func NewSession(cfg Config) (Session, error)
+func (r ResponseState) String() string {
+	switch r {
+	case ResponseStateUndefined:
+		return "undefined"
+	case ResponseStateReady:
+		return "ready"
+	case ResponseStateSubmitting:
+		return "submitting"
+	case ResponseStateSubmitted:
+		return "submitted"
+	case ResponseStateStreaming:
+		return "streaming"
+	case ResponseStateSInterrupted:
+		return "stream interrupted"
+	case ResponseStateError:
+		return "error"
+	default:
+		return "unknown state"
+	}
+}
 
-// --- Completion Helpers ---
-// Moved to completion_helpers.go to keep this file focused on interfaces/config.
-
-// SimpleWordsCompletion moved to completion_helpers.go
-// SingleWordCompletion moved to completion_helpers.go
+func (r ResponseState) IsProcessing() bool {
+	if r == ResponseStateUndefined {
+		return false
+	}
+	if r == ResponseStateReady {
+		return false
+	}
+	if r == ResponseStateError {
+		return false
+	}
+	if r == ResponseStateSInterrupted {
+		return false
+	}
+	return true
+}

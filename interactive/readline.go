@@ -23,16 +23,13 @@ type ReadlineSession struct {
 	config         Config
 	buffer         strings.Builder
 	state          InteractiveState
+	responeState   ResponseState
 	multiline      bool
 	lastInput      string    // Track last successful input
 	expectingCtrlE bool      // For Ctrl+X, Ctrl+E support
 	interruptCount int       // Track consecutive Ctrl+C presses
 	lastCtrlCTime  time.Time // Track time of last Ctrl+C press
 	isStreaming    bool      // Track streaming state for prompt handling
-	// submitReady field removed
-
-	// Readline doesn't easily expose line/pos, store if needed for complex logic
-	// linePos LinePos
 }
 
 // Compile-time check for Session interface
@@ -87,7 +84,6 @@ func NewSession(cfg Config) (*ReadlineSession, error) {
 		config:    cfg,
 		state:     StateSingleLine,
 		multiline: false,
-		lastInput: cfg.LastInput,
 	}
 
 	listener := session.createListener()
@@ -450,6 +446,10 @@ func (s *ReadlineSession) editInEditor(currentContent string) (string, error) {
 	return strings.TrimSuffix(string(contentBytes), "\n"), nil
 }
 
+func (r *ReadlineSession) SetResponseState(state ResponseState) {
+	r.responeState = state
+}
+
 // GetHistory retrieves the current history from the readline instance.
 func (s *ReadlineSession) GetHistory() []string {
 	if s.reader != nil {
@@ -457,7 +457,7 @@ func (s *ReadlineSession) GetHistory() []string {
 		// We could potentially read it from the history file if needed,
 		// but it's better if the main application manages the canonical history.
 		// Returning the config's initial history as a placeholder.
-		return s.config.LoadedHistory
+		return s.config.ConversationHistory
 	}
 	return nil
 }
@@ -481,3 +481,5 @@ func expandTilde(path string) (string, error) {
 type PainterFunc func(line []rune, pos int) []rune
 
 func (p PainterFunc) Paint(line []rune, pos int) []rune { return p(line, pos) }
+
+func (s *ReadlineSession) SetResponeState(state ResponseState) {}

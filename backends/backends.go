@@ -32,8 +32,3 @@ func WithHTTPClient(client *http.Client) options.InferenceProviderOption {
 func WithUseLegacyMaxTokens(useLegacy bool) options.InferenceProviderOption {
 	return registry.WithUseLegacyMaxTokens(useLegacy)
 }
-
-// WithEnvLookupFunc returns an option to set the environment variable lookup function
-func WithEnvLookupFunc(f func(string) string) options.InferenceProviderOption {
-	return registry.WithEnvLookupFunc(f)
-}
