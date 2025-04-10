@@ -64,7 +64,7 @@ func (s *ReadlineSession) Quit() {
 }
 
 // NewSession creates a new interactive readline session.
-func NewSession(cfg Config) (*ReadlineSession, error) {
+func NewSession(cfg Config) (Session, error) {
 	if cfg.SingleLineHint == "" {
 		cfg.SingleLineHint = DefaultSingleLineHint
 	}
@@ -101,6 +101,13 @@ func NewSession(cfg Config) (*ReadlineSession, error) {
 	stdinFile, stdinIsFile := cfg.Stdin.(*os.File)
 	isTerminalFunc := func() bool {
 		if stdinIsFile {
+			// Ensure stdinFile is not nil before accessing Fd()
+			if stdinFile == nil {
+				// If stdin is not an os.File or is nil, assume not a terminal
+				// This might happen in tests or specific environments.
+				// Fallback to checking os.Stdout as a proxy?
+				return term.IsTerminal(int(os.Stdout.Fd()))
+			}
 			return term.IsTerminal(int(stdinFile.Fd()))
 		}
 		// Fallback: Check if os.Stdout is a TTY, assuming it's the interactive one
@@ -131,11 +138,6 @@ func NewSession(cfg Config) (*ReadlineSession, error) {
 	session.reader = reader
 
 	return session, nil
-}
-
-// SetLastInput sets the last input for retrieval with up arrow.
-func (s *ReadlineSession) SetLastInput(input string) {
-	s.lastInput = input
 }
 
 // SetStreaming updates the streaming state, affecting the prompt display.
@@ -175,11 +177,13 @@ func (s *ReadlineSession) getPrompt() string {
 
 // getPlaceHolder returns the hint text with ANSI codes for dim color.
 func (s *ReadlineSession) getPlaceHolder() string {
-	hint := s.config.SingleLineHint
-	if s.multiline {
-		hint = s.config.MultiLineHint
-	}
-	return ansiDimColor(hint)
+	// readline has a bug that make hint handling tough.,
+	// hint := s.config.SingleLineHint
+	// if s.multiline {
+	// 	hint = s.config.MultiLineHint
+	// }
+	// return ansiDimColor(hint)
+	return ""
 }
 
 // ansiDimColor applies dim ANSI color code.
@@ -251,44 +255,56 @@ func (s *ReadlineSession) createListener() readline.Listener {
 func (s *ReadlineSession) Run(ctx context.Context) error {
 	closeDone := false
 	defer func() {
-		if !closeDone {
+		if !closeDone && s.reader != nil { // Check reader isn't nil
 			s.reader.Close()
 		}
 	}()
+
 	done := make(chan struct{})
 	defer close(done)
-	go func() { // Context cancellation handling
+
+	// Simplified context cancellation handling
+	go func() {
 		select {
 		case <-ctx.Done():
+			// When context is cancelled (e.g., by SIGINT), just close the reader.
+			// Readline should then return an error (like io.EOF or a custom one).
 			if s.reader != nil {
-				pid := os.Getpid()
-				p, _ := os.FindProcess(pid)
-				if p != nil {
-					_ = p.Signal(os.Interrupt)
-				}
+				s.reader.Close() // This should interrupt the blocking Readline call
+				closeDone = true
 			}
 		case <-done:
+			// Loop finished normally
 		}
 	}()
 
 	inTripleQuoteMode := false
 	submitBuffer := false
-	submitReady := false // Local variable for double-enter logic
+	submitReady := false
 
 	for {
-		s.reader.SetPrompt(s.getPrompt()) // Update prompt
-		line, err := s.reader.Readline()
+		// Check context before blocking Readline call
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 
-		// --- Handle Errors ---
+		s.reader.SetPrompt(s.getPrompt())
+		line, err := s.reader.Readline() // This blocks
+
+		// Check context *immediately* after Readline returns
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// --- Handle Readline Errors ---
 		if errors.Is(err, readline.ErrInterrupt) { // Ctrl+C
+			// This is often handled internally by readline closing, but handle explicitly
 			fmt.Fprintln(os.Stderr) // Newline
-			// TODO: If streaming/processing, attempt context cancellation here
 			now := time.Now()
-			if now.Sub(s.lastCtrlCTime) < 1*time.Second && s.interruptCount > 0 {
+			if now.Sub(s.lastCtrlCTime) < 2*time.Second && s.interruptCount > 0 && len(line) == 0 {
 				fmt.Fprintln(os.Stderr, ansiDimColor("Exiting..."))
-				closeDone = true
-				s.reader.Close()
-				return err
+				// No need to close reader here, defer and cancellation goroutine handle it
+				return err // Return the interrupt error
 			}
 			s.interruptCount++
 			s.lastCtrlCTime = now
@@ -296,37 +312,34 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 			inTripleQuoteMode = false
 			s.multiline = false
 			s.expectingCtrlE = false
-			submitReady = false // Reset local submitReady
+			submitReady = false
 			msg := "Input cleared."
 			if len(line) == 0 {
 				msg = "Press Ctrl+C again quickly to exit."
 			}
 			fmt.Fprintln(os.Stderr, ansiDimColor(msg))
-			continue
-		} else if errors.Is(err, io.EOF) { // Ctrl+D
+			continue // Continue the loop
+		} else if errors.Is(err, io.EOF) { // Ctrl+D or reader closed due to context cancel
+			if ctx.Err() != nil {
+				return ctx.Err() // Prioritize context cancellation
+			}
+			// Handle Ctrl+D logic
 			if s.buffer.Len() > 0 || len(line) > 0 {
 				fmt.Fprintln(os.Stderr)
 				if s.buffer.Len() == 0 && len(line) > 0 {
 					s.buffer.WriteString(line)
 				}
-				submitBuffer = true
+				submitBuffer = true // Submit remaining buffer on Ctrl+D
 			} else {
 				fmt.Fprintln(os.Stderr, ansiDimColor("Exiting..."))
-				closeDone = true
-				s.reader.Close()
-				return err
+				return err // Return EOF to signal exit
 			}
 		} else if err != nil {
-			closeDone = true
-			s.reader.Close()
+			// Handle other potential readline errors
 			return fmt.Errorf("readline error: %w", err)
 		}
 
-		if ctx.Err() != nil {
-			return ctx.Err()
-		} // Check context
-
-		// --- Process Input ---
+		// --- Process Input (remains the same) ---
 		trimmedLine := strings.TrimSpace(line)
 		isTripleQuoteMarker := trimmedLine == "\"\"\""
 
@@ -377,20 +390,30 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 		if submitBuffer {
 			submitBuffer = false
 			s.multiline = false
-			submitReady = false // Reset local submitReady
+			submitReady = false
 			inputToProcess := s.buffer.String()
 			s.buffer.Reset()
 
 			if strings.TrimSpace(inputToProcess) != "" {
-				// Clean line *before* calling potentially blocking ProcessFn
-				s.reader.Clean()
+				s.reader.Clean() // Clean before calling potentially blocking function
+
+				// Pass the main ctx to ProcessFn
 				processErr := s.config.ProcessFn(ctx, inputToProcess)
 
+				// Check context error *after* ProcessFn returns
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+
+				// Handle ProcessFn result (remains the same)
 				if lastMsg, ok := processErr.(ErrUseLastMessage); ok {
 					fmt.Fprintln(os.Stderr, ansiDimColor("Use Up Arrow to recall last input for editing."))
 					s.lastInput = string(lastMsg)
-				} else if processErr != nil && !errors.Is(processErr, ErrEmptyInput) && !errors.Is(processErr, context.Canceled) {
-					fmt.Fprintf(os.Stderr, "Processing error: %v\n", processErr)
+				} else if processErr != nil && !errors.Is(processErr, ErrEmptyInput) {
+					// Don't print error if context was cancelled during processing
+					if !errors.Is(processErr, context.Canceled) {
+						fmt.Fprintf(os.Stderr, "Processing error: %v\n", processErr)
+					}
 				} else if processErr == nil {
 					// Save successful input to readline's history
 					if err := s.reader.SaveHistory(inputToProcess); err != nil {
@@ -403,8 +426,9 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 			s.expectingCtrlE = false
 		} else if !s.isStreaming {
 			s.reader.Refresh()
-		} // Refresh prompt if not submitting/streaming
+		}
 	}
+	// Unreachable in normal flow, loop exits via return
 }
 
 // editInEditor helper using Suspend/Resume.
@@ -463,16 +487,7 @@ func (s *ReadlineSession) GetHistory() []string {
 }
 
 // Expand tilde in file paths
-func expandTilde(path string) (string, error) {
-	if path == "" || path[0] != '~' {
-		return path, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home dir: %w", err)
-	}
-	return filepath.Join(home, path[1:]), nil
-}
+// func expandTilde(path string) (string, error) // Keep the one in completion.go
 
 // Define LinePos struct (if needed for complex cursor logic)
 // type LinePos struct { Line []rune; Pos int; Key rune }
@@ -481,5 +496,3 @@ func expandTilde(path string) (string, error) {
 type PainterFunc func(line []rune, pos int) []rune
 
 func (p PainterFunc) Paint(line []rune, pos int) []rune { return p(line, pos) }
-
-func (s *ReadlineSession) SetResponeState(state ResponseState) {}

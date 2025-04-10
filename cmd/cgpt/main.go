@@ -40,8 +40,10 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -59,7 +61,7 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 	fs.StringArrayVarP(&opts.InputStrings, "input", "i", nil, "Direct string input (can be used multiple times)")
 	fs.StringArrayVarP(&opts.InputFiles, "file", "f", nil, "Input file path. Use '-' for stdin (can be used multiple times)")
 	fs.BoolVarP(&opts.Continuous, "continuous", "c", true, "Run in continuous mode (interactive)")
-	fs.BoolVar(&opts.UseTUI, "tui", true, "Use terminal UI mode (BubbleTea) for interactive sessions")
+	fs.BoolVar(&opts.UseTUI, "tui", false, "Use terminal UI mode (BubbleTea) for interactive sessions")
 	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
 	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
@@ -83,11 +85,25 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
 	// Config flags
-	fs.StringVarP(&opts.Config.Backend, "backend", "b", "anthropic", "The backend to use")
-	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-3-7-sonnet-20250219", "The model to use")
-	fs.StringVarP(&opts.Config.SystemPrompt, "system-prompt", "s", "", "System prompt to use")
-	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum tokens to generate")
-	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0.05, "Temperature for sampling")
+	// Check if opts.Config is nil before accessing fields
+	backend := "anthropic"
+	model := "claude-3-7-sonnet-20250219"
+	sysPrompt := ""
+	maxTokens := 0
+	temp := 0.05
+	if opts.Config != nil {
+		backend = opts.Config.Backend
+		model = opts.Config.Model
+		sysPrompt = opts.Config.SystemPrompt
+		maxTokens = opts.Config.MaxTokens
+		temp = opts.Config.Temperature
+	}
+	fs.StringVarP(&opts.Config.Backend, "backend", "b", backend, "The backend to use")
+	fs.StringVarP(&opts.Config.Model, "model", "m", model, "The model to use")
+	fs.StringVarP(&opts.Config.SystemPrompt, "system-prompt", "s", sysPrompt, "System prompt to use")
+	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", maxTokens, "Maximum tokens to generate")
+	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", temp, "Temperature for sampling")
+
 
 	// Config file path
 	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
@@ -96,24 +112,42 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 func main() {
 	opts, flagSet, err := initFlags(os.Args, os.Stdin)
 	if err != nil {
-		if err == pflag.ErrHelp {
+		// Check specifically for pflag.ErrHelp to exit cleanly
+		if errors.Is(err, pflag.ErrHelp) {
 			os.Exit(0)
 		}
 		fmt.Fprintf(os.Stderr, "cgpt: flag error: %v\n", err)
 		os.Exit(2)
 	}
 
-	// start pprof:
+	// Start pprof if needed (keep as is)
 	go func() {
-		http.ListenAndServe("localhost:6060", nil)
+		_ = http.ListenAndServe("localhost:6060", nil) // Ignore error for optional pprof
 	}()
-	ctx := context.Background()
-	if err := run(ctx, opts, flagSet); err != nil {
-		fmt.Fprintf(os.Stderr, "cgpt: error: %v\n", err)
-		os.Exit(1)
+
+	// Centralized signal handling
+	// Create the primary context that cancels on SIGINT or SIGTERM
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop() // Ensure stop is called eventually
+
+	// Call run directly with the main context
+	err = run(ctx, opts, flagSet)
+
+	// Handle context cancellation cleanly after run returns
+	if err != nil {
+		// Don't report context canceled errors as application errors
+		if !errors.Is(err, context.Canceled) {
+			fmt.Fprintf(os.Stderr, "cgpt: error: %v\n", err)
+			os.Exit(1)
+		}
+		// If it *was* context.Canceled, exit cleanly (status 0)
+		// Optional: print a message indicating graceful exit on signal
+		// fmt.Fprintln(os.Stderr, "\ncgpt: Shutting down...")
 	}
+	// Exit 0 on success or context cancellation
 }
 
+// run function now takes the main context directly
 func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) error {
 	// Ensure we have stderr output even if uninitialized
 	stderr := opts.Stderr
@@ -124,12 +158,32 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 	// Load the config file
 	fileConfig, err := options.LoadConfig(opts.ConfigPath, stderr, flagSet)
 	if err != nil {
+		// Use Fprintf for stderr
 		fmt.Fprintf(stderr, "Warning: failed to load config: %v. Proceeding with defaults/flags.\n", err)
+		// Reset fileConfig to avoid using partially loaded data, rely on flags/defaults
+		fileConfig = &options.Config{} // Or handle more gracefully if needed
 	}
-	opts.Config = fileConfig
+	// Apply flags over fileConfig (or vice versa, depending on desired precedence)
+	// This merge logic might need refinement based on how flags vs config are intended to interact.
+	// Assuming flags override config for now:
+	if flagSet.Changed("backend") {
+		fileConfig.Backend = opts.Config.Backend
+	}
+	if flagSet.Changed("model") {
+		fileConfig.Model = opts.Config.Model
+	}
+	if flagSet.Changed("system-prompt") {
+		fileConfig.SystemPrompt = opts.Config.SystemPrompt
+	}
+	if flagSet.Changed("max-tokens") {
+		fileConfig.MaxTokens = opts.Config.MaxTokens
+	}
+	if flagSet.Changed("temperature") {
+		fileConfig.Temperature = opts.Config.Temperature
+	}
+	opts.Config = fileConfig // Use the potentially merged/updated config
 
-	// TODO: move to history
-	// Creates the default save path if it doesn't exist
+	// TODO: move to history (keep as is)
 	if dir, _ := os.UserHomeDir(); dir != "" {
 		err := os.MkdirAll(filepath.Join(dir, ".cgpt"), 0755)
 		if err != nil {
@@ -138,15 +192,32 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 	}
 
 	// Process input using the new input package
-	isStdinTerminal := term.IsTerminal(int(os.Stdin.Fd())) // Check TTY status *once*
+	isStdinTerminal := false
+	if f, ok := opts.Stdin.(*os.File); ok && f != nil { // Check if f is not nil
+		isStdinTerminal = term.IsTerminal(int(f.Fd()))
+	}
+
 
 	// Store the flags that were explicitly set, in order they appeared on the command line
 	var inputFileOrder, inputStringOrder []string
 	flagSet.Visit(func(flag *pflag.Flag) {
+		// Ensure flag.Value is not nil before calling String()
+		if flag.Value == nil {
+			return
+		}
 		if flag.Name == "file" || flag.Name == "f" {
-			inputFileOrder = append(inputFileOrder, flag.Value.String())
+			// Handle string slice flags correctly
+			if files, ok := flag.Value.(pflag.SliceValue); ok {
+				inputFileOrder = append(inputFileOrder, files.GetSlice()...)
+			} else {
+				inputFileOrder = append(inputFileOrder, flag.Value.String())
+			}
 		} else if flag.Name == "input" || flag.Name == "i" {
-			inputStringOrder = append(inputStringOrder, flag.Value.String())
+			if inputs, ok := flag.Value.(pflag.SliceValue); ok {
+				inputStringOrder = append(inputStringOrder, inputs.GetSlice()...)
+			} else {
+				inputStringOrder = append(inputStringOrder, flag.Value.String())
+			}
 		}
 	})
 
@@ -160,6 +231,7 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		opts.Continuous, // Let the input processor know if -c flag was used
 	).WithFileOrder(inputFileOrder).WithStringOrder(inputStringOrder)
 
+	// Pass ctx directly to GetCombinedReader
 	inputReader, _, tryReattachTTY, err := inputProcessor.GetCombinedReader(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to prepare input reader: %w", err) // Error opening files etc.
@@ -167,36 +239,33 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 
 	inputBytes, err := io.ReadAll(inputReader)
 	if err != nil {
+		// Check for context cancellation during read
+		if errors.Is(err, context.Canceled) {
+			return err // Propagate cancellation
+		}
 		return fmt.Errorf("failed to read input: %w", err)
 	}
 	initialPrompt := strings.TrimSpace(string(inputBytes))
 
 	// --- TTY Handling ---
-	// If we need to reattach to TTY (continuous mode with piped input)
 	var ttyFile *os.File
-	// Skip debug message to keep output clean
 	if tryReattachTTY {
-		// This flag implies opts.Continuous is true and stdin was piped
 		var errTTY error
 		ttyFile, errTTY = os.OpenFile("/dev/tty", os.O_RDWR, 0)
-
 		if errTTY != nil {
-			// Don't fail hard, but log prominently - future TTY operations will likely fail
 			fmt.Fprintf(stderr, "Error: Could not reattach to terminal for interactive mode.\n")
-			ttyFile = nil // Ensure ttyFile is nil if open failed
+			ttyFile = nil
 		} else {
-			// *** CRITICAL: Defer close until the run function exits ***
 			defer func() {
 				if ttyFile != nil {
-					ttyFile.Close()
+					_ = ttyFile.Close() // Ignore close error on defer
 				}
 			}()
 		}
 	}
 
-	// Initialize the model (the llms.Model interface)
+	// Initialize the model
 	modelOpts := []backends.InferenceProviderOption{}
-	// if debug mode is on, attach the debug http client:
 	if opts.DebugMode {
 		fmt.Fprintln(stderr, "Debug mode enabled")
 		modelOpts = append(modelOpts, backends.WithHTTPClient(httputil.DebugHTTPClient))
@@ -209,7 +278,7 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		return fmt.Errorf("failed to initialize model: %w", err)
 	}
 
-	// Check if user *explicitly* provided input via args, -i, or -f (excluding '-')
+	// Determine implicit continuous mode (keep as is)
 	hasExplicitFileInput := false
 	for _, f := range opts.InputFiles {
 		if f != "-" {
@@ -218,18 +287,17 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		}
 	}
 	hasExplicitInputOtherThanStdin := hasExplicitFileInput || len(opts.InputStrings) > 0 || len(opts.PositionalArgs) > 0
-
-	// Launch implicitly into continuous mode if:
-	// 1. No other input sources were given (args, -i, -f other than '-')
-	// 2. Stdin is available and is a terminal (not piped/redirected)
-	// 3. The user didn't already specify -c
 	if opts.Stdin != nil && isStdinTerminal && !hasExplicitInputOtherThanStdin && !opts.Continuous {
 		opts.Continuous = true
 	}
-	// --- End Continuous Mode ---
 
-	// Only have spinner on if stdout is a tty:
-	opts.ShowSpinner = opts.ShowSpinner && term.IsTerminal(int(os.Stdout.Fd()))
+	// Spinner on TTY (keep as is)
+	isStdoutTerminal := false
+	if f, ok := opts.Stdout.(*os.File); ok && f != nil { // Check f not nil
+		isStdoutTerminal = term.IsTerminal(int(f.Fd()))
+	}
+	opts.ShowSpinner = opts.ShowSpinner && isStdoutTerminal
+
 
 	// Create the completion service config & service
 	compCfg := NewCompletionConfig(opts)
@@ -272,21 +340,22 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 	}
 
 	// Handle case where we are NOT continuous and have NO initial prompt (even after loading history)
-	// The completion service's Run should handle history loading via Options
 	if !opts.Continuous && initialPrompt == "" && opts.HistoryIn == "" {
-		return fmt.Errorf("no input provided for non-continuous mode (use -i, -f, args, or pipe stdin)")
+		// Check payload message count *after* potential history loading inside New()
+		if len(s.GetPayloadMessages()) == 0 { // Assuming GetPayloadMessages exists
+			return fmt.Errorf("no input provided for non-continuous mode (use -i, -f, args, or pipe stdin)")
+		}
 	}
+
 
 	// Add prefill if provided
 	if opts.Prefill != "" {
 		s.SetNextCompletionPrefill(opts.Prefill)
 	}
 
-	// When running in continuous mode with a reattached TTY - no need for special messaging
-
-	// Run the completion service - this now handles all cases including TTY reattachment
+	// Run the completion service
 	runOpts := completion.RunOptions{
-		Config:                   compCfg,
+		Config:                   compCfg, // This is completion.Config
 		InputStrings:             opts.InputStrings,
 		InputFiles:               opts.InputFiles,
 		PositionalArgs:           opts.PositionalArgs,
@@ -310,18 +379,31 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		ConfigPath:               opts.ConfigPath,
 		OpenAIUseLegacyMaxTokens: opts.OpenAIUseLegacyMaxTokens,
 	}
+	// Pass the main ctx directly
 	return s.Run(ctx, runOpts)
 }
 
+// NewCompletionConfig creates a completion.Config from options.RunOptions
 func NewCompletionConfig(cfg options.RunOptions) *completion.Config {
+	// Ensure cfg.Config is not nil before accessing fields
+	maxTokens := 0
+	temp := 0.05 // Default temperature
+	sysPrompt := ""
+	if cfg.Config != nil {
+		maxTokens = cfg.Config.MaxTokens
+		temp = cfg.Config.Temperature
+		sysPrompt = cfg.Config.SystemPrompt
+	}
 	return &completion.Config{
-		MaxTokens:         cfg.Config.MaxTokens,
-		Temperature:       cfg.Config.Temperature,
-		SystemPrompt:      cfg.Config.SystemPrompt,
-		CompletionTimeout: cfg.CompletionTimeout,
+		MaxTokens:         maxTokens,
+		Temperature:       temp,
+		SystemPrompt:      sysPrompt,
+		CompletionTimeout: cfg.CompletionTimeout, // Use timeout from RunOptions directly
 	}
 }
 
+
+// initFlags defines and parses command line flags
 func initFlags(args []string, stdin io.Reader) (options.RunOptions, *pflag.FlagSet, error) {
 	opts := options.RunOptions{
 		Config: &options.Config{},
@@ -329,48 +411,67 @@ func initFlags(args []string, stdin io.Reader) (options.RunOptions, *pflag.FlagS
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}
+	// Default values for Config fields if not set by flags/config file
+	opts.Config.Backend = "anthropic"
+	opts.Config.Model = "claude-3-7-sonnet-20250219"
+	opts.Config.Temperature = 0.05
+	opts.CompletionTimeout = 2 * time.Minute
+
 	if len(args) == 0 {
-		return opts, nil, fmt.Errorf("no arguments provided")
+		// Provide a default pflag.FlagSet even on error for consistency
+		fs := pflag.NewFlagSet("cgpt", pflag.ContinueOnError)
+		defineFlags(fs, &opts) // Define flags even if no args are provided
+		return opts, fs, fmt.Errorf("no arguments provided")
 	}
 
 	fs := pflag.NewFlagSet(args[0], pflag.ContinueOnError)
 	fs.SortFlags = false
-	defineFlags(fs, &opts)
-
-	// We no longer reset InputFiles based on stdin being a terminal
-	// This is now handled by the input processor
+	defineFlags(fs, &opts) // Define flags on the new FlagSet
 
 	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples (comma separated list of sections, or 'all')")
 	help := fs.BoolP("help", "h", false, "Display help information")
 
-	fs.MarkHidden("stream-output")
+	fs.MarkHidden("stream")
 	fs.MarkHidden("readline-history-file")
 	fs.MarkHidden("prefill-echo")
 	fs.MarkHidden("show-spinner")
+	// Mark deprecated history flags as hidden
+	fs.MarkHidden("history-load")
+	fs.MarkHidden("history-save")
+
 
 	fs.Usage = func() {
-		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
-		fmt.Println()
-		if *showAdvancedUsage != "" {
-			printAdvancedUsage(*showAdvancedUsage)
+		// Use Stderr for usage to match convention
+		fmt.Fprintln(os.Stderr, "cgpt is a command line tool for interacting with generative AI models")
+		fmt.Fprintln(os.Stderr) // Add a newline
+		// Ensure showAdvancedUsage isn't nil before dereferencing
+		if showAdvancedUsage != nil && *showAdvancedUsage != "" {
+			printAdvancedUsage(*showAdvancedUsage) // Assumes this prints to stdout/stderr appropriately
 			return
 		}
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", args[0])
-		fs.PrintDefaults()
-		printBasicUsage()
+		// Use FlagUsagesWrapped for better wrapping
+		fmt.Fprint(os.Stderr, fs.FlagUsagesWrapped(120)) // Adjust wrap width if needed
+		printBasicUsage()                                 // Assumes this prints to stdout/stderr appropriately
 	}
 
 	err := fs.Parse(args[1:])
 	if err != nil {
-		return opts, fs, err
+		// Check for help flag explicitly even on parse error
+		if help != nil && *help { // Check if help is not nil before dereferencing
+			fs.Usage()
+			return opts, fs, pflag.ErrHelp // Return specific help error
+		}
+		return opts, fs, err // Return the parse error
 	}
 
-	if *help {
+	// Handle help and advanced usage after successful parsing
+	if help != nil && *help { // Check if help is not nil
 		fs.Usage()
 		return opts, fs, pflag.ErrHelp
 	}
 
-	if *showAdvancedUsage != "" {
+	if showAdvancedUsage != nil && *showAdvancedUsage != "" { // Check if showAdvancedUsage is not nil
 		printAdvancedUsage(*showAdvancedUsage)
 		return opts, fs, pflag.ErrHelp
 	}

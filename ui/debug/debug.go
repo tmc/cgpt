@@ -45,7 +45,7 @@ func NewView() *DebugView {
 	}
 
 	return &DebugView{
-		maxEvents:     15,
+		maxEvents:     5,
 		ignoredEvents: ignored,
 		width:         80,
 		columnWidth:   35,

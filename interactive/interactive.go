@@ -85,7 +85,7 @@ const (
 
 // Defaults
 var (
-	DefaultSingleLineHint  = `Enter prompt (""" for multi-line, ESC for command mode)`  // Updated hint
+	DefaultSingleLineHint  = `Enter prompt (""" for multi-line, ESC for command mode)`
 	DefaultMultiLineHint   = `(End with """ or Ctrl+D to submit, ESC for command mode)` // Updated hint
 	SubmitReadyPlaceholder = "Press Enter again to submit..."
 )
