@@ -1,6 +1,3 @@
-//go:build !js
-// +build !js
-
 package interactive
 
 import (
@@ -18,6 +15,13 @@ import (
 	"github.com/chzyer/readline"
 	"go.uber.org/zap"
 	"golang.org/x/term"
+)
+
+// Escape sequences for bracketed paste mode
+const (
+	// The terminal sends ESC[200~ to start paste mode and ESC[201~ to end it
+	bracketedPasteStart = "\x1b[200~"
+	bracketedPasteEnd   = "\x1b[201~"
 )
 
 // ReadlineSession implements an interactive terminal session using chzyer/readline.
@@ -40,6 +44,13 @@ type ReadlineSession struct {
 	interruptCount int       // Track consecutive Ctrl+C presses
 	lastCtrlCTime  time.Time // Track time of last Ctrl+C press
 	isStreaming    bool      // Track streaming state for prompt handling (Redundant? Use responseState)
+
+	// Paste handling optimization
+	inPasteMode      bool            // True when in bracketed paste mode
+	pasteBuffer      []rune          // Buffer to accumulate content during paste operations
+	lastPasteRedraw  time.Time       // Last time we refreshed the display during paste
+	disableRedraw    bool            // Flag to completely disable redraws during paste
+	accumulatedPaste strings.Builder // Accumulate pasted content across multiple lines
 
 	// Cancellation for ongoing processing
 	currentProcessCancel context.CancelFunc // Stores the cancel func for the current ProcessFn call
@@ -73,8 +84,37 @@ func (s *ReadlineSession) SaveHistory(filename string) error {
 func (s *ReadlineSession) Quit() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Restore terminal state when quitting
+	if s.reader != nil && s.reader.Config.Stdout != nil {
+		s.log.Debug("Restoring terminal state on quit")
+
+		// Disable bracketed paste mode
+		fmt.Fprint(s.reader.Config.Stdout, "\x1b[?2004l") // Disable bracketed paste mode
+	}
+
 	if s.reader != nil {
 		s.reader.Close() // Close should be thread-safe, but lock for consistency
+	}
+}
+
+// Constants for paste handling
+const (
+	// Default redraw interval during paste operations (500ms provides a good balance)
+	pasteRedrawInterval = 500 * time.Millisecond
+
+	// Threshold for reporting paste size (in bytes)
+	pasteSizeReportThreshold = 100
+)
+
+// formatByteSize formats byte size to a human-readable string
+func formatByteSize(bytes int) string {
+	if bytes < 1024 {
+		return fmt.Sprintf("%d bytes", bytes)
+	} else if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
+	} else {
+		return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
 	}
 }
 
@@ -111,9 +151,13 @@ func NewSession(cfg Config) (Session, error) {
 	cfg.HistoryFile = historyPath // Update config with expanded path
 
 	session := &ReadlineSession{
-		config: cfg,
-		log:    log,
-		state:  StateSingleLine,
+		config:          cfg,
+		log:             log,
+		state:           StateSingleLine,
+		inPasteMode:     false,
+		pasteBuffer:     make([]rune, 0, 256), // Pre-allocate buffer for paste operations
+		lastPasteRedraw: time.Time{},          // Zero time (never refreshed)
+		disableRedraw:   false,                // Start with redraws enabled
 	}
 	session.responseState.Store(ResponseStateReady) // Initialize atomic state
 
@@ -124,6 +168,12 @@ func NewSession(cfg Config) (Session, error) {
 		if currentState == ResponseStateStreaming {
 			return line
 		}
+
+		// Skip all hints/processing during paste mode
+		if session.inPasteMode {
+			return line // Simple fast path for paste operations
+		}
+
 		// Don't modify non-empty lines
 		if len(line) > 0 {
 			return line
@@ -170,9 +220,12 @@ func NewSession(cfg Config) (Session, error) {
 		Listener:          listener,                      // Custom key handling
 		Painter:           painter,                       // Custom hint display
 		// Stdin/out/err will be set below based on config/TTY
-		ForceUseInteractive:    true, // Try interactive features even if TTY detection fails
-		DisableAutoSaveHistory: true, // We handle saving manually
-		FuncIsTerminal:         isTerminalFunc,
+		ForceUseInteractive: true, // Try interactive features even if TTY detection fails
+		FuncIsTerminal:      isTerminalFunc,
+
+		// Performance optimizations for large input handling
+		DisableAutoSaveHistory: true,  // We handle saving manually
+		VimMode:                false, // Disable vim mode which can slow down handling of large inputs
 	}
 
 	// Set Stdout/Stderr from config if provided
@@ -212,6 +265,19 @@ func NewSession(cfg Config) (Session, error) {
 	}
 	session.reader = reader
 
+	// Enable bracketed paste mode for better paste handling
+	// This tells the terminal to send special markers when pasting content
+	if stdinIsFile && isTerminalFunc() {
+		// Only enable if we're connected to a terminal
+		if readlineConfig.Stdout != nil {
+			log.Info("Enabling bracketed paste mode for paste optimization")
+
+			// Enable bracketed paste mode - this is the key feature we need
+			// Terminal will send ESC[200~ before and ESC[201~ after pasted content
+			fmt.Fprint(readlineConfig.Stdout, "\x1b[?2004h") // Enable bracketed paste mode
+		}
+	}
+
 	log.Info("Readline session initialized")
 	return session, nil
 }
@@ -232,9 +298,9 @@ func (s *ReadlineSession) SetResponseState(state ResponseState) {
 				// Only clean line when we're transitioning from processing to interrupted/ready
 				fmt.Fprint(s.reader.Config.Stderr, "\r\033[K") // Clear current line
 			}
-			
+
 			s.reader.SetPrompt(s.getPrompt())
-			s.reader.Clean() // Ensure line is clean
+			s.reader.Clean()   // Ensure line is clean
 			s.reader.Refresh() // Redraw the line and prompt
 		}
 		s.mu.Unlock()
@@ -244,22 +310,29 @@ func (s *ReadlineSession) SetResponseState(state ResponseState) {
 // AddResponsePart prints the response part directly.
 // Assumes it's called from the ProcessFn goroutine.
 func (s *ReadlineSession) AddResponsePart(part string) {
-	s.mu.Lock() // Lock for safe access to reader and its output writer
-	defer s.mu.Unlock()
-	
-	// --- CRITICAL CHECK ---
-	// Check state *before* writing. If interrupted or already ready for next prompt, discard the part.
+	// First, check state BEFORE locking to avoid holding lock unnecessarily
+	// This is a fast path for discarding output after interrupt
 	currentState := s.responseState.Load().(ResponseState)
 	if currentState == ResponseStateSInterrupted || currentState == ResponseStateReady {
 		s.log.Debugf("Discarding response part in state %s: %q", currentState, part)
 		return // Do not print if interrupted or already finished
 	}
-	// --- END CHECK ---
-	
+
+	s.mu.Lock() // Lock for safe access to reader and its output writer
+	defer s.mu.Unlock()
+
+	// Double-check state after acquiring lock (state might have changed)
+	currentState = s.responseState.Load().(ResponseState)
+	if currentState == ResponseStateSInterrupted || currentState == ResponseStateReady {
+		s.log.Debugf("Discarding response part after lock in state %s: %q", currentState, part)
+		return // Do not print if interrupted or already finished
+	}
+
 	if s.reader == nil {
 		fmt.Print(part) // Fallback if reader not initialized
 		return
 	}
+
 	// Use Clean/Refresh to minimize prompt interference
 	s.reader.Clean()
 	// Use the configured Stdout writer for output
@@ -292,6 +365,116 @@ func (s *ReadlineSession) getPrompt() string {
 // ansiDimColor applies dim ANSI color code.
 func ansiDimColor(text string) string { return fmt.Sprintf("\x1b[90m%s\x1b[0m", text) }
 
+// Handle bracketed paste mode
+// Detects and processes paste operations using exact bracketed paste markers
+func (s *ReadlineSession) handleBracketedPaste(line []rune, key rune) (bool, []rune, int) {
+	lineStr := string(line)
+
+	// Specifically check for the start marker
+	startIndex := strings.Index(lineStr, bracketedPasteStart)
+	if startIndex != -1 {
+		s.log.Debug("Bracketed paste start marker detected at position", startIndex)
+		s.inPasteMode = true
+		s.disableRedraw = true
+		s.lastPasteRedraw = time.Now()
+
+		// Reset accumulated paste content
+		s.accumulatedPaste.Reset()
+
+		// Get content after the start marker
+		beforeMarker := ""
+		if startIndex > 0 {
+			beforeMarker = lineStr[:startIndex]
+		}
+		afterMarker := lineStr[startIndex+len(bracketedPasteStart):]
+
+		// Check if the end marker is also in this line
+		endIndex := strings.Index(afterMarker, bracketedPasteEnd)
+		if endIndex != -1 {
+			// Both start and end markers are present
+			s.log.Debug("Paste completed in a single line")
+			s.inPasteMode = false
+			s.disableRedraw = false
+
+			// Get content between the markers
+			pastedContent := afterMarker[:endIndex]
+			afterEnd := afterMarker[endIndex+len(bracketedPasteEnd):]
+
+			// Add to accumulated paste
+			s.accumulatedPaste.WriteString(pastedContent)
+
+			// Print paste size message if it's over the threshold
+			pasteSize := s.accumulatedPaste.Len()
+			if pasteSize > pasteSizeReportThreshold && s.reader != nil && s.reader.Config.Stderr != nil {
+				sizeMsg := fmt.Sprintf("\r%s\n", ansiDimColor(fmt.Sprintf("[Pasted %s]", formatByteSize(pasteSize))))
+				fmt.Fprint(s.reader.Config.Stderr, sizeMsg)
+			}
+
+			// Construct clean line
+			cleanLine := beforeMarker + pastedContent + afterEnd
+			return true, []rune(cleanLine), len([]rune(cleanLine))
+		}
+
+		// Only start marker present
+		// Add to accumulated paste
+		s.accumulatedPaste.WriteString(afterMarker)
+
+		cleanLine := beforeMarker + afterMarker
+		return true, []rune(cleanLine), len([]rune(cleanLine))
+	}
+
+	// Check for the end marker
+	if s.inPasteMode {
+		endIndex := strings.Index(lineStr, bracketedPasteEnd)
+		if endIndex != -1 {
+			s.log.Debug("Bracketed paste end marker detected at position", endIndex)
+			s.inPasteMode = false
+			s.disableRedraw = false
+
+			// Clean up the line by removing the end marker
+			beforeMarker := ""
+			if endIndex > 0 {
+				beforeMarker = lineStr[:endIndex]
+			}
+			afterMarker := lineStr[endIndex+len(bracketedPasteEnd):]
+
+			// Add to accumulated paste
+			s.accumulatedPaste.WriteString(beforeMarker)
+
+			// Print paste size message if it's over the threshold
+			pasteSize := s.accumulatedPaste.Len()
+			if pasteSize > pasteSizeReportThreshold && s.reader != nil && s.reader.Config.Stderr != nil {
+				sizeMsg := fmt.Sprintf("\r%s\n", ansiDimColor(fmt.Sprintf("[Pasted %s]", formatByteSize(pasteSize))))
+				fmt.Fprint(s.reader.Config.Stderr, sizeMsg)
+			}
+
+			cleanLine := beforeMarker + afterMarker
+			return true, []rune(cleanLine), len([]rune(cleanLine))
+		}
+
+		// Still in paste mode but no end marker yet
+		// Add the current line to accumulated paste
+		s.accumulatedPaste.WriteString(lineStr)
+
+		now := time.Now()
+
+		// Throttle redraws during paste to reduce flickering
+		if s.lastPasteRedraw.IsZero() || now.Sub(s.lastPasteRedraw) > pasteRedrawInterval {
+			// Time for a periodic redraw
+			s.lastPasteRedraw = now
+			s.disableRedraw = false
+			return true, line, len(line)
+		}
+
+		// Disable redraws between the throttling interval
+		s.disableRedraw = true
+		return true, line, len(line)
+	}
+
+	// Not in paste mode
+	return false, line, len(line)
+}
+
 // createListener returns a listener that handles specific key events. Needs locking.
 func (s *ReadlineSession) createListener() readline.Listener {
 	return readline.FuncListener(func(line []rune, pos int, key rune) (newLine []rune, newPos int, ok bool) {
@@ -301,6 +484,20 @@ func (s *ReadlineSession) createListener() readline.Listener {
 		processed := false
 		newLine = line
 		newPos = pos
+
+		// Handle bracketed paste mode and paste optimizations
+		isPaste, modifiedLine, modifiedPos := s.handleBracketedPaste(line, key)
+		if isPaste {
+			// For paste operations, apply minimal processing
+			if s.disableRedraw {
+				// Skip the readline refresh cycle entirely to reduce flickering
+				return modifiedLine, modifiedPos, true // ok=true bypasses refresh
+			} else {
+				// Allow occasional redraws based on throttling
+				s.log.Debug("Paste operation with allowed refresh")
+				return modifiedLine, modifiedPos, false
+			}
+		}
 
 		// Handle Up Arrow only when the line is empty to recall last input
 		if key == readline.CharPrev && len(line) == 0 && s.buffer.Len() == 0 && s.lastInput != "" {
@@ -372,6 +569,15 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 			s.currentProcessCancel()
 			s.currentProcessCancel = nil
 		}
+
+		// Restore terminal state when exiting
+		if s.reader != nil && s.reader.Config.Stdout != nil {
+			s.log.Debug("Restoring terminal state on exit")
+
+			// Disable bracketed paste mode
+			fmt.Fprint(s.reader.Config.Stdout, "\x1b[?2004l") // Disable bracketed paste mode
+		}
+
 		// Close readline instance
 		if s.reader != nil {
 			s.log.Info("Closing readline instance")
@@ -387,10 +593,21 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-			s.log.Infof("Main context cancelled (%v), closing readline.", ctx.Err())
+			s.log.Infof("Main context cancelled (%v), closing readline instance.", ctx.Err())
 			s.mu.Lock()
+			// First set the proper state to ensure other operations know we're interrupting
+			s.SetResponseState(ResponseStateSInterrupted)
+
+			// Cancel any ongoing processing
+			if s.currentProcessCancel != nil {
+				s.log.Debug("Cancelling ongoing process due to context cancellation")
+				s.currentProcessCancel()
+				s.currentProcessCancel = nil
+			}
+
+			// Then close the reader to unblock the Readline() call
 			if s.reader != nil {
-				s.reader.Close() // Interrupt the blocking Readline call
+				s.reader.Close() // This unblocks the Readline() call with an error
 			}
 			s.mu.Unlock()
 		case <-contextDone:
@@ -424,13 +641,10 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 		// Check context *immediately* after Readline returns
 		if ctx.Err() != nil {
 			s.log.Infof("Context cancelled after Readline call: %v", ctx.Err())
-			// Don't return immediately if we were processing, let interrupt handle it
-			if s.responseState.Load().(ResponseState).IsProcessing() {
-				s.log.Warn("Context cancelled during processing, relying on interrupt logic.")
-				// The ErrInterrupt block should handle this if reader was closed by context goroutine
-			} else {
-				return ctx.Err()
-			}
+			// If the error is due to context cancellation:
+			// 1. Always prioritize the context error for clean shutdown
+			// 2. Return immediately - the calling code needs to know we've been cancelled
+			return ctx.Err()
 		}
 
 		// --- Handle Readline Errors ---
@@ -440,63 +654,62 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 			currentState := s.responseState.Load().(ResponseState)
 			s.log.Debugf("Ctrl+C received, current state: %s", currentState)
 
-			if currentState.IsProcessing() {
+			// --- Handle Interrupt while Idle/Pending Submit ---
+			if !currentState.IsProcessing() {
+				// If there's text on the line or in buffer (incl. pending submit), just clear it
+				if len(line) > 0 || s.buffer.Len() > 0 || s.pendingSubmit {
+					s.log.Debug("Ctrl+C clearing input line/buffer or pending submit")
+					fmt.Fprint(currentReader.Config.Stderr, "\r"+ansiDimColor("Input cleared")+"        \r") // Print feedback directly
+					s.buffer.Reset()
+					inTripleQuoteMode = false
+					s.multiline = false
+					s.pendingSubmit = false // Explicitly reset pendingSubmit
+					s.expectingCtrlE = false
+					s.mu.Unlock()
+					continue // Continue the loop
+				} else {
+					// Exit on Ctrl+C when line is empty and not processing
+					s.log.Info("Exiting on Ctrl+C at empty prompt.")
+					fmt.Fprint(currentReader.Config.Stderr, "\r"+ansiDimColor("Exiting...")+"        \r")
+					s.mu.Unlock()
+					return ErrInterrupted // Return specific interrupt error
+				}
+			} else {
 				// --- Interrupt Processing ---
 				s.log.Info("Interrupting ongoing response generation.")
+
+				// Ensure line is clear before showing interrupt message
+				fmt.Fprint(currentReader.Config.Stderr, "\r\033[K") // Clear current line
+
+				// Set state *immediately* - this will block further response parts
+				s.SetResponseState(ResponseStateSInterrupted) // Update state (atomic)
+
+				// Cancel the processing AFTER state is updated
 				if s.currentProcessCancel != nil {
 					s.currentProcessCancel() // Signal the ProcessFn goroutine to stop
 					s.currentProcessCancel = nil
 				} else {
 					s.log.Warn("Interrupt received while processing, but no cancel function found!")
 				}
-				s.SetResponseState(ResponseStateSInterrupted) // Update state (atomic)
-				
-				// Ensure we have a clean line before showing feedback
-				fmt.Fprint(currentReader.Config.Stderr, "\r\033[K") // Clear current line completely
-				// Provide feedback directly to stderr
+
+				// Provide clear feedback that processing was interrupted
+				// We use a newline at the end to ensure prompt appears on a fresh line
 				fmt.Fprintln(currentReader.Config.Stderr, ansiDimColor("[Interrupted]"))
-				
+
 				// Reset buffer/multiline state immediately
 				s.buffer.Reset()
 				inTripleQuoteMode = false
 				s.multiline = false
 				s.pendingSubmit = false
 				s.expectingCtrlE = false
-				
-				// Force refresh the prompt after a short delay to ensure proper display
-				go func() {
-					time.Sleep(50 * time.Millisecond) // Small delay to let other goroutines complete
-					s.mu.Lock()
-					if s.reader != nil {
-						s.reader.Clean()
-						s.reader.Refresh()
-					}
-					s.mu.Unlock()
-				}()
-				
+
+				// Force refresh the prompt immediately
+				currentReader.SetPrompt(s.getPrompt()) // Reset prompt for the next line
+				currentReader.Clean()                  // Clean before refresh
+				currentReader.Refresh()                // Refresh to show the clean prompt
+
 				s.mu.Unlock() // Unlock before continuing loop
 				continue      // Go back to prompt
-			} else {
-				// --- Interrupt while Idle ---
-				// If there's text on the line or in buffer, just clear it
-				if len(line) > 0 || s.buffer.Len() > 0 {
-					s.log.Debug("Ctrl+C clearing input line/buffer")
-					// Print feedback directly
-					fmt.Fprint(currentReader.Config.Stderr, "\r"+ansiDimColor("Input cleared")+"        \r")
-					s.buffer.Reset()
-					inTripleQuoteMode = false
-					s.multiline = false
-					s.pendingSubmit = false
-					s.expectingCtrlE = false
-					s.mu.Unlock()
-					continue // Continue the loop
-				} else {
-					// Exit on Ctrl+C when line is empty
-					s.log.Info("Exiting on Ctrl+C at empty prompt.")
-					fmt.Fprint(currentReader.Config.Stderr, "\r"+ansiDimColor("Exiting...")+"        \r")
-					s.mu.Unlock()
-					return ErrInterrupted // Return specific interrupt error
-				}
 			}
 		} else if errors.Is(err, io.EOF) { // Ctrl+D or reader closed
 			s.log.Debug("EOF received from Readline")
@@ -524,11 +737,24 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 		} else if err != nil {
 			// Handle other potential readline errors (e.g., reader closed unexpectedly)
 			// Check if the error occurred *because* the context was cancelled
-			if ctx.Err() != nil {
-				s.log.Warnf("Readline error likely due to context cancellation: %v (context err: %v)", err, ctx.Err())
+			// Use a separate variable to avoid shadowing ctx.Err()
+			mainCtxErr := ctx.Err()
+			if mainCtxErr != nil {
+				s.log.Warnf("Readline error likely due to context cancellation: %v (context err: %v)", err, mainCtxErr)
 				s.mu.Unlock()
-				return ctx.Err()
+				// Return the original context error if the context is done
+				return mainCtxErr
 			}
+
+			// Check if reader was closed (often happens on exit/interrupt)
+			// If state is interrupted or ready, it might be a non-fatal close after processing/interrupt
+			currentState := s.responseState.Load().(ResponseState)
+			if currentState == ResponseStateSInterrupted {
+				s.log.Warnf("Readline error in interrupted state, possibly due to close: %v", err)
+				s.mu.Unlock()
+				return ErrInterrupted
+			}
+
 			s.log.Errorf("Unexpected readline error: %v", err)
 			s.mu.Unlock()
 			return fmt.Errorf("readline error: %w", err)
