@@ -2,7 +2,6 @@
 package options
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -91,40 +90,25 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 
 	// Get backend (respecting precedence)
 	backend := v.GetString("backend")
-	if verbose, _ := flagSet.GetBool("verbose"); verbose {
+	if verbose, _ := flagSet.GetBool("debug"); verbose {
 		fmt.Fprintf(stderr, "cgpt: backend is %q\n", backend)
 	}
 
 	// Check if model is explicitly set anywhere before setting default
 	hasModel := false
 	if flagSet.Changed("model") {
-		if verbose, _ := flagSet.GetBool("verbose"); verbose {
-			fmt.Fprintf(stderr, "cgpt: model set by flag: %s\n", flagSet.Lookup("model").Value.String())
-		}
 		hasModel = true
 	} else if IsEnvSet("CGPT_MODEL") {
-		if verbose, _ := flagSet.GetBool("verbose"); verbose {
-			fmt.Fprintf(stderr, "cgpt: model set by env: %s\n", os.Getenv("CGPT_MODEL"))
-		}
 		hasModel = true
 		v.Set("model", os.Getenv("CGPT_MODEL"))
 	} else if v.InConfig("model") {
-		if verbose, _ := flagSet.GetBool("verbose"); verbose {
-			fmt.Fprintf(stderr, "cgpt: model set in config: %s\n", v.GetString("model"))
-		}
 		hasModel = true
 	}
 
 	// Only set default model if no explicit model is set
 	if !hasModel {
-		if verbose, _ := flagSet.GetBool("verbose"); verbose {
-			fmt.Fprintln(stderr, "cgpt: no model set, using default")
-		}
 		if defaultModel, ok := DefaultModels[backend]; ok {
 			v.Set("model", defaultModel)
-			if verbose, _ := flagSet.GetBool("verbose"); verbose {
-				fmt.Fprintf(stderr, "cgpt: using default model for %s backend: %s\n", backend, defaultModel)
-			}
 		}
 	}
 
@@ -132,7 +116,6 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 		return nil, fmt.Errorf("unable to unmarshal config: %w", err)
 	}
 
-	LogConfig(cfg, stderr, flagSet)
 	return cfg, nil
 }
 
@@ -202,7 +185,7 @@ func HandleConfigFile(v *viper.Viper, stderr io.Writer, flagSet *pflag.FlagSet) 
 
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
-			if verbose, _ := flagSet.GetBool("verbose"); verbose {
+			if verbose, _ := flagSet.GetBool("debug"); verbose {
 				fmt.Fprintln(stderr, "cgpt: config file not found, using defaults")
 			}
 			return nil
@@ -214,12 +197,4 @@ func HandleConfigFile(v *viper.Viper, stderr io.Writer, flagSet *pflag.FlagSet) 
 		fmt.Fprintf(stderr, "cgpt: successfully read config from %s\n", v.ConfigFileUsed())
 	}
 	return nil
-}
-
-// LogConfig logs the final configuration
-func LogConfig(cfg *Config, stderr io.Writer, flagSet *pflag.FlagSet) {
-	if verbose, _ := flagSet.GetBool("verbose"); verbose {
-		fmt.Fprint(stderr, "cgpt-config: ")
-		json.NewEncoder(stderr).Encode(cfg)
-	}
 }

@@ -4,12 +4,11 @@ package interactive
 
 import (
 	"context"
-	"errors" // Import errors package
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath" // Import filepath
 	"strings"
 	"time"
 
@@ -70,6 +69,14 @@ func NewSession(cfg Config) (Session, error) {
 	}
 	if cfg.MultiLineHint == "" {
 		cfg.MultiLineHint = DefaultMultiLineHint
+	}
+
+	// Ensure prompts have a trailing space for visibility
+	if cfg.Prompt != "" && !strings.HasSuffix(cfg.Prompt, " ") {
+		cfg.Prompt = cfg.Prompt + " "
+	}
+	if cfg.AltPrompt != "" && !strings.HasSuffix(cfg.AltPrompt, " ") {
+		cfg.AltPrompt = cfg.AltPrompt + " "
 	}
 
 	// Expand tilde for history file path
@@ -172,7 +179,12 @@ func (s *ReadlineSession) getPrompt() string {
 	if s.multiline {
 		return s.config.AltPrompt
 	}
-	return s.config.Prompt
+	// Ensure the prompt is visible by adding a space after it if not already present
+	prompt := s.config.Prompt
+	if prompt != "" && !strings.HasSuffix(prompt, " ") {
+		prompt += " "
+	}
+	return prompt
 }
 
 // getPlaceHolder returns the hint text with ANSI codes for dim color.
@@ -262,13 +274,13 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 
 	done := make(chan struct{})
 	defer close(done)
-
-	// Simplified context cancellation handling
+	
+	// Only use context cancellation - signals are now handled at the top level
 	go func() {
 		select {
 		case <-ctx.Done():
-			// When context is cancelled (e.g., by SIGINT), just close the reader.
-			// Readline should then return an error (like io.EOF or a custom one).
+			// When context is cancelled (e.g., by SIGINT), force close the reader
+			fmt.Fprintln(os.Stderr, "\nTerminating session...")
 			if s.reader != nil {
 				s.reader.Close() // This should interrupt the blocking Readline call
 				closeDone = true
@@ -487,7 +499,17 @@ func (s *ReadlineSession) GetHistory() []string {
 }
 
 // Expand tilde in file paths
-// func expandTilde(path string) (string, error) // Keep the one in completion.go
+func expandTilde(path string) (string, error) {
+	// Check if path starts with ~/
+	if strings.HasPrefix(path, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("get home directory: %w", err)
+		}
+		return strings.Replace(path, "~", homeDir, 1), nil
+	}
+	return path, nil
+}
 
 // Define LinePos struct (if needed for complex cursor logic)
 // type LinePos struct { Line []rune; Pos int; Key rune }

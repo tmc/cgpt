@@ -145,6 +145,14 @@ func NewBubbleSession(cfg Config) (*BubbleSession, error) {
 		cfg.MultiLineHint = DefaultMultiLineHint
 	}
 
+	// Ensure prompts have a trailing space for visibility
+	if cfg.Prompt != "" && !strings.HasSuffix(cfg.Prompt, " ") {
+		cfg.Prompt = cfg.Prompt + " "
+	}
+	if cfg.AltPrompt != "" && !strings.HasSuffix(cfg.AltPrompt, " ") {
+		cfg.AltPrompt = cfg.AltPrompt + " "
+	}
+
 	session := &BubbleSession{config: cfg}
 	return session, nil
 }
@@ -200,15 +208,18 @@ func (s *BubbleSession) Run(ctx context.Context) error {
 
 	s.program = tea.NewProgram(s.model, options...)
 
+	// No local signal handling - rely on context cancellation from main
 	progDone := make(chan error, 1)
 	go func() { _, runErr := s.program.Run(); progDone <- runErr }()
 
+	// Handle context cancellation or normal program completion
 	select {
 	case <-ctx.Done(): // Check if the parent context was cancelled
 		s.model.debug.Log(" > Context cancelled, quitting program...")
 		s.program.Quit() // Tell bubbletea to quit
 		<-progDone       // Wait for Run() to actually finish
 		return ctx.Err() // Return the cancellation error
+		
 	case err := <-progDone: // Run finished on its own or via internal Quit
 		if ctx.Err() != nil { // Check if context was cancelled *during* Run
 			s.model.debug.Log(" > Program finished after context cancellation.")
@@ -317,7 +328,6 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-
 	// Handle messages that affect the model regardless of mode first
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -407,7 +417,6 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.editor.Reset()
 			}
 		}
-
 
 	case editorFinishedMsg: // From external editor ($EDITOR)
 		m.debug.Log(" > Editor finished msg received")
@@ -643,7 +652,6 @@ func (m *bubbleModel) triggerProcessFn(input string) tea.Cmd {
 			return processingMsg(false) // Signal processing stopped due to cancellation
 		}
 
-
 		// Handle other errors from ProcessFn
 		if err != nil {
 			m.debug.Log(" > ProcessFn error: %v", err)
@@ -733,7 +741,6 @@ func (m *bubbleModel) View() string {
 		inputAreaHeight = 1 // Ensure minimum height for input
 	}
 
-
 	// Render Editor or Command Input (using input model)
 	if m.input.mode == modeInsert {
 		m.input.editor.SetHeight(inputAreaHeight) // Set editor height
@@ -744,7 +751,9 @@ func (m *bubbleModel) View() string {
 		}
 	} else { // modeCommand
 		cmdInputWidth := m.width - lipgloss.Width(m.input.commandInput.Prompt) - 1
-		if cmdInputWidth < 10 { cmdInputWidth = 10 }
+		if cmdInputWidth < 10 {
+			cmdInputWidth = 10
+		}
 		m.input.commandInput.Width = cmdInputWidth
 		// Render command input in the allocated input area
 		// Potentially adjust height if command input needs more space (unlikely)
@@ -753,13 +762,11 @@ func (m *bubbleModel) View() string {
 		view.WriteString(strings.Repeat("\n", max(0, inputAreaHeight-lipgloss.Height(m.input.commandInput.View()))))
 	}
 
-
 	// Spinner or Error (using status model)
 	// Only show spinner if actively processing and not showing streaming output prominently
 	if m.status.isProcessing && (!m.status.isStreaming || m.conversationVM.respBuffer.Len() == 0) {
 		view.WriteString("\n" + m.status.spinner.View() + " Processing...")
 	}
-
 
 	if m.status.currentErr != nil {
 		view.WriteString("\n" + renderError(m))
@@ -783,7 +790,6 @@ func (m *bubbleModel) View() string {
 	// Trim only trailing newlines to preserve internal structure
 	return strings.TrimRight(view.String(), "\n")
 }
-
 
 // renderConversation renders conversation history.
 func renderConversation(m *bubbleModel) string {
@@ -809,7 +815,6 @@ func renderStreamingResponse(m *bubbleModel) string {
 	// Use full width for streaming response rendering initially
 	contentWidth := max(10, m.width-lipgloss.Width(prefix)-lipgloss.Width(indicator)-3) // Use model width
 
-
 	renderedContent := style.Width(contentWidth).Render(content)
 	lines := strings.Split(renderedContent, "\n")
 	firstLine := prefix + lines[0] // Apply prefix only to first line
@@ -826,7 +831,6 @@ func renderStreamingResponse(m *bubbleModel) string {
 	// Append indicator to the *last* line (after potential indenting)
 	return firstLine + subsequentLines + indicator
 }
-
 
 // renderError renders the current error message.
 func renderError(m *bubbleModel) string {
@@ -930,24 +934,6 @@ func handleCtrlC(m *bubbleModel) (tea.Model, tea.Cmd) {
 
 // Define a new message type for clearing the Ctrl+C hint
 type clearCtrlCHintMsg struct{}
-
-// Extend the main Update switch to handle this new message
-func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// ... (existing Update logic) ...
-
-	switch msg.(type) {
-	// ... (other cases) ...
-	case clearCtrlCHintMsg:
-		if m.status.currentErr != nil && m.status.currentErr.Error() == "Press Ctrl+C again to exit." {
-			m.status.currentErr = nil // Clear the hint
-		}
-		return m, nil // No further command needed
-		// ... (rest of Update logic) ...
-	}
-	// ...
-	return m, nil // Added default return
-}
-
 
 // handleCtrlD handles EOF/quit logic, delegating to editor first.
 func handleCtrlD(m *bubbleModel) (tea.Model, tea.Cmd) {

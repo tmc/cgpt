@@ -178,7 +178,7 @@ func runTest(t *testing.T, ctx context.Context, opts options.RunOptions, fs *pfl
 		},
 		Stdout:         opts.Stdout,
 		Stderr:         opts.Stderr,
-		Stdin:          opts.Stdin,
+		Stdin:          io.NopCloser(opts.Stdin),
 		InputStrings:   opts.InputStrings,
 		InputFiles:     opts.InputFiles,
 		PositionalArgs: opts.PositionalArgs,

@@ -180,15 +180,16 @@ func (p *Processor) GetCombinedReader(ctx context.Context) (reader io.Reader, wa
 		}
 	}
 
-	// Add positional args
-	if len(p.args) > 0 {
-		readers = append(readers, strings.NewReader(strings.Join(p.args, " ")))
+	// Add positional args - treat each one like a separate -i flag
+	for _, arg := range p.args {
+		readers = append(readers, strings.NewReader(arg))
 	}
 
 	// Determine if we need to reattach to TTY
-	// If continuous mode flag is explicitly set (-c) AND we used stdin that isn't a terminal,
-	// we'll need to try to reattach to the terminal for interactive mode
-	tryReattachTTY = p.forceContinuous && stdinUsed && !p.isStdinTerminal
+	// If continuous mode flag is explicitly set (-c), we'll need to try to reattach
+	// to the terminal for interactive mode, even if stdin wasn't used or is already a terminal
+	// This ensures we get a prompt in continuous mode regardless of input source
+	tryReattachTTY = p.forceContinuous
 
 	// Combine all readers
 	reader = io.MultiReader(readers...)

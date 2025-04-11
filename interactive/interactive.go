@@ -10,6 +10,9 @@ import (
 
 var ErrEmptyInput = errors.New("empty input")
 
+// ErrInterrupted signals that the interactive session was interrupted.
+var ErrInterrupted = errors.New("session interrupted")
+
 // ErrUseLastMessage signals recalling the last message for editing.
 type ErrUseLastMessage string
 

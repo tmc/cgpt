@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"sync"
+
+	// "log" // Standard log can likely be removed if all instances are converted
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,18 +15,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tmc/cgpt/interactive"
+	"github.com/tmc/cgpt/interactive" // Assuming this exists
 	"github.com/tmc/langchaingo/llms"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
+
+// Logging is now externalized to cmd/cgpt/logger.go
 
 // Service is the main entry point for the completion service.
 type Service struct {
 	cfg *Config
 
-	loggerCfg zap.Config
-	logger    *zap.SugaredLogger
+	logger *zap.SugaredLogger // Logger is now injected rather than created internally
 
 	model llms.Model
 
@@ -32,7 +37,7 @@ type Service struct {
 
 	completionTimeout time.Duration
 
-	historyIn           io.ReadCloser
+	historyIn           io.ReadCloser // Changed to ReadCloser
 	historyOutFile      string
 	readlineHistoryFile string
 
@@ -105,6 +110,13 @@ func WithOptions(opts Options) ServiceOption {
 	}
 }
 
+// WithLogger is a ServiceOption that sets the logger
+func WithLogger(logger *zap.SugaredLogger) ServiceOption {
+	return func(s *Service) {
+		s.logger = logger
+	}
+}
+
 // WithStdout sets the stdout writer
 func WithStdout(w io.Writer) ServiceOption {
 	return func(s *Service) {
@@ -119,12 +131,7 @@ func WithStderr(w io.Writer) ServiceOption {
 	}
 }
 
-// WithLogger sets the logger for the completion service.
-func WithLogger(l *zap.SugaredLogger) ServiceOption {
-	return func(s *Service) {
-		s.logger = l
-	}
-}
+// Note: WithLogger is already defined in the ServiceOption section
 
 // New creates a new Service with the given configuration.
 func New(cfg *Config, model llms.Model, opts ...ServiceOption) (*Service, error) {
@@ -137,8 +144,8 @@ func New(cfg *Config, model llms.Model, opts ...ServiceOption) (*Service, error)
 	}
 
 	// Create default options
-	defaultOpts := NewOptions()
-	if cfg != nil { // Check if cfg is not nil before accessing
+	defaultOpts := NewOptions() // Already sets Stderr default
+	if cfg != nil {             // Check if cfg is not nil before accessing
 		defaultOpts.CompletionTimeout = cfg.CompletionTimeout
 	}
 
@@ -158,51 +165,34 @@ func New(cfg *Config, model llms.Model, opts ...ServiceOption) (*Service, error)
 		opt(s)
 	}
 
-	// Setup logger - ensure s.opts.Stderr is valid
+	// --- Logger Setup ---
+
+	// Ensure Stderr is valid (already defaulted in NewOptions)
 	if s.opts.Stderr == nil {
-		s.opts.Stderr = os.Stderr // Default if not set by options
-	}
-	s.loggerCfg = zap.NewDevelopmentConfig()
-	s.loggerCfg.DisableStacktrace = true // Disable stacktraces for cleaner logs
-	s.loggerCfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder // Use ISO8601 for timestamps
-	s.loggerCfg.EncoderConfig.CallerKey = "" // Disable caller info
-
-
-	if s.logger == nil {
-		// Create custom WriteSyncer for Stderr only
-		stderrSyncer := zapcore.AddSync(s.opts.Stderr)
-
-		// Create custom Core with the WriteSyncer
-		core := zapcore.NewCore(
-			zapcore.NewConsoleEncoder(s.loggerCfg.EncoderConfig),
-			stderrSyncer,
-			s.loggerCfg.Level,
-		)
-
-		// Create logger with the custom Core
-		logger := zap.New(core)
-		s.logger = logger.Sugar()
+		s.opts.Stderr = os.Stderr
 	}
 
-	// Configure log level
-	s.loggerCfg.Level.SetLevel(zap.WarnLevel)
-	if s.opts.Verbose {
-		s.loggerCfg.Level.SetLevel(zap.InfoLevel)
+	if s.logger == nil { // Only create a default logger if one wasn't provided via options
+		// Create a basic default logger that writes to stderr
+		logger := zap.NewExample().Sugar() // Simple logger with minimal output
+		logger = logger.Named("cgpt")      // Add a name for identification
+		s.logger = logger
+		
+		s.logger.Warn("No logger provided, using basic default logger. Consider using WithLogger().")
+	} else {
+		s.logger.Debug("Using externally provided logger")
 	}
-	if s.opts.DebugMode {
-		s.loggerCfg.Level.SetLevel(zap.DebugLevel)
-		// Re-enable stacktrace and caller in debug mode
-		s.loggerCfg.DisableStacktrace = false
-		s.loggerCfg.EncoderConfig.CallerKey = "caller"
-		// Rebuild logger with debug settings
-		core := zapcore.NewCore(zapcore.NewConsoleEncoder(s.loggerCfg.EncoderConfig), zapcore.AddSync(s.opts.Stderr), s.loggerCfg.Level)
-		logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1)) // Add caller info
-		s.logger = logger.Sugar()
-	}
+
+	// --- End Logger Setup ---
+
+	s.logger.Info("cgpt service initialized")       // This line will be green
+	s.logger.Debugf("Service options: %+v", s.opts) // This line will be grey (if DebugMode is true)
 
 	// Handle history files
 	if err := s.handleHistory(s.opts.HistoryIn, s.opts.HistoryOut); err != nil {
-		fmt.Fprintln(s.opts.Stderr, err)
+		// Use Fprintln for user-facing warnings about history handling.
+		// These don't necessarily need full log format.
+		s.logger.Warnf("Error handling history: %v", err)
 	}
 
 	// Set prefill if needed
@@ -257,7 +247,7 @@ type RunOptions struct {
 	// I/O
 	Stdout io.Writer
 	Stderr io.Writer
-	Stdin  io.Reader
+	Stdin  io.ReadCloser
 
 	// Timing
 	MaximumTimeout time.Duration
@@ -269,34 +259,52 @@ type RunOptions struct {
 }
 
 // Run executes a completion using the service's options
+// Run receives the main context directly
 func (s *Service) Run(ctx context.Context, runCfg RunOptions) error {
 	// Update internal options (keep as is for now, refactor later if needed)
+	s.logger.Debugf("Running with options: %+v", runCfg)
 	tempOpts := RunOptionsToOptions(runCfg) // Use local var, don't modify s.opts directly here
 
 	// Apply input handling from RunOptions
 	if err := s.setupSystemPrompt(); err != nil {
 		return fmt.Errorf("system prompt setup error: %w", err)
 	}
+	// Pass ctx directly to handleInput
 	if err := s.handleInput(ctx, runCfg); err != nil {
 		// Propagate context cancellation if that caused the error
 		if errors.Is(err, context.Canceled) {
+			s.logger.Debug("Input handling cancelled by context")
 			return err
 		}
 		return fmt.Errorf("input handling error: %w", err)
 	}
 
-	// Close history input reader when Run finishes
+	// Close history input reader when Run finishes (if it was opened)
+	// Note: historyIn is set to nil in handleHistory after reading, so this defer might not be strictly necessary anymore.
 	if s.historyIn != nil {
 		defer s.historyIn.Close()
 	}
 
 	// Execute the completion based on options
+	// Pass ctx directly to the run methods
+	var runErr error
+	s.logger.Infof("Running completion... continuous=%v, streamOutput=%v", tempOpts.Continuous, tempOpts.StreamOutput)
 	if tempOpts.Continuous {
 		if tempOpts.StreamOutput {
 			runErr = s.runContinuousCompletionStreaming(ctx, runCfg)
 		} else {
 			runErr = s.runContinuousCompletion(ctx, runCfg)
 		}
+		// After continuous mode finishes (normally or by error/cancel), rename history
+		renameCtx, cancelRename := context.WithTimeout(context.Background(), 10*time.Second) // Short timeout for rename
+		defer cancelRename()
+		if renameErr := s.renameChatHistory(renameCtx); renameErr != nil {
+			// Use logger for internal warnings
+			s.logger.Warnf("Failed to rename history on exit: %v", renameErr)
+			// Optionally inform user via Fprintf as well
+			// s.logger.Warnf("Failed to rename history on exit: %v", renameErr)
+		}
+
 	} else {
 		if tempOpts.StreamOutput {
 			runErr = s.runOneShotCompletionStreaming(ctx, runCfg)
@@ -306,13 +314,19 @@ func (s *Service) Run(ctx context.Context, runCfg RunOptions) error {
 	}
 
 	// Ensure final history save happens unless cancelled mid-save
-	if !errors.Is(runErr, context.Canceled) { // Avoid saving if the main run was cancelled
+	// This is crucial for one-shot modes. Continuous mode saves within its loop/generateResponse.
+	if !tempOpts.Continuous && !errors.Is(runErr, context.Canceled) { // Avoid saving if the main run was cancelled
 		if saveErr := s.saveHistory(); saveErr != nil {
 			// Log history save error but don't overwrite original runErr
-			fmt.Fprintf(s.opts.Stderr, "\nWarning: failed to save final history: %v\n", saveErr)
+			s.logger.Warnf("Failed to save final history: %v", saveErr)
+			// Use Fprintln for user-facing warning
+			s.logger.Warnf("Failed to save final history: %v", saveErr)
 		}
 	}
 
+	if errors.Is(runErr, context.Canceled) {
+		s.logger.Debug("Run finished due to context cancellation")
+	}
 
 	return runErr // Return the original error from the run methods
 }
@@ -364,7 +378,7 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 		defer close(ch)
 		fullResponse := strings.Builder{}
 		firstChunk := true
-		addedAssistantMessage := false // Track if message was added (via prefill or full response)
+		var err error // Declare error variable
 
 		prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload) // Pass ctx
 
@@ -374,13 +388,12 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 				spinnerPos = len(s.nextCompletionPrefill) + 1 // Simplified
 			}
 			select {
-			case ch <- s.nextCompletionPrefill + " ":
+			case ch <- s.nextCompletionPrefill + " ": // Add space after prefill if echoing
 			case <-ctx.Done(): // Respect context cancellation
+				s.logger.Debug("Prefill send cancelled by context")
 				prefillCleanup()
 				return
 			}
-			// Don't add to payload here yet, add the *final* message later
-			addedAssistantMessage = true // Mark that prefill *was* used
 			fullResponse.WriteString(s.nextCompletionPrefill) // Track prefill in buffer
 		}
 
@@ -396,7 +409,7 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 		}()
 
 		// Use the passed context directly for the LLM call
-		_, err := s.model.GenerateContent(ctx, payload.Messages, // Use ctx directly
+		_, err = s.model.GenerateContent(ctx, payload.Messages, // Use ctx directly
 			llms.WithMaxTokens(s.cfg.MaxTokens),
 			llms.WithTemperature(s.cfg.Temperature),
 			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
@@ -414,27 +427,38 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 					fullResponse.Write(chunk) // Append chunk to full response
 					return nil
 				case <-ctx.Done(): // Check context within streaming func
+					s.logger.Debug("Streaming function cancelled by context")
 					return ctx.Err() // Return context error to stop streaming
 				}
 			}))
 
-		// Handle potential errors from GenerateContent
-		if err != nil && !errors.Is(err, context.Canceled) {
-			// Use logger instead of log.Printf
-			s.logger.Errorf("failed to generate content: %v", err)
-			// Optionally send error via the channel or handle differently
-		}
-
 		// Add the complete assistant message to the payload *once* after streaming finishes
+		// regardless of error, as long as some content was generated.
 		finalContent := fullResponse.String()
 		if finalContent != "" { // Only add if there's content
 			payload.addAssistantMessage(finalContent)
 		}
 
-
 		// Reset prefill after completion attempt
 		s.nextCompletionPrefill = ""
+
+		// Handle potential errors from GenerateContent *after* adding message and resetting prefill
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				s.logger.Debugf("Content generation cancelled or timed out: %v", err)
+				// Don't log as error if it's just cancellation
+			} else {
+				s.logger.Errorf("Failed to generate content: %v", err)
+				// Optionally send error via the channel or handle differently
+				// For now, just log it. The error is implicitly returned by the outer function scope.
+			}
+			// The channel will be closed by the defer, signaling completion/error.
+		} else {
+			s.logger.Debug("Content generation completed successfully.")
+		}
+
 	}()
+	// Return the channel immediately. Errors during generation will cause the channel to close.
 	return ch, nil
 }
 
@@ -442,20 +466,18 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 func (s *Service) PerformCompletion(ctx context.Context, payload *ChatCompletionPayload) (string, error) {
 	var stopSpinner func()
 	var spinnerPos int
-	addedAssistantMessage := false
 
 	prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload) // Pass ctx
-	defer prefillCleanup() // Ensure cleanup happens
+	defer prefillCleanup()                                               // Ensure cleanup happens
 
-	if s.nextCompletionPrefill != "" {
-		// Don't add to payload here, add the final combined message later
-		addedAssistantMessage = true // Mark prefill was used
-	}
+	// Don't add prefill to payload here, add the final combined message later
 
 	if s.opts.ShowSpinner {
 		stopSpinner = spin(spinnerPos, s.opts.Stderr) // Pass Stderr
 		defer stopSpinner()                           // Ensure spinner stops
 	}
+
+	s.logger.Debugf("Performing non-streaming completion with %d existing messages", len(payload.Messages))
 
 	// Use the passed context directly
 	response, err := s.model.GenerateContent(ctx, payload.Messages, // Use ctx directly
@@ -463,63 +485,84 @@ func (s *Service) PerformCompletion(ctx context.Context, payload *ChatCompletion
 		llms.WithTemperature(s.cfg.Temperature))
 
 	// Handle context cancellation error cleanly
-	if errors.Is(err, context.Canceled) {
-		return "", err // Propagate cancellation
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		s.logger.Debugf("Non-streaming completion cancelled or timed out: %v", err)
+		// Reset prefill even on cancellation
+		s.nextCompletionPrefill = ""
+		return "", err // Propagate cancellation/timeout
 	}
 	if err != nil {
+		s.logger.Errorf("Failed to generate non-streaming content: %v", err)
+		// Reset prefill even on error
+		s.nextCompletionPrefill = ""
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}
 
 	if len(response.Choices) == 0 {
-		// Consider logging this or returning a more specific error
+		s.logger.Warn("Received response with no choices from model")
+		// Reset prefill
+		s.nextCompletionPrefill = ""
 		return "", fmt.Errorf("no response choices from model")
 	}
 
 	content := response.Choices[0].Content
+	s.logger.Debugf("Received non-streaming response content (length %d)", len(content))
 	fullContent := s.nextCompletionPrefill + content // Combine prefill and response
 
 	// Add the full message to the payload
 	if fullContent != "" {
 		payload.addAssistantMessage(fullContent)
+		s.logger.Debugf("Added assistant message (length %d) to payload", len(fullContent))
+	} else {
+		s.logger.Debug("No content (prefill+response) to add to payload")
 	}
 
-
-	s.nextCompletionPrefill = "" // Reset prefill after completion
+	s.nextCompletionPrefill = "" // Reset prefill after successful completion
 
 	return content, nil // Return only the newly generated part
 }
 
-// handleAssistantPrefill - pass context
+// handleAssistantPrefill manages echoing prefill and preparing spinner position.
+// It no longer modifies the payload directly.
 func (s *Service) handleAssistantPrefill(ctx context.Context, payload *ChatCompletionPayload) (func(), int) {
 	spinnerPos := 0
+	cleanupFunc := func() {} // Default no-op cleanup
+
 	if s.nextCompletionPrefill == "" {
-		return func() {}, spinnerPos
+		return cleanupFunc, spinnerPos
 	}
 
-	// Store the current message count to ensure proper cleanup
-	// initialMessageCount := len(payload.Messages) // No longer needed here
+	s.logger.Debugf("Handling assistant prefill: '%s'", s.nextCompletionPrefill)
 
 	if s.opts.EchoPrefill {
-		// Write needs context check? Unlikely to block significantly.
-		_, _ = s.opts.Stdout.Write([]byte(s.nextCompletionPrefill)) // Ignore write error for echo
-		spinnerPos = len(s.nextCompletionPrefill)                    // Position after prefill
+		// Write needs context check? Unlikely to block significantly, but good practice.
+		select {
+		case <-ctx.Done():
+			s.logger.Debug("Context cancelled before echoing prefill")
+			// Don't echo if cancelled
+		default:
+			// Use Fprint for potentially simpler handling than Write with byte slice
+			_, err := fmt.Fprint(s.opts.Stdout, s.nextCompletionPrefill)
+			if err != nil {
+				s.logger.Warnf("Error echoing prefill to stdout: %v", err)
+			}
+			spinnerPos = len(s.nextCompletionPrefill) // Position after prefill
+		}
 	}
 
-	// Don't add assistant message here anymore, handled in Perform*
-
-	// Cleanup function is now a no-op as payload management is centralized
-	return func() {}, spinnerPos
+	// Cleanup function remains a no-op as payload management is centralized
+	return cleanupFunc, spinnerPos
 }
 
-
 // GetInputReader - pass context
-func GetInputReader(ctx context.Context, files []string, strings []string, args []string, stdin io.Reader) (io.Reader, error) {
+func GetInputReader(ctx context.Context, files []string, stringsToRead []string, args []string, stdin io.Reader) (io.Reader, error) {
 	handler := &InputHandler{
 		Files:   files,
-		Strings: strings,
+		Strings: stringsToRead, // Renamed to avoid conflict with strings package
 		Args:    args,
 		Stdin:   stdin,
 	}
+	// Pass context to Process (though current Process doesn't use it extensively yet)
 	return handler.Process(ctx)
 }
 
@@ -527,6 +570,7 @@ func (s *Service) setupSystemPrompt() error {
 	// Allow setup even with history, if system prompt is explicitly provided
 	// and not already present, or differs.
 	if s.cfg == nil || s.cfg.SystemPrompt == "" {
+		s.logger.Debug("No system prompt configured or config is nil.")
 		return nil // No system prompt configured
 	}
 
@@ -545,100 +589,219 @@ func (s *Service) setupSystemPrompt() error {
 			}
 		}
 		if existingPrompt != s.cfg.SystemPrompt {
-			s.logger.Debugf("Updating system prompt from '%s' to '%s'", existingPrompt, s.cfg.SystemPrompt)
+			s.logger.Infof("Updating system prompt from '%s' to '%s'", existingPrompt, s.cfg.SystemPrompt)
 			s.payload.Messages[sysIdx] = sysMsg // Update existing
+		} else {
+			s.logger.Debug("Existing system prompt matches config, no update needed.")
 		}
 	} else {
 		// Add system prompt at the beginning if it doesn't exist
-		s.logger.Debugf("Adding system prompt: '%s'", s.cfg.SystemPrompt)
+		s.logger.Infof("Prepending system prompt: '%s'", s.cfg.SystemPrompt)
 		s.payload.Messages = append([]llms.MessageContent{sysMsg}, s.payload.Messages...)
 	}
 
 	return nil
 }
 
-
 // handleInput - pass context, check context during ReadAll
 func (s *Service) handleInput(ctx context.Context, runCfg RunOptions) error {
-	r, err := GetInputReader(ctx, runCfg.InputFiles, runCfg.InputStrings, runCfg.PositionalArgs, runCfg.Stdin)
-	if err != nil {
-		return fmt.Errorf("failed to get inputs: %w", err)
+	// First, handle files and strings using GetInputReader
+	inputFiles := runCfg.InputFiles
+	inputStrings := runCfg.InputStrings
+	posArgs := runCfg.PositionalArgs
+
+	s.logger.Debugf("Handling input: files=%v, strings=%v, args=%v, stdin_present=%t",
+		inputFiles, inputStrings, posArgs, runCfg.Stdin != nil)
+
+	// Process file and string inputs first
+	// Check if stdin seems available (not foolproof)
+	stdinIsPipeOrFile := isStdinAvailable(runCfg.Stdin)
+	s.logger.Debugf("Stdin available (detected as pipe/file): %t", stdinIsPipeOrFile)
+
+	if len(inputFiles) > 0 || len(inputStrings) > 0 || stdinIsPipeOrFile {
+		s.logger.Debug("Processing input from files, strings, or stdin pipe/file")
+		r, err := GetInputReader(ctx, inputFiles, inputStrings, nil, runCfg.Stdin) // Pass stdin here
+		if err != nil {
+			return fmt.Errorf("failed to get combined input reader: %w", err)
+		}
+
+		// If the reader is an io.Closer (like the multiCloser from GetInputReader), defer its closing.
+		if closer, ok := r.(io.Closer); ok {
+			defer func() {
+				if closeErr := closer.Close(); closeErr != nil {
+					s.logger.Warnf("Error closing input reader: %v", closeErr)
+				}
+			}()
+		}
+
+		// Read all data, respecting context cancellation
+		var inputBytes []byte
+		readDone := make(chan struct{})
+		var readErr error
+
+		go func() {
+			defer close(readDone)
+			inputBytes, readErr = io.ReadAll(r) // Read from the combined reader
+		}()
+
+		select {
+		case <-ctx.Done():
+			s.logger.Info("Input reading cancelled by context")
+			return ctx.Err() // Return context error
+		case <-readDone:
+			if readErr != nil {
+				// Check if the error is simply EOF, which is expected and not an error
+				if errors.Is(readErr, io.EOF) {
+					s.logger.Debug("EOF reached while reading input.")
+				} else {
+					return fmt.Errorf("failed to read combined inputs: %w", readErr)
+				}
+			}
+		}
+
+		// Process the input if we have any
+		if len(inputBytes) > 0 {
+			inputText := string(inputBytes)
+			// Avoid logging potentially huge inputs fully at info level
+			s.logger.Debugf("Read %d bytes from files/strings/stdin", len(inputBytes))
+			if len(inputText) < 500 { // Log shorter inputs fully at debug
+				s.logger.Debugf("Input text: '%s'", inputText)
+			}
+			s.payload.addUserMessage(inputText)
+		} else {
+			s.logger.Debug("No input bytes read from files/strings/stdin.")
+		}
+	} else {
+		s.logger.Debug("Skipping read from files/strings/stdin (none provided or stdin is terminal).")
 	}
 
-	// If the reader is an *os.File, we might need to manage closing it.
-	// However, MultiReader makes this complex. Assume ReadAll is sufficient for now.
-	if closer, ok := r.(io.Closer); ok {
-		defer closer.Close() // Close if the reader itself is closable (e.g., single file)
+	// Process positional arguments separately - each one becomes a separate message
+	if len(posArgs) > 0 {
+		s.logger.Debugf("Processing %d positional arguments", len(posArgs))
+		for _, arg := range posArgs {
+			trimmedArg := strings.TrimSpace(arg)
+			if len(trimmedArg) > 0 {
+				s.logger.Debugf("Adding positional arg as message: '%s'", trimmedArg)
+				s.payload.addUserMessage(trimmedArg)
+			} else {
+				s.logger.Debug("Skipping empty positional argument.")
+			}
+		}
+	} else {
+		s.logger.Debug("No positional arguments to process.")
 	}
 
-
-	// ReadAll doesn't directly support context, but we check ctx.Err() afterwards
-	inputBytes, err := io.ReadAll(r)
-	if ctx.Err() != nil {
-		return ctx.Err() // Prioritize context cancellation
-	}
-	if err != nil {
-		return fmt.Errorf("failed to read inputs: %w", err)
-	}
-
-	if len(inputBytes) != 0 {
-		s.payload.addUserMessage(string(inputBytes))
+	// Log final state if useful
+	if s.logger.Desugar().Core().Enabled(zapcore.DebugLevel) { // Check if debug is enabled efficiently
+		s.logger.Debugf("Payload messages after input handling: %d", len(s.payload.Messages))
+		// Optionally log message roles/types if needed for debugging
+		// for i, msg := range s.payload.Messages {
+		// 	s.logger.Debugf("  Msg %d: Role=%s", i, msg.Role)
+		// }
 	}
 
 	return nil
 }
 
+// isStdinAvailable checks if stdin *might* have data (pipe or file redirection).
+// It returns false if stdin is likely the interactive terminal.
+func isStdinAvailable(stdin io.Reader) bool {
+	if stdin == nil {
+		return false
+	}
+	// Check if it's the actual os.Stdin file descriptor
+	if f, ok := stdin.(*os.File); ok && f == os.Stdin {
+		stat, err := f.Stat()
+		if err != nil {
+			// Cannot stat stdin, assume not available for non-interactive use
+			return false
+		}
+		// If stdin is a character device (terminal), it's not "available" for non-interactive reading.
+		// If it's anything else (pipe, file), it is available.
+		return (stat.Mode() & os.ModeCharDevice) == 0
+	}
+	// If it's not os.Stdin but some other reader, assume it's intended for reading.
+	// This could be a bytes.Buffer in tests, etc.
+	return true
+}
+
 func (s *Service) loadedWithHistory() bool {
-	return s.historyIn != nil
+	// Consider history loaded if HistoryIn was specified *and* successfully read.
+	// Check if payload has more than just potentially a system prompt.
+	if len(s.payload.Messages) == 0 {
+		return false
+	}
+	if len(s.payload.Messages) == 1 && s.payload.Messages[0].Role == llms.ChatMessageTypeSystem {
+		return false // Only system prompt doesn't count as loaded history
+	}
+	return true // Assume history was loaded if there are non-system messages initially
 }
 
 func (s *Service) handleHistory(historyIn, historyOut string) error {
-	s.historyOutFile = historyOut
+	// Expand historyOut first to potentially create the default file early
+	expandedOutPath, expandOutErr := expandTilde(historyOut)
+	if expandOutErr != nil {
+		s.logger.Warnf("Could not expand history output path '%s': %v", historyOut, expandOutErr)
+		expandedOutPath = historyOut // Use original path as fallback
+	}
+	s.historyOutFile = expandedOutPath // Store potentially expanded path
+
+	// Attempt to load history if historyIn is provided
 	if historyIn != "" {
+		s.logger.Infof("Attempting to load history from: %s", historyIn)
 		expandedPath, err := expandTilde(historyIn)
 		if err != nil {
-			fmt.Fprintf(s.opts.Stderr,"Warning: could not expand history input path '%s': %v\n", historyIn, err)
-			expandedPath = historyIn // Use original path as fallback
+			// Log warning, but proceed with original path
+			s.logger.Warnf("Could not expand history input path '%s', using original: %v", historyIn, err)
+			expandedPath = historyIn
 		}
 
 		f, err := os.Open(expandedPath)
 		if err != nil {
 			// Don't return error if file not found, just log warning
 			if os.IsNotExist(err) {
-				fmt.Fprintf(s.opts.Stderr,"Warning: history input file not found: %s\n", expandedPath)
-				return nil // Not an error if history file doesn't exist
+				s.logger.Warnf("History input file not found: %s", expandedPath)
+				// File not found is not an error preventing startup
+			} else {
+				// Other errors opening the file are more problematic
+				return fmt.Errorf("issue opening input history file %s: %w", expandedPath, err)
 			}
-			return fmt.Errorf("issue opening input history file %s: %w", expandedPath, err)
-		}
-		s.historyIn = f // Assign the io.ReadCloser
-		// Defer closing until the Service.Run method finishes
+		} else {
+			// File opened successfully
+			s.historyIn = f            // Assign the io.ReadCloser
+			loadErr := s.loadHistory() // Load history immediately
 
-		// Load history immediately after opening
-		loadErr := s.loadHistory()
-		// Close the file reader *after* attempting to load
-		// We can close here because loadHistory reads all content now
-		if closeErr := f.Close(); closeErr != nil {
-			fmt.Fprintf(s.opts.Stderr, "Warning: failed to close history input file %s: %v\n", expandedPath, closeErr)
-		}
-		s.historyIn = nil // Set reader to nil after closing
+			// Close the file reader *after* attempting to load
+			if closeErr := s.historyIn.Close(); closeErr != nil {
+				s.logger.Warnf("Failed to close history input file %s: %v", expandedPath, closeErr)
+			}
+			s.historyIn = nil // Set reader to nil after closing
 
-
-		if loadErr != nil {
-			// Log warning, but don't return error for load failure
-			fmt.Fprintf(s.opts.Stderr, "Warning: failed to load history from %s: %v\n", historyIn, loadErr)
+			if loadErr != nil {
+				// Log warning, but don't return error for load failure, allow proceeding without history
+				s.logger.Warnf("Failed to load history from %s: %v", expandedPath, loadErr)
+			} else {
+				s.logger.Infof("Successfully loaded history from %s", expandedPath)
+			}
 		}
+	} else {
+		s.logger.Debug("No history input file specified.")
 	}
 
 	// Initial save might create the file if historyOut is set but file doesn't exist
-	if s.historyOutFile != "" && len(s.payload.Messages) == 0 { // Save empty history if needed
-		expandedOutPath, _ := expandTilde(s.historyOutFile) // Ignore error for stat check
-		if _, err := os.Stat(expandedOutPath); os.IsNotExist(err) {
+	// This helps ensure the directory exists and the file can be written to later.
+	// Only do this if we *didn't* load any history (to avoid overwriting just-loaded history
+	// with potentially only a system prompt).
+	if s.historyOutFile != "" && !s.loadedWithHistory() {
+		if _, statErr := os.Stat(s.historyOutFile); os.IsNotExist(statErr) {
+			s.logger.Infof("History output file %s does not exist, attempting initial save.", s.historyOutFile)
 			if err := s.saveHistory(); err != nil {
-				fmt.Fprintf(s.opts.Stderr, "Warning: failed to create initial history file %s: %v\n", s.historyOutFile, err)
+				// Log failure to create initial history, but don't prevent startup
+				s.logger.Warnf("Failed to create initial history file %s: %v", s.historyOutFile, err)
 			}
 		}
 	}
-	return nil
+	return nil // Return nil even if loading had warnings
 }
 
 func (s *Service) getLastUserMessage() string {
@@ -651,520 +814,687 @@ func (s *Service) getLastUserMessage() string {
 					parts = append(parts, textPart.Text)
 				}
 			}
-			return strings.Join(parts, "\n")
+			return strings.Join(parts, "\n") // Join parts if multi-part exists
 		}
 	}
+	s.logger.Debug("No previous user message found in history.")
 	return "" // No user message found
 }
 
-
 // runOneShotCompletionStreaming - pass context
 func (s *Service) runOneShotCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
-	s.logger.Debug("running one-shot completion with streaming")
+	s.logger.Debug("Running one-shot completion with streaming")
 	s.payload.Stream = true
+
+	// Use the context directly - no local signal handling
+	// Pass the context to the streaming function
 	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload)
 	if err != nil {
-		// Handle context cancellation from PerformCompletionStreaming
+		// Handle context cancellation from PerformCompletionStreaming setup (unlikely)
 		if errors.Is(err, context.Canceled) {
+			s.logger.Debug("Stream setup cancelled by context.")
 			return err
 		}
-		return fmt.Errorf("failed to perform completion streaming: %w", err)
+		// Other setup errors
+		return fmt.Errorf("failed to initiate completion streaming: %w", err)
 	}
-	content := strings.Builder{}
+
+	// Reading from the stream
 	for r := range streamPayloads {
-		// Check context *inside* the loop in case PerformCompletionStreaming doesn't error out immediately
-		if ctx.Err() != nil {
-			// Drain the rest of the channel? Or just break? Break is simpler.
-			break
-		}
-		// content.WriteString(r) // No need to buffer here
-		// Check context before potentially blocking write? Unlikely.
-		_, writeErr := runCfg.Stdout.Write([]byte(r))
-		if writeErr != nil {
-			s.logger.Warnf("Error writing to stdout: %v", writeErr)
-			// Potentially break or return error depending on severity
+		// Check context *inside* the loop
+		select {
+		case <-ctx.Done():
+			s.logger.Info("Streaming interrupted by context cancellation.")
+			_, _ = runCfg.Stdout.Write([]byte("\n")) // Ensure newline on interrupt
+			// History is saved implicitly by PerformCompletionStreaming goroutine adding partial message
+			return ctx.Err() // Return context error
+		default:
+			// Write the chunk to output
+			_, writeErr := runCfg.Stdout.Write([]byte(r))
+			if writeErr != nil {
+				// Don't stop streaming for a write error, just log it
+				s.logger.Warnf("Error writing stream chunk to stdout: %v", writeErr)
+			}
 		}
 	}
 
-	// Check context error after loop finishes or breaks
+	// Check context error after loop finishes (channel closed by PerformCompletionStreaming)
+	// This handles cases where GenerateContent itself returned a context error.
 	if ctx.Err() != nil {
-		// Don't save history if cancelled during streaming? Or save partial?
-		// Current logic saves *after* loop, so partial won't be saved here.
+		s.logger.Debug("Streaming finished due to context cancellation during generation.")
+		_, _ = runCfg.Stdout.Write([]byte("\n")) // Ensure newline
 		return ctx.Err()
 	}
+
+	s.logger.Debug("One-shot streaming finished normally.")
+	_, _ = runCfg.Stdout.Write([]byte("\n")) // Ensure newline after successful stream
+
+	// History saving is now handled in Run() for one-shot modes
+
 	return nil
 }
 
-// Non-streaming version of one-shot completion.
+// runOneShotCompletion - pass context
 func (s *Service) runOneShotCompletion(ctx context.Context, runCfg RunOptions) error {
-	s.logger.Debug("running one-shot completion")
-
+	s.logger.Debug("Running one-shot completion without streaming")
 	s.payload.Stream = false
+
+	// Use the context directly - no local signal handling
+	// Pass the context to the completion function
 	response, err := s.PerformCompletion(ctx, s.payload)
 	if err != nil {
-		return err
+		// Check for cancellation/timeout handled within PerformCompletion
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			s.logger.Info("One-shot completion cancelled or timed out.")
+			return err // Return the context error
+		}
+		// Other errors
+		return fmt.Errorf("failed to perform completion: %w", err)
 	}
+
+	// Check if we've been cancelled *after* completion but *before* writing response
+	// (less likely but possible)
+	if ctx.Err() != nil {
+		s.logger.Info("Context cancelled after completion but before writing response.")
+		return ctx.Err()
+	}
+
 	_, writeErr := runCfg.Stdout.Write([]byte(response))
 	if writeErr != nil {
-		s.logger.Warnf("Error writing to stdout: %v", writeErr)
-		// Maybe return this error?
+		// Log warning but don't fail the operation for write error
+		s.logger.Warnf("Error writing response to stdout: %v", writeErr)
 	}
 	_, _ = runCfg.Stdout.Write([]byte("\n")) // Ensure newline after non-streaming response
 
+	s.logger.Debug("One-shot completion finished normally.")
+	// History saving is now handled in Run() for one-shot modes
 
-	// Save history *after* successful completion
-	// Payload was updated by PerformCompletion
-	// if err := s.saveHistory(); err != nil { // Moved to Run()
-	//	return fmt.Errorf("failed to save history: %w", err)
-	// }
 	return nil
 }
 
 // runContinuousCompletionStreaming - simplify context handling
 func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
-	fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Running in continuous mode. Press ctrl+c to exit.\033[0m\n")
+	// Use grey color for status messages via Fprintf
+	s.logger.Info("Running in continuous mode (streaming). Press ctrl+c to exit.")
 
-	// No need for ctxWithCancel, just use ctx directly
-	// The interactive session's Run method should respect the passed ctx.
-
-	// Generate initial response if needed
+	// Generate initial response if needed (e.g., if input was provided via flags/files)
+	// Check if the last message is from the user, indicating we need an initial response.
 	if len(s.payload.Messages) > 0 && s.payload.Messages[len(s.payload.Messages)-1].Role == llms.ChatMessageTypeHuman {
-		// Pass ctx
+		s.logger.Info("Generating initial response for continuous mode...")
+		// Pass ctx for the initial generation
 		if err := s.generateResponse(ctx, runCfg); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return err
-			} // Exit cleanly on cancel
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				s.logger.Info("Initial response generation cancelled or timed out.")
+				return err // Exit cleanly on cancel/timeout
+			}
 			// Log error but continue to interactive loop if possible
-			fmt.Fprintf(s.opts.Stderr, "\nError generating initial response: %v\n", err)
-			// return fmt.Errorf("failed to generate initial response: %w", err) // Optionally exit
+			s.logger.Errorf("Failed to generate initial response: %v", err)
+			// Error already logged
+			// Decide whether to proceed to interactive loop or exit
+			// return fmt.Errorf("failed to generate initial response: %w", err) // Option to exit
 		}
 	}
 
-
-	processFn := func(ctx context.Context, input string) error {
+	processFn := func(loopCtx context.Context, input string) error {
+		// loopCtx is the context provided by the interactive session for this specific input loop
+		s.logger.Debugf("Processing user input: '%s'", input)
 		input = strings.TrimSpace(input)
 		if input == "" {
-			return interactive.ErrEmptyInput
+			s.logger.Debug("Empty input received, prompting again.")
+			return interactive.ErrEmptyInput // Signal session to reprompt
 		}
 
-		// Special command handling (remains the same)
+		// Special command handling
 		if input == "/last" {
-			// Get the last user message, if available
 			if lastMsg := s.getLastUserMessage(); lastMsg != "" {
+				s.logger.Debug("User requested /last, providing previous message.")
 				return interactive.ErrUseLastMessage(lastMsg)
 			}
-			fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mNo previous message to edit.\033[0m\n")
-			return interactive.ErrEmptyInput
+			s.logger.Debug("User requested /last, but no previous message found.")
+			s.logger.Info("No previous message to edit.")
+			return interactive.ErrEmptyInput // Reprompt
 		}
 
+		// Add user message and generate response
 		s.payload.addUserMessage(input)
-		// Pass the context received by processFn (which originates from session.Run)
-		if err := s.generateResponse(ctx, runCfg); err != nil {
+		// Pass the loopCtx to generateResponse
+		if err := s.generateResponse(loopCtx, runCfg); err != nil {
 			// Don't return error on cancellation, let session handle it
-			if errors.Is(err, context.Canceled) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				s.logger.Info("Response generation cancelled or timed out during interactive loop.")
+				// Let session handle exit, return nil here to allow potential cleanup in session
 				return nil
 			}
-			// Log or display the error appropriately
-			fmt.Fprintf(s.opts.Stderr, "\nError generating response: %v\n", err)
-			// Decide whether to continue the loop or return the error
+			// Log other errors and inform user, but allow loop to continue
+			s.logger.Errorf("Failed to generate response during interactive loop: %v", err)
+			s.logger.Errorf("Error generating response: %v", err)
 			// Returning nil allows the loop to continue after an error.
-			return nil // Or return err to stop the loop
+			return nil
 		}
 
-		// Save history after successful generation moved to generateResponse
-		// if err := s.saveHistory(); err != nil {
-		// 	fmt.Fprintf(s.opts.Stderr, "\nWarning: issue saving history: %v\n", err)
-		// }
-		return nil
+		// History saving is now handled within generateResponse/Perform* methods
+		// No explicit save needed here.
+
+		return nil // Signal success for this input loop
 	}
 
 	// Configure the interactive session
+	historyFilePath, expandErr := expandTilde(runCfg.ReadlineHistoryFile)
+	if expandErr != nil {
+		s.logger.Warnf("Could not expand readline history path '%s': %v", runCfg.ReadlineHistoryFile, expandErr)
+		historyFilePath = runCfg.ReadlineHistoryFile // Use original path
+	} else {
+		s.logger.Debugf("Using expanded readline history path: %s", historyFilePath)
+	}
+
 	sessionConfig := interactive.Config{
 		Stdin:               runCfg.Stdin, // Pass Stdin from RunOptions
 		Prompt:              ">>> ",
 		AltPrompt:           "... ",
-		HistoryFile:         expandTilde(runCfg.ReadlineHistoryFile),
+		HistoryFile:         historyFilePath,
 		ProcessFn:           processFn,
-		// Add other necessary fields like CommandFn, AutoCompleteFn if needed
 		ConversationHistory: s.payload.MessagesToHistoryStrings(), // Provide current history
 	}
-
 	var session interactive.Session
-	var err error
+	var sessionErr error
 
 	// Select session type based on UseTUI
 	if runCfg.UseTUI {
-		session, err = interactive.NewBubbleSession(sessionConfig)
-		if err == nil {
-			fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Using Terminal UI mode (BubbleTea)\033[0m\n")
+		s.logger.Info("Attempting to initialize BubbleTea UI session.")
+		session, sessionErr = interactive.NewBubbleSession(sessionConfig)
+		if sessionErr == nil {
+			s.logger.Info("Using Terminal UI mode (BubbleTea)")
 		} else {
-			fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mWarning: Failed to initialize BubbleTea UI: %v. Falling back to readline.\033[0m\n", err)
-			// Fall through to readline
+			s.logger.Warnf("Failed to initialize BubbleTea UI: %v. Falling back to readline.", sessionErr)
+			s.logger.Warnf("Failed to initialize BubbleTea UI: %v. Falling back to readline.", sessionErr)
+			// Fall through to readline by leaving session == nil
 		}
+	} else {
+		s.logger.Info("Using classic readline interactive session.")
 	}
 
 	// Fallback or default to ReadlineSession
 	if session == nil { // If TUI wasn't requested or failed
-		session, err = interactive.NewSession(sessionConfig) // NewSession handles build tags
-		if err != nil {
-			return fmt.Errorf("failed to create interactive session: %w", err)
+		session, sessionErr = interactive.NewSession(sessionConfig) // NewSession handles build tags
+		if sessionErr != nil {
+			return fmt.Errorf("failed to create interactive session: %w", sessionErr)
 		}
 	}
 
+	s.activeSession = session // Store the active session
 
-	s.activeSession = session
-
-	// Pass the main ctx directly to session.Run
+	// Pass the main ctx (from Run) directly to session.Run
+	// The session itself will manage its internal context based on this parent context.
+	s.logger.Debug("Starting interactive session...")
 	runErr := s.activeSession.Run(ctx)
+	s.logger.Debug("Interactive session finished.")
 
-	// Check context error after Run returns
-	if ctx.Err() != nil {
-		// Context was canceled (likely by signal)
-		// Perform cleanup *after* Run returns (renameChatHistory moved to Run)
-		// renameCtx, cancelRename := context.WithTimeout(context.Background(), 10*time.Second)
-		// defer cancelRename()
-		// if renameErr := s.renameChatHistory(renameCtx); renameErr != nil {
-		//	fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Failed to rename history on exit: %v\033[0m\n", renameErr)
-		// }
+	// Check the reason for Run returning
+	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
+		// Context was canceled (likely by signal handled by main or session)
+		s.logger.Info("Interactive session exited due to context cancellation or deadline.")
+		// History renaming is handled in the main Run function's defer for continuous mode
 		return ctx.Err() // Return the cancellation error
 	}
 
 	// If Run returned an error other than context cancellation
-	if runErr != nil {
+	if runErr != nil && !errors.Is(runErr, interactive.ErrInterrupted) && !errors.Is(runErr, io.EOF) {
+		s.logger.Errorf("Interactive session exited with error: %v", runErr)
+		// History renaming is handled in the main Run function's defer
 		return runErr // Return the error from the session itself
 	}
 
-	// Normal exit without cancellation or session error
-	// Perform final rename attempt here as well for normal exit (renameChatHistory moved to Run)
-	// renameCtx, cancelRename := context.WithTimeout(context.Background(), 10*time.Second)
-	// defer cancelRename()
-	// if renameErr := s.renameChatHistory(renameCtx); renameErr != nil {
-	// 	fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Failed to rename history: %v\033[0m\n", renameErr)
-	// }
+	// Normal exit without cancellation or session error (or just ErrInterrupted)
+	s.logger.Info("Interactive session exited normally.")
+	// History renaming is handled in the main Run function's defer
 
 	return nil // Normal, clean exit
 }
 
 // runContinuousCompletion - simplify context handling (similar to streaming version)
 func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions) error {
-	fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Running in continuous mode. Press ctrl+c to exit.\033[0m\n")
+	// Use grey color for status messages via Fprintf
+	s.logger.Info("Running in continuous mode (non-streaming). Press ctrl+c to exit.")
 
-	// Use ctx directly
+	// Generate initial response if needed (similar to streaming version)
+	if len(s.payload.Messages) > 0 && s.payload.Messages[len(s.payload.Messages)-1].Role == llms.ChatMessageTypeHuman {
+		s.logger.Info("Generating initial response for continuous mode...")
+		// Generate non-streaming response
+		// Need to adapt generateResponse or call PerformCompletion directly
+		if response, err := s.PerformCompletion(ctx, s.payload); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				s.logger.Info("Initial response generation cancelled or timed out.")
+				return err // Exit cleanly
+			}
+			s.logger.Errorf("Failed to generate initial response: %v", err)
+			// Error already logged
+			// Optionally exit or continue to loop
+		} else {
+			// Print initial response
+			_, _ = runCfg.Stdout.Write([]byte(response))
+			_, _ = runCfg.Stdout.Write([]byte("\n"))
+			// Save history after initial response (handled by PerformCompletion updating payload, Run will save)
+		}
+	}
 
-	processFn := func(ctx context.Context, input string) error {
+	processFn := func(loopCtx context.Context, input string) error {
+		s.logger.Debugf("Processing user input: '%s'", input)
 		input = strings.TrimSpace(input)
 		if input == "" {
+			s.logger.Debug("Empty input received, prompting again.")
 			return interactive.ErrEmptyInput
 		}
-		s.payload.addUserMessage(input)
-		// Pass ctx
-		response, err := s.PerformCompletion(ctx, s.payload)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nil // Let session handle cancellation
+
+		// Special command handling (same as streaming)
+		if input == "/last" {
+			// ... (same as streaming version)
+			if lastMsg := s.getLastUserMessage(); lastMsg != "" {
+				return interactive.ErrUseLastMessage(lastMsg)
 			}
-			fmt.Fprintf(s.opts.Stderr, "\nError generating response: %v\n", err)
+			s.logger.Info("No previous message to edit.")
+			return interactive.ErrEmptyInput
+		}
+
+		s.payload.addUserMessage(input)
+		// Pass loopCtx to PerformCompletion
+		response, err := s.PerformCompletion(loopCtx, s.payload)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				s.logger.Info("Response generation cancelled or timed out during interactive loop.")
+				return nil // Let session handle exit
+			}
+			s.logger.Errorf("Failed to generate response during interactive loop: %v", err)
+			s.logger.Errorf("Error generating response: %v", err)
 			return nil // Allow loop to continue
 		}
-		_, _ = runCfg.Stdout.Write([]byte(response)) // Ignore write error
-		_, _ = runCfg.Stdout.Write([]byte("\n"))    // Add newline
 
-		// History saving moved to generateResponse/PerformCompletion
-		// if err := s.saveHistory(); err != nil {
-		//	fmt.Fprintf(s.opts.Stderr, "\nWarning: issue saving history: %v\n", err)
-		// }
-		return nil
+		// Write response
+		_, _ = runCfg.Stdout.Write([]byte(response)) // Ignore write error
+		_, _ = runCfg.Stdout.Write([]byte("\n"))     // Add newline
+
+		// History is updated by PerformCompletion. Final save by Run defer.
+
+		return nil // Success for this input loop
+	}
+
+	// Configure and run interactive session (same as streaming version)
+	historyFilePath, expandErr := expandTilde(runCfg.ReadlineHistoryFile)
+	if expandErr != nil {
+		s.logger.Warnf("Could not expand readline history path: %v", expandErr)
+		historyFilePath = runCfg.ReadlineHistoryFile
+	} else {
+		s.logger.Debugf("Using expanded readline history path: %s", historyFilePath)
 	}
 
 	sessionConfig := interactive.Config{
 		Stdin:               runCfg.Stdin,
 		Prompt:              ">>> ",
 		AltPrompt:           "... ",
-		HistoryFile:         expandTilde(runCfg.ReadlineHistoryFile),
+		HistoryFile:         historyFilePath,
 		ProcessFn:           processFn,
-		ConversationHistory: s.payload.MessagesToHistoryStrings(), // Provide current history
-		// Add other fields as needed
+		ConversationHistory: s.payload.MessagesToHistoryStrings(),
 	}
 
-	var session interactive.Session
-	var err error
-
-	// Use NewSession which respects build tags
-	session, err = interactive.NewSession(sessionConfig)
+	session, err := interactive.NewSession(sessionConfig)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create interactive session: %w", err)
 	}
 
 	s.activeSession = session
 
-	// Pass ctx directly
-	runErr := session.Run(ctx)
+	// Pass the main ctx directly to session.Run
+	s.logger.Debug("Starting interactive session...")
+	runErr := s.activeSession.Run(ctx)
+	s.logger.Debug("Interactive session finished.")
 
-	// Handle exit reasons (similar to streaming version, renameChatHistory moved to Run)
-	if ctx.Err() != nil {
+	// Handle exit reasons (same as streaming version)
+	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
+		s.logger.Info("Interactive session exited due to context cancellation or deadline.")
+		// History rename/save handled in Run defer
 		return ctx.Err()
 	}
-	if runErr != nil {
+	if runErr != nil && !errors.Is(runErr, interactive.ErrInterrupted) {
+		s.logger.Errorf("Interactive session exited with error: %v", runErr)
+		// History rename/save handled in Run defer
 		return runErr
 	}
 
-	// Normal exit cleanup (renameChatHistory moved to Run)
+	s.logger.Info("Interactive session exited normally.")
+	// History rename/save handled in Run defer
 
-	return nil
+	return nil // Normal, clean exit
 }
 
 func expandTilde(path string) (string, error) {
-	if path == "" || path[0] != '~' {
+	if path == "" {
+		return "", nil
+	}
+	if path[0] != '~' {
 		return path, nil
 	}
-	if len(path) > 1 && path[1] != '/' && path[1] != '\\' {
-		// Handle ~user syntax if needed, otherwise return original
-		return path, nil // Or return an error for unsupported syntax
+	// Handle "~" or "~/"
+	if len(path) == 1 || (len(path) > 1 && path[1] == filepath.Separator) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to get user home dir: %w", err)
+		}
+		if len(path) == 1 { // Just "~"
+			return home, nil
+		}
+		// Replace "~/"
+		return filepath.Join(home, path[2:]), nil
 	}
-
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get home dir: %w", err)
-	}
-
-	if len(path) == 1 { // Just "~"
-		return home, nil
-	}
-	// Replace "~/" or "~\"
-	return filepath.Join(home, path[2:]), nil
+	// Handle other cases like ~user (unsupported for now) or invalid paths
+	// For simplicity, return original path if format is not recognized/supported
+	return path, nil
 }
 
-
-// generateResponse - pass context, check context errors, save history on success
+// generateResponse handles calling the appropriate Perform* method and outputting results.
+// It now relies on Perform* methods to update the payload.
+// History saving is handled by the caller (Run) or Perform* internals.
 func (s *Service) generateResponse(ctx context.Context, runCfg RunOptions) error {
-	s.payload.Stream = runCfg.StreamOutput
+	s.payload.Stream = runCfg.StreamOutput // Ensure payload reflects current mode
 
+	var err error
 	if runCfg.StreamOutput {
-		// Pass ctx
-		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload)
-		if err != nil {
-			return err // Propagates cancellation etc.
+		s.logger.Debug("Generating streaming response...")
+		streamPayloads, streamErr := s.PerformCompletionStreaming(ctx, s.payload)
+		if streamErr != nil {
+			// Handle context cancellation from setup (unlikely)
+			if errors.Is(streamErr, context.Canceled) {
+				return streamErr
+			}
+			return fmt.Errorf("failed to initiate streaming: %w", streamErr)
 		}
 
-		// content := strings.Builder{} // Removed, payload is updated in Perform*
 		wasInterrupted := false
-
 		for r := range streamPayloads {
-			if ctx.Err() != nil { // Check context inside loop
+			select {
+			case <-ctx.Done(): // Check context inside loop
 				wasInterrupted = true
+				break // Exit the loop
+			default:
+				// If using TUI, update TUI instead of direct write
+				if s.activeSession != nil && runCfg.UseTUI {
+					s.activeSession.AddResponsePart(r)
+				} else {
+					// Write directly to stdout if not using TUI or no active session
+					_, writeErr := runCfg.Stdout.Write([]byte(r))
+					if writeErr != nil {
+						s.logger.Warnf("Error writing stream chunk to stdout: %v", writeErr)
+						// Optionally break or continue on write error
+					}
+				}
+			}
+			if wasInterrupted {
 				break
 			}
-			// content.WriteString(r) // Removed
-			if s.activeSession != nil {
-				s.activeSession.AddResponsePart(r)
-			}
-			// Check context before write?
-			_, _ = runCfg.Stdout.Write([]byte(r)) // Ignore write error
+		} // End range streamPayloads
+
+		// Final newline and status message
+		if !runCfg.UseTUI { // Don't add extra newline if TUI is managing output
+			_, _ = runCfg.Stdout.Write([]byte("\n")) // Ensure newline
 		}
 
-		// Handle interruption or normal completion
 		if wasInterrupted || ctx.Err() != nil {
-			_, _ = runCfg.Stdout.Write([]byte("\n")) // Ensure newline on interrupt
-			fmt.Fprintf(runCfg.Stderr, "\033[38;5;240mResponse interrupted.\033[0m\n")
-
-			// History is saved implicitly by PerformCompletionStreaming adding partial message
-			// if err := s.saveHistory(); err != nil { // Removed explicit save here
-			// 	fmt.Fprintf(runCfg.Stderr, "\033[38;5;240mWarning: Failed to save partial response: %v\033[0m\n", err)
-			// }
-
-			return ctx.Err() // Return context error
+			s.logger.Info("Response generation interrupted by context.")
+			if !runCfg.UseTUI { // TUI might handle its own interrupt message
+				s.logger.Info("Response interrupted.")
+			}
+			// Payload was updated with partial response by PerformCompletionStreaming
+			err = ctx.Err() // Return context error
+		} else {
+			s.logger.Debug("Streaming response generation finished normally.")
+			// Payload was updated with full response by PerformCompletionStreaming
 		}
-
-		// Normal completion
-		_, _ = runCfg.Stdout.Write([]byte("\n"))
-		// History already saved by PerformCompletionStreaming goroutine
 
 	} else { // Non-streaming
-		// Pass ctx
-		response, err := s.PerformCompletion(ctx, s.payload)
-		if err != nil {
-			return err // Propagates cancellation etc.
+		s.logger.Debug("Generating non-streaming response...")
+		response, performErr := s.PerformCompletion(ctx, s.payload)
+		if performErr != nil {
+			err = performErr // Assign error to return
+			// Error/cancellation logged within PerformCompletion
+		} else {
+			// If using TUI, add the whole response at once
+			if s.activeSession != nil && runCfg.UseTUI {
+				s.activeSession.AddResponsePart(response + "\n") // Add newline for TUI
+			} else {
+				// Write directly if not TUI
+				_, writeErr := runCfg.Stdout.Write([]byte(response))
+				if writeErr != nil {
+					s.logger.Warnf("Error writing non-streaming response to stdout: %v", writeErr)
+				}
+				_, _ = runCfg.Stdout.Write([]byte("\n")) // Add newline
+			}
+			s.logger.Debug("Non-streaming response generation finished normally.")
+			// Payload was updated by PerformCompletion
 		}
-		_, _ = runCfg.Stdout.Write([]byte(response))
-		_, _ = runCfg.Stdout.Write([]byte("\n")) // Add newline
-
-		// History already saved by PerformCompletion
 	}
 
-	// History saving is now handled within Perform* methods
+	// History saving is now handled outside this function (in Run or by Perform*)
+	// If we are in continuous mode, we might want to save history after each successful generation here?
+	// Let's stick to saving in Run for one-shot, and rely on Perform* updating payload for continuous.
+	// Final save/rename for continuous happens after the loop exits in Run.
 
-	return nil
+	return err // Return any error encountered during generation/streaming
 }
 
 // SetNextCompletionPrefill sets the next completion prefill message.
 // Note that not all inference engines support prefill messages.
 // Whitespace is trimmed from the end of the message.
 func (s *Service) SetNextCompletionPrefill(content string) {
-	s.nextCompletionPrefill = strings.TrimRight(content, " \t\n")
+	trimmedContent := strings.TrimRight(content, " \t\n")
+	s.logger.Debugf("Setting next completion prefill to: '%s'", trimmedContent)
+	s.nextCompletionPrefill = trimmedContent
 }
 
 // generateHistoryTitle sends the conversation history to the LLM to generate a descriptive title
 func (s *Service) generateHistoryTitle(ctx context.Context) (string, error) {
-	// Don't try to generate a title if we have no messages or context is done
-	if len(s.payload.Messages) < 2 || ctx.Err() != nil {
-		return "empty-chat", ctx.Err()
+	defaultTitle := fmt.Sprintf("chat-%s", s.sessionTimestamp)
+
+	// Don't try to generate a title if we have insufficient messages or context is done
+	// Require at least one user and one AI message ideally. Let's say >= 2 messages total.
+	if len(s.payload.Messages) < 2 {
+		s.logger.Debug("Insufficient messages for title generation, using default.")
+		return defaultTitle, nil
+	}
+	if ctx.Err() != nil {
+		s.logger.Warn("Context cancelled before title generation, using default.")
+		return defaultTitle, ctx.Err()
 	}
 
 	// Construct prompt carefully, limiting message content
 	var promptBuilder strings.Builder
-	promptBuilder.WriteString("Generate a short, filesystem-safe, kebab-case title (max 5 words, e.g., debug-rust-code, explain-quantum-mechanics) for the following conversation:\n\n")
+	promptBuilder.WriteString("Generate a short, filesystem-safe, kebab-case title (max 5 words, e.g., debug-rust-code, explain-quantum-mechanics) for the following conversation. Output ONLY the title string.\n\nCONVERSATION:\n")
 
-	msgLimit := min(len(s.payload.Messages), 6) // Limit messages considered for title
-	charLimit := 500                           // Limit total characters in prompt
+	msgLimit := min(len(s.payload.Messages), 8) // Limit messages considered for title (increased slightly)
+	charLimit := 800                            // Limit total characters in prompt (increased slightly)
 	currentChars := 0
+	addedMessages := 0
 
-	for _, m := range s.payload.Messages[:msgLimit] {
-		rolePrefix := fmt.Sprintf("%s: ", m.Role)
+	// Iterate backwards to prioritize more recent messages? Or forwards? Let's stick to forwards.
+	for _, m := range s.payload.Messages {
+		// Skip system messages for title generation prompt
+		if m.Role == llms.ChatMessageTypeSystem {
+			continue
+		}
+
+		rolePrefix := fmt.Sprintf("%s: ", m.Role) // Use actual role (Human, AI)
 		promptBuilder.WriteString(rolePrefix)
 		currentChars += len(rolePrefix)
 
+		partStr := ""
 		for _, p := range m.Parts {
-			partStr := fmt.Sprint(p) // Handle different part types simply
-			partLen := len(partStr)
-			if currentChars+partLen > charLimit {
-				// Truncate part if adding it exceeds limit
-				truncateLen := charLimit - currentChars - 3 // Account for "..."
-				if truncateLen > 0 {
-					promptBuilder.WriteString(partStr[:truncateLen] + "...")
-				}
-				currentChars = charLimit // Mark as full
-				break                    // Stop adding parts for this message
+			if textPart, ok := p.(llms.TextContent); ok {
+				partStr += textPart.Text // Concatenate text parts
 			}
-			promptBuilder.WriteString(partStr)
-			currentChars += partLen
 		}
+		partStr = strings.TrimSpace(partStr) // Trim whitespace from combined parts
+
+		// Truncate individual message part string if needed
+		maxPartLen := (charLimit - currentChars) / (msgLimit - addedMessages + 1) // Dynamic limit
+		maxPartLen = max(maxPartLen, 50)                                          // Min length per part
+		if len(partStr) > maxPartLen {
+			partStr = partStr[:maxPartLen] + "..."
+		}
+
+		partLen := len(partStr)
+		if currentChars+partLen > charLimit {
+			// If adding this truncated part still exceeds limit, stop adding messages
+			s.logger.Debugf("Character limit %d reached while building title prompt.", charLimit)
+			break
+		}
+		promptBuilder.WriteString(partStr)
+		currentChars += partLen
 		promptBuilder.WriteString("\n") // Newline between messages
 		currentChars++
-		if currentChars >= charLimit {
-			break // Stop adding messages if char limit reached
+		addedMessages++
+
+		if addedMessages >= msgLimit {
+			s.logger.Debugf("Message limit %d reached for title prompt.", msgLimit)
+			break // Stop adding messages if message limit reached
 		}
 	}
-	promptBuilder.WriteString("\nTitle:") // Ask for the title explicitly
+	promptBuilder.WriteString("\nTITLE:") // Ask for the title explicitly
 
 	prompt := promptBuilder.String()
-	s.logger.Debugf("Generating title with prompt: %s", prompt)
+	s.logger.Debugf("Generating title with prompt (length %d)", len(prompt))
+	// For extreme debug: s.logger.Debugf("Title prompt:\n%s", prompt)
 
 	// Use a separate, short timeout for title generation
+	// Use the passed context as the parent for the timeout context
 	titleCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	// Use the main model configured for the service
 	completion, err := llms.GenerateFromSinglePrompt(titleCtx, s.model, prompt,
-		llms.WithMaxTokens(20), // Limit tokens for title
+		llms.WithMaxTokens(25),    // Limit tokens for title (slightly more generous)
 		llms.WithTemperature(0.2), // Lower temperature for more deterministic title
+		// llms.WithStopWords([]string{"\n"}), // Stop generation at newline?
 	)
 	if err != nil {
-		// Check if the error was due to context cancellation/timeout
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			s.logger.Warnf("Title generation timed out or was cancelled: %v", err)
-			return fmt.Sprintf("chat-%s", s.sessionTimestamp), nil // Fallback title
+		// Check if the error was due to context cancellation/timeout of titleCtx *or* the parent ctx
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+			s.logger.Warnf("Title generation timed out or was cancelled: %v. Using default title.", err)
+			return defaultTitle, nil // Fallback title, not an error for the caller
 		}
-		return "", fmt.Errorf("failed to generate title: %w", err)
+		// Log other LLM errors but fallback to default title
+		s.logger.Errorf("Failed to generate title via LLM: %v. Using default title.", err)
+		return defaultTitle, nil // Fallback title, not an error for the caller
 	}
 
 	// Sanitize and format the title
-	// Remove potential quotes, trim whitespace, replace spaces with hyphens, lowercase
 	title := strings.TrimSpace(completion)
+	// Remove potential quotes, trim final newlines that might sneak in
 	title = strings.Trim(title, `"'`)
+	title = strings.TrimRight(title, "\n")
+	// Lowercase, replace spaces/underscores with hyphens
 	title = strings.ToLower(title)
 	title = strings.ReplaceAll(title, " ", "-")
+	title = strings.ReplaceAll(title, "_", "-")
 	// Remove characters unsafe for filenames (allow letters, numbers, hyphen)
 	reg := regexp.MustCompile(`[^a-z0-9-]+`)
 	title = reg.ReplaceAllString(title, "")
-	// Limit length and prevent multiple consecutive hyphens
+	// Condense multiple consecutive hyphens
 	title = regexp.MustCompile(`-{2,}`).ReplaceAllString(title, "-")
+	// Trim leading/trailing hyphens
 	title = strings.Trim(title, "-")
 
-	const maxTitleLength = 50
+	const maxTitleLength = 60 // Slightly longer max length
 	if len(title) > maxTitleLength {
 		title = title[:maxTitleLength]
-		title = strings.TrimRight(title, "-") // Ensure it doesn't end with hyphen after truncate
+		// Trim again in case truncation left a hyphen
+		title = strings.TrimRight(title, "-")
 	}
 	if title == "" { // Fallback if sanitization removed everything
-		title = fmt.Sprintf("chat-%s", s.sessionTimestamp)
+		s.logger.Warn("Title sanitization resulted in empty string, using default title.")
+		title = defaultTitle
+	} else {
+		s.logger.Infof("Generated and sanitized history title: %s", title)
 	}
 
-
-	s.logger.Infof("Generated history title: %s", title)
 	return title, nil
 }
 
-
-// renameChatHistory generates a title and renames the history file
+// renameChatHistory generates a title and renames the history file. Called after continuous mode exits.
 func (s *Service) renameChatHistory(ctx context.Context) error {
-	// Expand tilde for history output file path
-	expandedOutPath, err := expandTilde(s.historyOutFile)
-	if err != nil {
-		fmt.Fprintf(s.opts.Stderr, "Warning: could not expand history output path '%s': %v\n", s.historyOutFile, err)
-		expandedOutPath = s.historyOutFile // Use original path as fallback
-	}
-	s.historyOutFile = expandedOutPath // Update service state with expanded path
-
-
-	if s.historyOutFile == "" || !strings.Contains(filepath.Base(s.historyOutFile), "default-history-") {
-		// Only rename default files, or if no file is set yet (though it should be by now)
-		s.logger.Debugf("Skipping history rename for file: %s", s.historyOutFile)
+	if s.historyOutFile == "" {
+		s.logger.Debug("No history output file set, skipping rename.")
 		return nil
 	}
 
-
-	home, err := os.UserHomeDir()
+	// Expand tilde just in case it wasn't expanded before or contains variables
+	// Though s.historyOutFile should ideally be the fully resolved path by now.
+	currentPath, err := expandTilde(s.historyOutFile)
 	if err != nil {
-		return fmt.Errorf("failed to get user home directory: %w", err)
+		// Log warning but try to proceed with the original path
+		s.logger.Warnf("Could not expand history output path '%s' during rename: %v", s.historyOutFile, err)
+		currentPath = s.historyOutFile
 	}
-	historyDir := filepath.Join(home, ".cgpt")
+	s.historyOutFile = currentPath // Update service state with potentially re-expanded path
 
-	// Get the current history file path (might be default or already renamed)
-	currentPath := s.historyOutFile
-	if !filepath.IsAbs(currentPath) { // Ensure path is absolute
-		currentPath = filepath.Join(historyDir, currentPath)
+	// Check if the file looks like a default, timestamped file eligible for renaming.
+	// Example default pattern: ~/.cgpt/default-history-YYYYMMDDHHMMSS.yaml
+	historyDir := filepath.Dir(currentPath)
+	baseName := filepath.Base(currentPath)
+	isDefaultFormat := strings.HasPrefix(baseName, "default-history-") && strings.HasSuffix(baseName, ".yaml")
+
+	// Or maybe check if it contains the specific session timestamp?
+	// isSessionTimestampFormat := strings.Contains(baseName, s.sessionTimestamp) && strings.HasSuffix(baseName, ".yaml")
+	// Let's stick to renaming files named like "default-history-*" for now.
+	// This avoids renaming user-specified explicit filenames.
+
+	if !isDefaultFormat {
+		s.logger.Debugf("History file '%s' does not match default pattern, skipping rename.", baseName)
+		return nil
 	}
 
 	// Check if the current file exists before trying to rename
 	if _, err := os.Stat(currentPath); os.IsNotExist(err) {
 		s.logger.Warnf("History file %s not found, cannot rename.", currentPath)
-		return nil // Don't treat as error if file doesn't exist
+		return nil // Don't treat as error if file doesn't exist (maybe it was never saved)
 	}
 
-	// Generate a descriptive title
-	title, err := s.generateHistoryTitle(ctx) // Pass context
-	if err != nil {
-		s.logger.Errorf("Failed to generate history title: %v", err)
-		return nil // Don't block exit on title generation failure
+	// Generate a descriptive title using the parent context passed down
+	title, titleErr := s.generateHistoryTitle(ctx) // Pass context
+	if titleErr != nil {
+		// generateHistoryTitle already logged the error and returned a default title
+		// We can proceed with the default title. Check if context was cancelled.
+		if errors.Is(titleErr, context.Canceled) || errors.Is(titleErr, context.DeadlineExceeded) {
+			s.logger.Info("History rename cancelled during title generation.")
+			return titleErr // Propagate cancellation
+		}
+		// Otherwise, continue with default title even if LLM call failed
 	}
 
 	// Create new filename with timestamp + title
-	// Use session timestamp for consistency even if title generation fails/falls back
+	// Use session timestamp for consistency
 	newFilename := fmt.Sprintf("%s-%s.yaml", s.sessionTimestamp, title)
 	newPath := filepath.Join(historyDir, newFilename)
 
-
-	// Avoid renaming if paths are the same
+	// Avoid renaming if paths are the same (e.g., if default title produced same name)
 	if currentPath == newPath {
-		s.logger.Debugf("History file already has the correct name: %s", newFilename)
+		s.logger.Debugf("Generated title results in the same filename, skipping rename: %s", newFilename)
 		return nil
 	}
 
-
 	// Rename the file
-	s.logger.Infof("Attempting to rename history file from %s to %s", currentPath, newPath)
+	s.logger.Infof("Attempting to rename history file from '%s' to '%s'", baseName, newFilename)
 	if err := os.Rename(currentPath, newPath); err != nil {
-		// Log specific error, but don't fail the exit
+		// Log specific error, but don't fail the exit flow
+		s.logger.Errorf("Failed to rename history file '%s' to '%s': %v", currentPath, newPath, err)
 		s.logger.Errorf("Failed to rename history file: %v", err)
 		return nil // Non-fatal error for rename failure
 	}
 
-	fmt.Fprintf(s.opts.Stderr, "\033[38;5;240mcgpt: Renamed history to: %s\033[0m\n", filepath.Base(newPath))
+	s.logger.Infof("Renamed history to: %s", newFilename)
 
-	// Update the historyOutFile path in the service state
+	// Update the historyOutFile path in the service state to the new name
 	s.historyOutFile = newPath
 	return nil
 }
 
+// --- Input Handling ---
 
 // InputSourceType represents the type of input source.
 type InputSourceType string
@@ -1173,64 +1503,84 @@ const (
 	InputSourceStdin  InputSourceType = "stdin"
 	InputSourceFile   InputSourceType = "file"
 	InputSourceString InputSourceType = "string"
-	InputSourceArg    InputSourceType = "arg"
+	InputSourceArg    InputSourceType = "arg" // Keep if needed, though args processed separately now
 )
 
 // InputSource represents a single input source.
 type InputSource struct {
 	Type   InputSourceType
 	Reader io.Reader
+	Source string // Store filename or identifier
 }
 
 // InputHandler manages multiple input sources.
 type InputHandler struct {
 	Files   []string
 	Strings []string
-	Args    []string
+	Args    []string // Keep for potential future use? Currently handled in handleInput directly.
 	Stdin   io.Reader
+	Logger  *zap.SugaredLogger // Added logger
 }
 
 // InputSources is a slice of InputSource.
 type InputSources []InputSource
 
 // Process reads the set of inputs, this will block on stdin if it is included.
-// The order of precedence is: Files, Strings, Args, Stdin (if '-' is not used explicitly).
+// The order of precedence is: Files, Strings, Stdin (if '-' is used explicitly or implicitly).
+// Args are now handled separately in the main handleInput function.
 func (h *InputHandler) Process(ctx context.Context) (io.Reader, error) {
 	var readers []io.Reader
-	var closers []io.Closer // Keep track of files to close
-	stdinUsed := false      // Track if stdin was used via '-'
+	var closers []io.Closer      // Keep track of files to close
+	stdinExplicitlyUsed := false // Track if stdin was used via '-'
+
+	log := h.Logger
+	if log == nil {
+		// Fallback to a Nop logger if none provided
+		log = zap.NewNop().Sugar()
+	}
 
 	cleanup := func() {
-		for _, closer := range closers {
-			closer.Close() // Attempt to close all opened files
+		log.Debugf("Closing %d input file readers.", len(closers))
+		for i, closer := range closers {
+			if err := closer.Close(); err != nil {
+				log.Warnf("Error closing input reader #%d: %v", i, err)
+			}
 		}
 	}
 	// Use a flag to signal success/error for cleanup
 	success := false
 	defer func() {
 		if !success {
-			cleanup() // Cleanup if function returns error
+			log.Debug("Cleaning up input readers due to error or incomplete processing.")
+			cleanup() // Cleanup if function returns error or panics
 		}
+		// If successful, the closer returned by Process will handle cleanup.
 	}()
 
+	// Process Files
 	for _, file := range h.Files {
 		if file == "-" {
-			if h.Stdin != nil {
-				// Stdin usually doesn't need closing managed here
+			if h.Stdin != nil && !stdinExplicitlyUsed {
+				log.Debug("Using stdin explicitly via '-' argument.")
 				readers = append(readers, h.Stdin)
-				stdinUsed = true
+				stdinExplicitlyUsed = true
+			} else if stdinExplicitlyUsed {
+				log.Warn("Stdin ('-') specified multiple times, ignoring subsequent instances.")
 			} else {
-				// If '-' is used but stdin is nil, treat as empty input
-				readers = append(readers, strings.NewReader(""))
+				log.Warn("Stdin ('-') specified but no stdin reader available.")
+				// Add an empty reader to represent the intent? Or ignore?
+				// Let's ignore for now.
 			}
 		} else {
 			expandedFile, err := expandTilde(file)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not expand file path '%s': %v\n", file, err)
+				log.Warnf("Could not expand file path '%s', using original: %v", file, err)
 				expandedFile = file
 			}
+			log.Debugf("Opening file input: %s", expandedFile)
 			f, err := os.Open(expandedFile)
 			if err != nil {
+				// Don't need cleanup here as defer will handle it
 				return nil, fmt.Errorf("opening file %s: %w", expandedFile, err)
 			}
 			readers = append(readers, f)
@@ -1238,26 +1588,39 @@ func (h *InputHandler) Process(ctx context.Context) (io.Reader, error) {
 		}
 	}
 
-	for _, s := range h.Strings {
-		readers = append(readers, strings.NewReader(s))
+	// Process Strings
+	if len(h.Strings) > 0 {
+		log.Debugf("Adding %d string inputs.", len(h.Strings))
+		for _, s := range h.Strings {
+			readers = append(readers, strings.NewReader(s))
+		}
 	}
 
-	for _, arg := range h.Args {
-		readers = append(readers, strings.NewReader(arg))
-	}
+	// Process Args - Currently handled in handleInput, so ignore h.Args here.
+	// if len(h.Args) > 0 {
+	// 	log.Debugf("Adding %d arg inputs.", len(h.Args))
+	// 	for _, arg := range h.Args {
+	// 		readers = append(readers, strings.NewReader(arg))
+	// 	}
+	// }
 
-	// Add stdin reader at the end ONLY if it wasn't explicitly used with '-'
-	if h.Stdin != nil && !stdinUsed {
+	// Add stdin reader implicitly at the end ONLY if it wasn't explicitly used with '-'
+	// AND if it seems like it's piped/redirected.
+	if h.Stdin != nil && !stdinExplicitlyUsed && isStdinAvailable(h.Stdin) {
+		log.Debug("Adding implicit stdin (pipe/redirect).")
 		readers = append(readers, h.Stdin)
+	} else if h.Stdin != nil && !stdinExplicitlyUsed && !isStdinAvailable(h.Stdin) {
+		log.Debug("Stdin is terminal and was not explicitly requested ('-'), skipping.")
 	}
 
 	// Handle the case where no inputs were provided at all
 	if len(readers) == 0 {
-		success = true // Mark as success
+		log.Debug("No input sources found (files, strings, or applicable stdin).")
+		success = true                    // Mark as success
 		return strings.NewReader(""), nil // Return empty reader instead of nil
 	}
 
-
+	log.Debugf("Combining %d input readers.", len(readers))
 	// Return a reader that closes all opened files when it's closed
 	multiReader := io.MultiReader(readers...)
 	multiCloserReader := struct {
@@ -1265,43 +1628,43 @@ func (h *InputHandler) Process(ctx context.Context) (io.Reader, error) {
 		io.Closer
 	}{
 		Reader: multiReader,
-		Closer: io.NopCloser(nil), // Default NopCloser
+		// Create a custom Closer that closes all tracked files
+		Closer: multiCloser{closers: closers, Logger: log},
 	}
 
-	// Create a custom Closer that closes all tracked files
-	multiCloserReader.Closer = multiCloser{closers: closers}
-
-	success = true // Mark as success before returning
+	success = true // Mark as success before returning the closable reader
 	return multiCloserReader, nil
 }
 
 // multiCloser helps close multiple io.Closer objects.
 type multiCloser struct {
 	closers []io.Closer
+	Logger  *zap.SugaredLogger
 }
 
 func (mc multiCloser) Close() error {
 	var errs []error
-	for _, closer := range mc.closers {
+	log := mc.Logger
+	if log == nil {
+		log = zap.NewNop().Sugar()
+	}
+
+	log.Debugf("MultiCloser closing %d readers.", len(mc.closers))
+	for i, closer := range mc.closers {
 		if err := closer.Close(); err != nil {
+			log.Warnf("Error closing reader #%d: %v", i, err)
 			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {
-		// Combine errors if needed, for now return the first one
-		return fmt.Errorf("errors closing readers: %v", errs)
+		// Combine errors? For now, return a generic error indicating failures.
+		return fmt.Errorf("errors closing %d readers: %v", len(errs), errs) // Report all errors
 	}
+	log.Debug("MultiCloser finished closing readers.")
 	return nil
 }
 
-
-
-func (h *InputHandler) getStdinReader() io.Reader {
-	if h.Stdin == nil {
-		return nil
-	}
-	return h.Stdin
-}
+// --- Payload Handling ---
 
 // ChatCompletionPayload holds the messages for a chat completion.
 type ChatCompletionPayload struct {
@@ -1309,292 +1672,46 @@ type ChatCompletionPayload struct {
 	Stream   bool                  `yaml:"-"`        // Exclude Stream from YAML
 }
 
-
 // newCompletionPayload creates a new ChatCompletionPayload.
 func newCompletionPayload(cfg *Config) *ChatCompletionPayload {
 	p := &ChatCompletionPayload{
 		Messages: []llms.MessageContent{},
-		Stream:   true, // Default to streaming
+		Stream:   true, // Default to streaming, can be overridden
 	}
-	// Add system prompt from config if available
-	if cfg != nil && cfg.SystemPrompt != "" {
-		// Avoid adding if payload already has one (e.g. from loaded history)
-		hasSys := false
-		for _, msg := range p.Messages {
-			if msg.Role == llms.ChatMessageTypeSystem {
-				hasSys = true
-				break
-			}
-		}
-		if !hasSys {
-			p.Messages = append(p.Messages, llms.TextParts(llms.ChatMessageTypeSystem, cfg.SystemPrompt))
-		}
-	}
+	// System prompt is added later by setupSystemPrompt to handle history loading correctly
 	return p
 }
 
 // addUserMessage adds a user message to the completion payload.
 func (p *ChatCompletionPayload) addUserMessage(content string) {
-	// Prevent adding empty user messages
-	if strings.TrimSpace(content) == "" {
+	trimmedContent := strings.TrimSpace(content)
+	if trimmedContent == "" {
+		// Optionally log skipping empty message
+		// s.logger.Debug("Skipping empty user message.")
 		return
 	}
-	// // Simple merge logic - append if last wasn't user, merge if last was user
-	// if len(p.Messages) > 0 && p.Messages[len(p.Messages)-1].Role == llms.ChatMessageTypeHuman {
-	// 	lastMsg := p.Messages[len(p.Messages)-1]
-	// 	existingContent := ""
-	// 	if len(lastMsg.Parts) > 0 {
-	// 		if textPart, ok := lastMsg.Parts[0].(llms.TextContent); ok {
-	// 			existingContent = textPart.Text
-	// 		}
-	// 	}
-	// 	// Use TextParts to ensure correct type
-	// 	p.Messages[len(p.Messages)-1] = llms.TextParts(llms.ChatMessageTypeHuman, existingContent+"\n\n"+content)
-	// } else {
-	p.Messages = append(p.Messages, llms.TextParts(llms.ChatMessageTypeHuman, content))
-	// }
+	// Simple append logic. Merging consecutive user messages can sometimes be complex
+	// depending on desired behavior (e.g., should they be one turn or multiple?).
+	// Sticking to append simplifies history representation.
+	p.Messages = append(p.Messages, llms.TextParts(llms.ChatMessageTypeHuman, trimmedContent))
 }
-
 
 // AddUserMessage adds a user message to the service's payload
 func (s *Service) AddUserMessage(content string) {
+	s.logger.Debugf("Adding user message (length %d)", len(content))
 	s.payload.addUserMessage(content)
 }
 
 // addAssistantMessage adds an assistant message to the completion payload.
 func (p *ChatCompletionPayload) addAssistantMessage(content string) {
-	// Prevent adding empty assistant messages
-	if strings.TrimSpace(content) == "" {
+	trimmedContent := strings.TrimSpace(content)
+	if trimmedContent == "" {
+		// Optionally log skipping empty message
+		// s.logger.Debug("Skipping empty assistant message.")
 		return
 	}
-	// Handle potential duplicate consecutive AI messages if needed (e.g., merge?)
-	// For now, just append.
-	p.Messages = append(p.Messages, llms.TextParts(llms.ChatMessageTypeAI, content))
-}
-
-// loadHistory loads the history from the history file reader.
-func (s *Service) loadHistory() error {
-	if s.historyIn == nil {
-		s.logger.Debug("No history input reader provided.")
-		return nil
-	}
-	data, err := io.ReadAll(s.historyIn) // Read all data since historyIn might be closed soon
-	if err != nil {
-		return fmt.Errorf("reading history input: %w", err)
-	}
-	if len(data) == 0 {
-		s.logger.Debug("History input was empty.")
-		return nil // Empty history is not an error
-	}
-
-	// Try unmarshaling as YAML first
-	var loadedMessages []llms.MessageContent
-	if yaml.Unmarshal(data, &loadedMessages) == nil {
-		s.logger.Debugf("Loaded %d messages from YAML history", len(loadedMessages))
-		// Prepend loaded history to existing payload messages if any
-		// Ensure system prompt isn't duplicated or handled correctly
-		currentMessages := s.payload.Messages // Messages from flags/stdin
-		s.payload.Messages = loadedMessages    // Start with loaded history
-
-		// Re-add any initial messages that weren't part of history (e.g., from flags)
-		// Skip system prompt from currentMessages if history already has one
-		historyHasSysPrompt := s.payload.HasSystemPrompt()
-		for _, msg := range currentMessages {
-			if msg.Role == llms.ChatMessageTypeSystem && historyHasSysPrompt {
-				continue // Skip initial system prompt if history provided one
-			}
-			// Simple append for now, might need smarter merging logic
-			s.payload.Messages = append(s.payload.Messages, msg)
-		}
-		// Ensure system prompt from config is applied/updated if needed
-		s.setupSystemPrompt() // Re-apply/verify system prompt from config
-		return nil
-	}
-
-	// Fallback: Try parsing as legacy plain text format (role: content\n)
-	s.logger.Debug("History is not valid YAML, attempting legacy plain text parse.")
-	lines := strings.Split(string(data), "\n")
-	var legacyMessages []llms.MessageContent
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, ": ", 2)
-		if len(parts) != 2 {
-			s.logger.Warnf("Skipping invalid legacy history line: %s", line)
-			continue
-		}
-		role := strings.ToLower(strings.TrimSpace(parts[0]))
-		content := strings.TrimSpace(parts[1])
-		var msgType llms.ChatMessageType
-		switch role {
-		case "user", "human":
-			msgType = llms.ChatMessageTypeHuman
-		case "ai", "assistant":
-			msgType = llms.ChatMessageTypeAI
-		case "system":
-			msgType = llms.ChatMessageTypeSystem
-		default:
-			s.logger.Warnf("Skipping legacy history line with unknown role '%s'", role)
-			continue
-		}
-		legacyMessages = append(legacyMessages, llms.TextParts(msgType, content))
-	}
-	if len(legacyMessages) > 0 {
-		s.logger.Debugf("Loaded %d messages from legacy history format", len(legacyMessages))
-		currentMessages := s.payload.Messages
-		s.payload.Messages = legacyMessages
-		historyHasSysPrompt := s.payload.HasSystemPrompt()
-		for _, msg := range currentMessages {
-			if msg.Role == llms.ChatMessageTypeSystem && historyHasSysPrompt {
-				continue
-			}
-			s.payload.Messages = append(s.payload.Messages, msg)
-		}
-		s.setupSystemPrompt()
-		// Consider saving immediately in the new format
-		if s.historyOutFile != "" {
-			if err := s.saveHistory(); err != nil {
-				s.logger.Warnf("Failed to save history in new format after loading legacy: %v", err)
-			} else {
-				s.logger.Info("Converted legacy history to new YAML format.")
-			}
-		}
-		return nil
-	}
-
-	s.logger.Warn("Could not parse history file content (checked YAML and legacy format).")
-	return nil // Treat unparseable as non-fatal for now
-}
-
-
-// saveHistory saves the history to the history file in YAML format.
-func (s *Service) saveHistory() error {
-	// Expand tilde if present in the history output file path
-	expandedPath, err := expandTilde(s.historyOutFile)
-	if err != nil {
-		fmt.Fprintf(s.opts.Stderr, "Warning: could not expand history output path '%s': %v\n", s.historyOutFile, err)
-		expandedPath = s.historyOutFile // Use original path as fallback
-	}
-
-
-	if expandedPath == "" {
-		// If no output file specified (even after expansion), don't attempt to save.
-		return nil
-	}
-
-	if len(s.payload.Messages) == 0 {
-		// Optionally write an empty file or just do nothing
-		// Let's do nothing if there are no messages to save
-		// s.logger.Debug("No messages in payload, skipping history save.")
-		return nil
-	}
-
-
-	// Ensure directory exists
-	historyDir := filepath.Dir(expandedPath)
-	if err := os.MkdirAll(historyDir, 0755); err != nil {
-		return fmt.Errorf("failed to create history directory %s: %w", historyDir, err)
-	}
-
-	// Marshal messages to YAML
-	data, err := yaml.Marshal(s.payload.Messages)
-	if err != nil {
-		return fmt.Errorf("failed to marshal history to YAML: %w", err)
-	}
-
-	// Write to file
-	err = os.WriteFile(expandedPath, data, 0644) // Use standard file permissions
-	if err != nil {
-		return fmt.Errorf("failed to write history file %s: %w", expandedPath, err)
-	}
-	s.logger.Debugf("Saved %d messages to history file: %s", len(s.payload.Messages), expandedPath)
-
-	return nil
-}
-
-// Spinner implementation
-type spinner struct {
-	frames []string
-	pos    int
-	active bool
-	done   chan struct{}
-	output io.Writer // Added output writer
-}
-
-func newSpinner(output io.Writer) *spinner {
-	if output == nil {
-		output = os.Stderr // Default to stderr
-	}
-	return &spinner{
-		frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
-		done:   make(chan struct{}),
-		output: output,
-	}
-}
-
-func (s *spinner) start(initialPos int) {
-	s.active = true
-	// Print initial spaces if needed
-	if initialPos > 0 {
-		fmt.Fprint(s.output, strings.Repeat(" ", initialPos))
-	}
-	fmt.Fprint(s.output, " ") // Print initial space for the spinner frame
-
-	go func() {
-		ticker := time.NewTicker(80 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-s.done:
-				// Clear the spinner frame before returning
-				fmt.Fprint(s.output, "\b \b")
-				return
-			case <-ticker.C:
-				if !s.active { // Double check active flag
-					fmt.Fprint(s.output, "\b \b")
-					return
-				}
-				fmt.Fprint(s.output, "\b"+s.frames[s.pos])
-				s.pos = (s.pos + 1) % len(s.frames)
-			}
-		}
-	}()
-}
-
-func (s *spinner) stop() {
-	if !s.active {
-		return
-	}
-	s.active = false
-	// Signal the goroutine to stop and clean up
-	// Use non-blocking send to avoid deadlock if goroutine already exited
-	select {
-	case s.done <- struct{}{}:
-	default:
-	}
-}
-
-
-// spin starts a spinner at the given character position using the specified writer.
-func spin(pos int, writer io.Writer) func() {
-	if writer == nil {
-		writer = os.Stderr // Default to stderr if nil
-	}
-	// Check if writer is a terminal TTY before starting spinner
-	isTerminal := false
-	if f, ok := writer.(*os.File); ok {
-		isTerminal = term.IsTerminal(int(f.Fd()))
-	}
-	// Only start spinner if output is a terminal
-	if !isTerminal {
-		return func() {} // Return no-op function if not a terminal
-	}
-
-
-	s := newSpinner(writer)
-	s.start(pos)
-	return s.stop
+	// Append assistant message. Merging consecutive AI messages is usually not needed.
+	p.Messages = append(p.Messages, llms.TextParts(llms.ChatMessageTypeAI, trimmedContent))
 }
 
 // Helper to check if payload has a system prompt
@@ -1611,29 +1728,268 @@ func (p *ChatCompletionPayload) HasSystemPrompt() bool {
 func (p *ChatCompletionPayload) MessagesToHistoryStrings() []string {
 	var history []string
 	for _, msg := range p.Messages {
+		// Skip system messages for readline history? Usually yes.
+		if msg.Role == llms.ChatMessageTypeSystem {
+			continue
+		}
+
 		// Simple conversion, might lose multi-part detail
 		var contentBuilder strings.Builder
 		for _, part := range msg.Parts {
 			if textPart, ok := part.(llms.TextContent); ok {
+				if contentBuilder.Len() > 0 {
+					contentBuilder.WriteString("\n") // Add newline between text parts if needed
+				}
 				contentBuilder.WriteString(textPart.Text)
 			}
-			// Add handling for other part types if necessary
+			// Add handling for other part types if necessary for history display
 		}
-		// Add role prefix for clarity, though readline might not use it
-		// history = append(history, fmt.Sprintf("%s: %s", msg.Role, contentBuilder.String()))
-		// Or just the content:
-		// Skip empty messages
+
 		content := contentBuilder.String()
+		// Include role for potential context? Readline might ignore it.
+		// Let's just add the content for now.
 		if strings.TrimSpace(content) != "" {
 			history = append(history, content)
 		}
-
 	}
 	return history
 }
 
-// --- YAML Marshaling/Unmarshaling for llms.MessageContent ---
-// We need custom marshaling because llms.MessageContent contains an interface (ContentPart)
+// GetPayloadMessages returns a copy of the current messages in the payload.
+func (s *Service) GetPayloadMessages() []llms.MessageContent {
+	if s.payload == nil {
+		return nil
+	}
+	// Return a copy to prevent external modification
+	msgsCopy := make([]llms.MessageContent, len(s.payload.Messages))
+	copy(msgsCopy, s.payload.Messages)
+	return msgsCopy
+}
+
+// --- History Loading/Saving ---
+
+// loadHistory loads the history from the history file reader (s.historyIn).
+// s.historyIn should be closed by the caller after this function returns.
+func (s *Service) loadHistory() error {
+	if s.historyIn == nil {
+		s.logger.Error("loadHistory called with nil historyIn reader.") // Should not happen
+		return errors.New("internal error: history reader is nil")
+	}
+	s.logger.Debug("Reading history data from input reader...")
+	data, err := io.ReadAll(s.historyIn) // Read all data
+	if err != nil {
+		return fmt.Errorf("reading history input: %w", err)
+	}
+	if len(data) == 0 {
+		s.logger.Debug("History input was empty.")
+		return nil // Empty history is not an error
+	}
+
+	s.logger.Debugf("Read %d bytes of history data. Attempting YAML parse.", len(data))
+	// Try unmarshaling as YAML first using our wrapper
+	var wrappedMessages []MessageContentWrapper
+	if err := yaml.Unmarshal(data, &wrappedMessages); err == nil && len(wrappedMessages) > 0 {
+		// YAML unmarshal succeeded and yielded messages
+		loadedMessages := make([]llms.MessageContent, len(wrappedMessages))
+		for i, wrapped := range wrappedMessages {
+			loadedMessages[i] = wrapped.Content
+		}
+		s.logger.Infof("Loaded %d messages from YAML history", len(loadedMessages))
+
+		// Prepend loaded history to any existing payload messages (e.g., from flags before history load)
+		currentMessages := s.payload.Messages // Messages from flags/stdin added before history load
+		s.payload.Messages = loadedMessages   // Start with loaded history
+
+		// Re-add any initial messages that weren't part of history
+		historyHasSysPrompt := s.payload.HasSystemPrompt()
+		s.logger.Debugf("History has system prompt: %t. Current initial messages: %d", historyHasSysPrompt, len(currentMessages))
+		for _, msg := range currentMessages {
+			if msg.Role == llms.ChatMessageTypeSystem && historyHasSysPrompt {
+				s.logger.Debug("Skipping initial system prompt from args/config as history already has one.")
+				continue // Skip initial system prompt if history provided one
+			}
+			// Simple append for now. Could implement smarter merging if needed.
+			s.logger.Debugf("Appending initial message (Role: %s) after loaded history.", msg.Role)
+			s.payload.Messages = append(s.payload.Messages, msg)
+		}
+		// Ensure system prompt from config is applied/updated if needed, potentially overwriting loaded one
+		if err := s.setupSystemPrompt(); err != nil {
+			// Log error but don't fail loading history
+			s.logger.Warnf("Error applying config system prompt after loading history: %v", err)
+		}
+		return nil
+	} else if err != nil {
+		s.logger.Warnf("YAML unmarshal failed: %v. Checking for legacy format.", err)
+		// Fall through to check legacy format
+	} else {
+		s.logger.Debug("YAML unmarshal succeeded but yielded no messages.")
+		// Fall through? Or treat as empty? Let's try legacy.
+	}
+
+	// Fallback: Try parsing as legacy plain text format (role: content\n)
+	s.logger.Debug("Attempting legacy plain text parse for history.")
+	lines := strings.Split(string(data), "\n")
+	var legacyMessages []llms.MessageContent
+	for i, line := range lines {
+		trimmedLine := strings.TrimSpace(line)
+		if trimmedLine == "" {
+			continue
+		}
+		parts := strings.SplitN(trimmedLine, ":", 2) // Split only on the first colon
+		if len(parts) != 2 {
+			s.logger.Warnf("Skipping invalid legacy history line %d: no colon found: %s", i+1, trimmedLine)
+			continue
+		}
+		role := strings.ToLower(strings.TrimSpace(parts[0]))
+		content := strings.TrimSpace(parts[1])
+		var msgType llms.ChatMessageType
+		switch role {
+		case "user", "human":
+			msgType = llms.ChatMessageTypeHuman
+		case "ai", "assistant", "model": // Accept 'model' as well
+			msgType = llms.ChatMessageTypeAI
+		case "system":
+			msgType = llms.ChatMessageTypeSystem
+		default:
+			s.logger.Warnf("Skipping legacy history line %d with unknown role '%s'", i+1, role)
+			continue
+		}
+		if content != "" {
+			legacyMessages = append(legacyMessages, llms.TextParts(msgType, content))
+		} else {
+			s.logger.Debugf("Skipping legacy history line %d with empty content (Role: %s)", i+1, role)
+		}
+	}
+
+	if len(legacyMessages) > 0 {
+		s.logger.Infof("Loaded %d messages from legacy history format.", len(legacyMessages))
+		// Similar logic to YAML load for prepending/merging
+		currentMessages := s.payload.Messages
+		s.payload.Messages = legacyMessages
+		historyHasSysPrompt := s.payload.HasSystemPrompt()
+		s.logger.Debugf("Legacy history has system prompt: %t. Current initial messages: %d", historyHasSysPrompt, len(currentMessages))
+		for _, msg := range currentMessages {
+			if msg.Role == llms.ChatMessageTypeSystem && historyHasSysPrompt {
+				s.logger.Debug("Skipping initial system prompt from args/config as legacy history has one.")
+				continue
+			}
+			s.logger.Debugf("Appending initial message (Role: %s) after loaded legacy history.", msg.Role)
+			s.payload.Messages = append(s.payload.Messages, msg)
+		}
+		if err := s.setupSystemPrompt(); err != nil {
+			s.logger.Warnf("Error applying config system prompt after loading legacy history: %v", err)
+		}
+
+		// Recommend saving immediately in the new format if an output file is configured
+		if s.historyOutFile != "" {
+			s.logger.Info("Legacy history format loaded. Saving immediately in new YAML format.")
+			if err := s.saveHistory(); err != nil {
+				// Log failure but don't treat as critical load error
+				s.logger.Warnf("Failed to save history in new format after loading legacy: %v", err)
+				s.logger.Warnf("Failed to convert legacy history to new format: %v", err)
+			} else {
+				s.logger.Debug("Successfully saved history in YAML format after loading legacy.")
+			}
+		}
+		return nil
+	}
+
+	// If neither YAML nor legacy parsing worked
+	s.logger.Warn("Could not parse history file content (checked YAML and legacy formats). Proceeding without loaded history.")
+	// Optionally inform user
+	s.logger.Warn("Could not parse history file content. Ignoring history file.")
+	return nil // Treat unparseable as non-fatal for now, allows startup
+}
+
+// saveHistory saves the history to the history file in YAML format.
+func (s *Service) saveHistory() error {
+	if s.historyOutFile == "" {
+		s.logger.Debug("No history output file specified, skipping save.")
+		return nil
+	}
+
+	// Ensure the path is fully resolved (tilde expansion should happen earlier, but check again)
+	expandedPath, err := expandTilde(s.historyOutFile)
+	if err != nil {
+		// Log error but proceed with potentially unexpanded path
+		s.logger.Warnf("Could not expand history output path '%s' during save: %v", s.historyOutFile, err)
+		expandedPath = s.historyOutFile
+	}
+
+	if len(s.payload.Messages) == 0 {
+		// Don't save an empty history file unless it doesn't exist yet (to create dir)
+		// Let's attempt to create the directory anyway, then write if messages exist.
+		s.logger.Debug("No messages in payload to save to history.")
+		// return nil // Skip saving if no messages? Or save empty file?
+	}
+
+	// Ensure directory exists
+	historyDir := filepath.Dir(expandedPath)
+	s.logger.Debugf("Ensuring history directory exists: %s", historyDir)
+	if err := os.MkdirAll(historyDir, 0750); err != nil { // Slightly more restrictive permissions
+		return fmt.Errorf("failed to create history directory %s: %w", historyDir, err)
+	}
+
+	// Only proceed to write if there are messages
+	if len(s.payload.Messages) == 0 {
+		s.logger.Debug("Directory ensured, but no messages to write.")
+		return nil
+	}
+
+	// Wrap messages for marshaling
+	wrappedMessages := make([]MessageContentWrapper, len(s.payload.Messages))
+	for i, msg := range s.payload.Messages {
+		wrappedMessages[i] = MessageContentWrapper{Content: msg}
+	}
+
+	// Marshal wrapped messages to YAML
+	s.logger.Debugf("Marshaling %d messages to YAML for history file: %s", len(wrappedMessages), expandedPath)
+	data, err := yaml.Marshal(wrappedMessages)
+	if err != nil {
+		return fmt.Errorf("failed to marshal history to YAML: %w", err)
+	}
+
+	// Write to file using TempFile and Rename for atomicity
+	tempFile, err := os.CreateTemp(historyDir, filepath.Base(expandedPath)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary history file in %s: %w", historyDir, err)
+	}
+	tempFilePath := tempFile.Name()
+	s.logger.Debugf("Writing history to temporary file: %s", tempFilePath)
+
+	_, writeErr := tempFile.Write(data)
+	// Close the temp file before attempting rename
+	closeErr := tempFile.Close()
+
+	if writeErr != nil {
+		_ = os.Remove(tempFilePath) // Attempt cleanup on write error
+		return fmt.Errorf("failed to write to temporary history file %s: %w", tempFilePath, writeErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(tempFilePath) // Attempt cleanup on close error
+		return fmt.Errorf("failed to close temporary history file %s: %w", tempFilePath, closeErr)
+	}
+
+	// Atomically replace the target file with the temporary file
+	s.logger.Debugf("Renaming temporary history file %s to %s", tempFilePath, expandedPath)
+	err = os.Rename(tempFilePath, expandedPath)
+	if err != nil {
+		// If rename fails, the temp file might still be around. Attempt removal.
+		_ = os.Remove(tempFilePath)
+		return fmt.Errorf("failed to rename temporary history file %s to %s: %w", tempFilePath, expandedPath, err)
+	}
+
+	// Set permissions explicitly after rename (optional, depends on umask)
+	// if err := os.Chmod(expandedPath, 0640); err != nil {
+	// 	s.logger.Warnf("Failed to set permissions on history file %s: %v", expandedPath, err)
+	// }
+
+	s.logger.Infof("Saved %d messages to history file: %s", len(s.payload.Messages), expandedPath)
+
+	return nil
+}
+
+// --- YAML Marshaling/Unmarshaling ---
 
 // messageContentYAML is a helper struct for YAML serialization/deserialization.
 type messageContentYAML struct {
@@ -1647,69 +2003,205 @@ type messagePartYAML struct {
 	Type string `yaml:"type"`
 	Text string `yaml:"text,omitempty"`
 	// Add fields for other part types like ImageURL, ToolCall, ToolCallResponse if needed
+	// ImageURL string `yaml:"image_url,omitempty"`
+	// ToolCalls []ToolCall `yaml:"tool_calls,omitempty"` // Assuming ToolCall is marshallable
 }
 
-// MarshalYAML implements the yaml.Marshaler interface for llms.MessageContent.
-func (mc llms.MessageContent) MarshalYAML() (interface{}, error) {
-	yamlParts := make([]messagePartYAML, 0, len(mc.Parts))
-	for _, part := range mc.Parts {
+// MessageContentWrapper wraps llms.MessageContent for YAML marshaling
+type MessageContentWrapper struct {
+	Content llms.MessageContent
+}
+
+// MarshalYAML implements yaml.Marshaler
+func (w MessageContentWrapper) MarshalYAML() (interface{}, error) {
+	yamlParts := make([]messagePartYAML, 0, len(w.Content.Parts))
+	for _, part := range w.Content.Parts {
 		switch p := part.(type) {
 		case llms.TextContent:
 			yamlParts = append(yamlParts, messagePartYAML{Type: "text", Text: p.Text})
-		// Add cases for other types (ImageURL, ToolCall, etc.) here
+		// --- Add cases for other supported types ---
 		// case llms.ImageURLContent:
-		// 	yamlParts = append(yamlParts, messagePartYAML{Type: "image_url", ImageURL: p.ImageURL})
+		//  yamlParts = append(yamlParts, messagePartYAML{Type: "image_url", ImageURL: p.ImageURL})
+		// case llms.ToolCallContent:
+		//  // Assuming p.ToolCalls is a slice of a marshallable ToolCall struct
+		//  yamlParts = append(yamlParts, messagePartYAML{Type: "tool_calls", ToolCalls: p.ToolCalls})
 		default:
 			// Handle unknown part types or return an error
-			// For now, skipping unknown parts during serialization
-			log.Printf("Skipping unknown message part type during YAML marshal: %T", p)
+			// Using standard logger here as service logger might not be available
+			// log.Printf("Skipping unknown message part type during YAML marshal: %T", p)
+			// Let's return an error instead of skipping silently
+			return nil, fmt.Errorf("cannot marshal unknown message part type: %T", p)
 		}
 	}
-	return messageContentYAML{Role: mc.Role, Parts: yamlParts}, nil
+	return messageContentYAML{Role: w.Content.Role, Parts: yamlParts}, nil
 }
 
-// UnmarshalYAML implements the yaml.Unmarshaler interface for llms.MessageContent.
-func (mc *llms.MessageContent) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	var helper messageContentYAML
-	if err := unmarshal(&helper); err != nil {
-		// Check for simpler string unmarshal (legacy support?)
-		var simpleContent string
-		if errSimple := unmarshal(&simpleContent); errSimple == nil {
-			// Heuristic: Assume it's a user message if just a string
-			mc.Role = llms.ChatMessageTypeHuman
-			mc.Parts = []llms.ContentPart{llms.TextContent{Text: simpleContent}}
-			return nil
-		}
-		return err // Return original error if it wasn't a simple string
+// UnmarshalYAML implements the yaml.Unmarshaler interface.
+func (w *MessageContentWrapper) UnmarshalYAML(node *yaml.Node) error {
+	// Check node kind first
+	if node.Kind != yaml.MappingNode {
+		// Support legacy format where history was just a list of strings?
+		// For now, require the map structure.
+		return fmt.Errorf("expected YAML mapping node for message, got %v", node.Kind)
 	}
 
+	var helper messageContentYAML
+	if err := node.Decode(&helper); err != nil {
+		return fmt.Errorf("failed to decode message YAML structure: %w", err)
+	}
 
-	mc.Role = helper.Role
-	mc.Parts = make([]llms.ContentPart, 0, len(helper.Parts))
+	w.Content.Role = helper.Role
+	w.Content.Parts = make([]llms.ContentPart, 0, len(helper.Parts))
 	for _, yamlPart := range helper.Parts {
 		switch yamlPart.Type {
 		case "text":
-			mc.Parts = append(mc.Parts, llms.TextContent{Text: yamlPart.Text})
-		// Add cases for other types (ImageURL, ToolCall, etc.) here
+			w.Content.Parts = append(w.Content.Parts, llms.TextContent{Text: yamlPart.Text})
+		// --- Add cases for other supported types ---
 		// case "image_url":
-		// 	mc.Parts = append(mc.Parts, llms.ImageURLContent{ImageURL: yamlPart.ImageURL})
+		//  w.Content.Parts = append(w.Content.Parts, llms.ImageURLContent{ImageURL: yamlPart.ImageURL})
+		// case "tool_calls":
+		//  w.Content.Parts = append(w.Content.Parts, llms.ToolCallContent{ToolCalls: yamlPart.ToolCalls})
 		default:
-			// Handle unknown part types or return an error
-			// For now, skipping unknown parts during deserialization
-			log.Printf("Skipping unknown message part type during YAML unmarshal: %s", yamlPart.Type)
+			// Log or return error for unknown types found in the file
+			// Using standard logger here as service logger might not be available
+			// log.Printf("Skipping unknown message part type '%s' during YAML unmarshal", yamlPart.Type)
+			// Return error to be stricter
+			return fmt.Errorf("unknown message part type '%s' found in history YAML", yamlPart.Type)
 		}
 	}
 	return nil
 }
 
 // Ensure our custom types work with the yaml package
-var _ yaml.Marshaler = (*llms.MessageContent)(nil)
-var _ yaml.Unmarshaler = (*llms.MessageContent)(nil)
+var _ yaml.Marshaler = (*MessageContentWrapper)(nil)
+var _ yaml.Unmarshaler = (*MessageContentWrapper)(nil)
 
-// GetPayloadMessages returns the current messages in the payload.
-func (s *Service) GetPayloadMessages() []llms.MessageContent {
-	if s.payload == nil {
-		return nil
+// --- Spinner ---
+
+// spinner provides a simple CLI spinner.
+type spinner struct {
+	frames     []string
+	pos        int
+	active     bool
+	stopChan   chan struct{} // Renamed from 'done'
+	output     io.Writer
+	mu         sync.Mutex // Added mutex for thread safety
+	ticker     *time.Ticker
+	initialPos int
+}
+
+// newSpinner creates a spinner instance.
+func newSpinner(output io.Writer) *spinner {
+	if output == nil {
+		output = os.Stderr // Default to stderr
 	}
-	return s.payload.Messages
+	return &spinner{
+		// Simple frames: "-\|/"
+		// Braille frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		frames:   []string{"-", "\\", "|", "/"},
+		stopChan: make(chan struct{}),
+		output:   output,
+	}
+}
+
+// start begins the spinner animation in a separate goroutine.
+func (s *spinner) start(initialPos int) {
+	s.mu.Lock()
+	if s.active {
+		s.mu.Unlock()
+		return // Already active
+	}
+	s.active = true
+	s.initialPos = initialPos
+	s.pos = 0
+	s.ticker = time.NewTicker(150 * time.Millisecond) // Slower ticker?
+	s.mu.Unlock()
+
+	go s.run()
+}
+
+// run is the internal loop for the spinner animation.
+func (s *spinner) run() {
+	s.mu.Lock()
+	// Print initial spaces if needed
+	if s.initialPos > 0 {
+		fmt.Fprint(s.output, strings.Repeat(" ", s.initialPos))
+	}
+	fmt.Fprint(s.output, " ") // Print initial space for the spinner frame
+	ticker := s.ticker
+	s.mu.Unlock()
+
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			s.mu.Lock()
+			// Clear the spinner frame before returning
+			fmt.Fprint(s.output, "\b \b")
+			s.mu.Unlock()
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			if !s.active { // Check active flag inside loop
+				fmt.Fprint(s.output, "\b \b") // Clear just in case
+				s.mu.Unlock()
+				return
+			}
+			// Update spinner frame
+			fmt.Fprint(s.output, "\b"+s.frames[s.pos])
+			s.pos = (s.pos + 1) % len(s.frames)
+			s.mu.Unlock()
+		}
+	}
+}
+
+// stop signals the spinner goroutine to stop and cleans up.
+func (s *spinner) stop() {
+	s.mu.Lock()
+	if !s.active {
+		s.mu.Unlock()
+		return // Already stopped
+	}
+	s.active = false
+	// Stop the ticker first
+	if s.ticker != nil {
+		s.ticker.Stop()
+	}
+	s.mu.Unlock()
+
+	// Signal the goroutine using non-blocking send
+	select {
+	case s.stopChan <- struct{}{}:
+	default:
+		// Goroutine might have already exited, which is fine.
+	}
+}
+
+// spin starts a spinner at the given character position using the specified writer.
+// It returns a function to stop the spinner.
+func spin(pos int, writer io.Writer) func() {
+	if writer == nil {
+		writer = os.Stderr // Default to stderr if nil
+	}
+	// Check if writer is a terminal TTY before starting spinner
+	isTerminal := false
+	if f, ok := writer.(*os.File); ok {
+		// Use golang.org/x/term for potentially better cross-platform check
+		isTerminal = term.IsTerminal(int(f.Fd()))
+	} else {
+		// If not a file, assume not a terminal (e.g., buffer in tests)
+		isTerminal = false
+	}
+
+	// Only start spinner if output is a terminal
+	if !isTerminal {
+		// log.Debug("Output is not a terminal, spinner disabled.") // Use service logger if available
+		return func() {} // Return no-op function if not a terminal
+	}
+
+	// log.Debug("Output is a terminal, starting spinner.") // Use service logger
+	s := newSpinner(writer)
+	s.start(pos)
+	return s.stop // Return the stop method
 }
