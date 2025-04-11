@@ -49,7 +49,7 @@ type Service struct {
 
 	// activeSession is the interactive session being used (for controlling UI state)
 	activeSession interactive.Session
-	
+
 	// resetSignalHandlerFunc is an optional callback to reset signal handling state
 	// Used to tell the main program to reset the double-interrupt timeout
 	resetSignalHandlerFunc func()
@@ -333,18 +333,19 @@ func (s *Service) Run(ctx context.Context, runCfg RunOptions) error {
 		}
 	}
 
-	if errors.Is(runErr, context.Canceled) {
-		s.logger.Debug("Run finished due to context cancellation")
-		
-		// CRITICAL FIX: Don't propagate context.Canceled error when in continuous mode
-		// This prevents Ctrl+C during generation from exiting the program
+	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, interactive.ErrInterrupted) {
+		s.logger.Debug("Run finished due to context cancellation or user interrupt")
+
+		// CRITICAL FIX: Don't propagate context.Canceled or ErrInterrupted error when in continuous mode
+		// This prevents Ctrl+C during generation or at prompt from exiting the program
 		if tempOpts.Continuous {
-			s.logger.Info("Suppressing context cancellation error in continuous mode")
-			return nil // Return nil instead of the cancellation error
+			s.logger.Info("Suppressing context cancellation/interrupt error in continuous mode")
+			return nil // Return nil instead of the cancellation/interrupt error
 		}
+		// For non-continuous mode, return the error as before
 	}
 
-	return runErr // Return the original error from the run methods
+	return runErr // Return the original error from the run methods (unless suppressed above)
 }
 
 // RunOptionsToOptions converts RunOptions to Options
@@ -438,6 +439,12 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 					return nil
 				case <-ctx.Done(): // Check context within streaming func
 					s.logger.Debug("Streaming function cancelled by context")
+					// If we have an active session, immediately set the interrupted state to prevent
+					// further output from buffered/pending AddResponsePart calls
+					if s.activeSession != nil {
+						s.logger.Debug("Setting ResponseStateSInterrupted from streaming function due to context cancellation")
+						s.activeSession.SetResponseState(interactive.ResponseStateSInterrupted)
+					}
 					return ctx.Err() // Return context error to stop streaming
 				}
 			}))
@@ -456,9 +463,18 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				s.logger.Debugf("Content generation cancelled or timed out: %v", err)
+				// Set interrupted state if active session exists and we haven't done so already
+				if s.activeSession != nil {
+					s.logger.Debug("Setting ResponseStateSInterrupted from error handler due to context cancellation")
+					s.activeSession.SetResponseState(interactive.ResponseStateSInterrupted)
+				}
 				// Don't log as error if it's just cancellation
 			} else {
 				s.logger.Errorf("Failed to generate content: %v", err)
+				// Set error state if active session exists
+				if s.activeSession != nil {
+					s.activeSession.SetResponseState(interactive.ResponseStateError)
+				}
 				// Optionally send error via the channel or handle differently
 				// For now, just log it. The error is implicitly returned by the outer function scope.
 			}
@@ -931,17 +947,18 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 		s.logger.Info("Generating initial response for continuous mode...")
 		// Pass ctx for the initial generation
 		if err := s.generateResponse(ctx, runCfg); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// Check for cancellation or timeout during initial generation
+			// Treat ErrInterrupted similarly to context cancellation for this initial phase
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, interactive.ErrInterrupted) {
 				s.logger.Info("Initial response generation cancelled or timed out.")
-				// IMPORTANT FIX: Don't propagate cancellation errors for initial generation
-				// Instead, continue to the interactive loop
+				// Don't exit, just continue to the interactive loop below
 				s.logger.Info("Continuing to interactive mode after interrupted initial response.")
 			} else {
-				// Log error but continue to interactive loop if possible
+				// Log other errors but still continue to interactive loop
 				s.logger.Errorf("Failed to generate initial response: %v", err)
 			}
-			// Always continue to interactive mode regardless of error
-			// We don't want to exit just because the initial response failed
+			// Always continue to interactive mode regardless of error/interrupt
+			// We don't want to exit just because the initial response failed or was interrupted
 		}
 	}
 
@@ -969,16 +986,17 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 		s.payload.addUserMessage(input)
 		// Pass the loopCtx to generateResponse
 		if err := s.generateResponse(loopCtx, runCfg); err != nil {
-			// Don't return error on cancellation, let session handle it
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// Handle cancellation/timeout/interrupt during generation
+			// Treat ErrInterrupted as cancellation for this purpose
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, interactive.ErrInterrupted) {
 				s.logger.Info("Response generation cancelled or timed out during interactive loop.")
-				// Let session handle exit, return nil here to allow potential cleanup in session
-				return nil
+				// Return the interrupt error to signal the loop should handle it gracefully
+				return interactive.ErrInterrupted
 			}
 			// Log other errors and inform user, but allow loop to continue
 			s.logger.Errorf("Failed to generate response during interactive loop: %v", err)
 			s.logger.Errorf("Error generating response: %v", err)
-			// Returning nil allows the loop to continue after an error.
+			// Returning nil allows the loop to continue after a non-cancellation error.
 			return nil
 		}
 
@@ -999,11 +1017,14 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 
 	sessionConfig := interactive.Config{
 		Stdin:               runCfg.Stdin, // Pass Stdin from RunOptions
+		Stdout:              runCfg.Stdout, // Pass Stdout
+		Stderr:              runCfg.Stderr, // Pass Stderr
 		Prompt:              ">>> ",
 		AltPrompt:           "... ",
 		HistoryFile:         historyFilePath,
 		ProcessFn:           processFn,
 		ConversationHistory: s.payload.MessagesToHistoryStrings(), // Provide current history
+		Logger:              s.logger,                              // Pass logger to session
 	}
 	var session interactive.Session
 	var sessionErr error
@@ -1039,42 +1060,29 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 	runErr := s.activeSession.Run(ctx)
 	s.logger.Debug("Interactive session finished.")
 
-	// CRITICAL BUGFIX: Don't exit even if runErr has a context error
-	// This completely prevents Ctrl+C in ANY situation from exiting the program in continuous mode
-	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
-		// MOST CRITICAL FIX: When in continuous mode, NEVER exit because of a context cancellation
-		// This ensures we can interrupt generation without exiting the program
-		
-		// Start over with a fresh session
-		s.logger.Info("Session was interrupted - restarting interactive session")
-		
-		// Create a fresh context derived from background
-		freshCtx := context.Background()
-		freshSessionCtx, cancelFresh := context.WithCancel(freshCtx)
-		defer cancelFresh()
-		
-		// Create a new session with same config
-		newSession, err := interactive.NewSession(sessionConfig)
-		if err != nil {
-			s.logger.Errorf("Failed to create new session after interruption: %v", err)
-			return nil // Still return nil to avoid exiting
+	// Check the error returned by the session's Run method
+	if runErr != nil {
+		// If the error is context cancellation or interruption, suppress it for continuous mode
+		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, interactive.ErrInterrupted) {
+			s.logger.Info("Interactive session exited due to cancellation/interrupt (suppressed in continuous mode).")
+			// History renaming is handled in the main Run function's defer
+			return nil // Suppress the error
 		}
-		
-		s.activeSession = newSession
-		
-		// Run new session with fresh context
-		s.logger.Info("Starting new interactive session")
-		return s.activeSession.Run(freshSessionCtx)
+
+		// For other errors (like io.EOF indicating clean exit), log and potentially return
+		if errors.Is(runErr, io.EOF) {
+			s.logger.Info("Interactive session exited normally (EOF).")
+			// History renaming handled in defer
+			return nil // Treat EOF as clean exit
+		}
+
+		// Log and return other unexpected errors from the session
+		s.logger.Errorf("Interactive session exited with unexpected error: %v", runErr)
+		// History renaming handled in defer
+		return runErr
 	}
 
-	// If Run returned an error other than context cancellation
-	if runErr != nil && !errors.Is(runErr, interactive.ErrInterrupted) && !errors.Is(runErr, io.EOF) {
-		s.logger.Errorf("Interactive session exited with error: %v", runErr)
-		// History renaming is handled in the main Run function's defer
-		return runErr // Return the error from the session itself
-	}
-
-	// Normal exit without cancellation or session error (or just ErrInterrupted)
+	// Normal exit without error
 	s.logger.Info("Interactive session exited normally.")
 	// History renaming is handled in the main Run function's defer
 
@@ -1090,15 +1098,17 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 	if len(s.payload.Messages) > 0 && s.payload.Messages[len(s.payload.Messages)-1].Role == llms.ChatMessageTypeHuman {
 		s.logger.Info("Generating initial response for continuous mode...")
 		// Generate non-streaming response
-		// Need to adapt generateResponse or call PerformCompletion directly
-		if response, err := s.PerformCompletion(ctx, s.payload); err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		response, err := s.PerformCompletion(ctx, s.payload)
+		if err != nil {
+			// Treat ErrInterrupted like cancellation
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, interactive.ErrInterrupted) {
 				s.logger.Info("Initial response generation cancelled or timed out.")
-				return err // Exit cleanly
+				// Don't exit, continue to the interactive loop
+				s.logger.Info("Continuing to interactive mode after interrupted initial response.")
+			} else {
+				s.logger.Errorf("Failed to generate initial response: %v", err)
+				// Continue to loop even on error
 			}
-			s.logger.Errorf("Failed to generate initial response: %v", err)
-			// Error already logged
-			// Optionally exit or continue to loop
 		} else {
 			// Print initial response
 			_, _ = runCfg.Stdout.Write([]byte(response))
@@ -1117,7 +1127,6 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 
 		// Special command handling (same as streaming)
 		if input == "/last" {
-			// ... (same as streaming version)
 			if lastMsg := s.getLastUserMessage(); lastMsg != "" {
 				return interactive.ErrUseLastMessage(lastMsg)
 			}
@@ -1129,13 +1138,14 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 		// Pass loopCtx to PerformCompletion
 		response, err := s.PerformCompletion(loopCtx, s.payload)
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// Treat interrupt like cancellation
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, interactive.ErrInterrupted) {
 				s.logger.Info("Response generation cancelled or timed out during interactive loop.")
-				return nil // Let session handle exit
+				return interactive.ErrInterrupted // Signal loop to handle interrupt
 			}
 			s.logger.Errorf("Failed to generate response during interactive loop: %v", err)
 			s.logger.Errorf("Error generating response: %v", err)
-			return nil // Allow loop to continue
+			return nil // Allow loop to continue after non-cancellation error
 		}
 
 		// Write response
@@ -1147,7 +1157,7 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 		return nil // Success for this input loop
 	}
 
-	// Configure and run interactive session (same as streaming version)
+	// Configure and run interactive session (same structure as streaming version)
 	historyFilePath, expandErr := expandTilde(runCfg.ReadlineHistoryFile)
 	if expandErr != nil {
 		s.logger.Warnf("Could not expand readline history path: %v", expandErr)
@@ -1158,14 +1168,17 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 
 	sessionConfig := interactive.Config{
 		Stdin:               runCfg.Stdin,
+		Stdout:              runCfg.Stdout, // Pass Stdout
+		Stderr:              runCfg.Stderr, // Pass Stderr
 		Prompt:              ">>> ",
 		AltPrompt:           "... ",
 		HistoryFile:         historyFilePath,
 		ProcessFn:           processFn,
 		ConversationHistory: s.payload.MessagesToHistoryStrings(),
+		Logger:              s.logger, // Pass logger
 	}
 
-	session, err := interactive.NewSession(sessionConfig)
+	session, err := interactive.NewSession(sessionConfig) // Assume non-TUI here
 	if err != nil {
 		return fmt.Errorf("failed to create interactive session: %w", err)
 	}
@@ -1177,37 +1190,18 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 	runErr := s.activeSession.Run(ctx)
 	s.logger.Debug("Interactive session finished.")
 
-	// CRITICAL BUGFIX: Don't exit even if runErr has a context error (same as streaming version)
-	// This completely prevents Ctrl+C in ANY situation from exiting the program in continuous mode
-	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
-		// MOST CRITICAL FIX: When in continuous mode, NEVER exit because of a context cancellation
-		// This ensures we can interrupt generation without exiting the program
-		
-		// Start over with a fresh session
-		s.logger.Info("Session was interrupted - restarting interactive session")
-		
-		// Create a fresh context derived from background
-		freshCtx := context.Background()
-		freshSessionCtx, cancelFresh := context.WithCancel(freshCtx)
-		defer cancelFresh()
-		
-		// Create a new session with same config
-		newSession, err := interactive.NewSession(sessionConfig)
-		if err != nil {
-			s.logger.Errorf("Failed to create new session after interruption: %v", err)
-			return nil // Still return nil to avoid exiting
+	// Handle session exit error (same logic as streaming version)
+	if runErr != nil {
+		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || errors.Is(runErr, interactive.ErrInterrupted) {
+			s.logger.Info("Interactive session exited due to cancellation/interrupt (suppressed in continuous mode).")
+			return nil // Suppress
 		}
-		
-		s.activeSession = newSession
-		
-		// Run new session with fresh context
-		s.logger.Info("Starting new interactive session")
-		return s.activeSession.Run(freshSessionCtx)
-	}
-	if runErr != nil && !errors.Is(runErr, interactive.ErrInterrupted) {
-		s.logger.Errorf("Interactive session exited with error: %v", runErr)
-		// History rename/save handled in Run defer
-		return runErr
+		if errors.Is(runErr, io.EOF) {
+			s.logger.Info("Interactive session exited normally (EOF).")
+			return nil // Clean exit
+		}
+		s.logger.Errorf("Interactive session exited with unexpected error: %v", runErr)
+		return runErr // Return other errors
 	}
 
 	s.logger.Info("Interactive session exited normally.")
@@ -1243,91 +1237,168 @@ func expandTilde(path string) (string, error) {
 // generateResponse handles calling the appropriate Perform* method and outputting results.
 // It now relies on Perform* methods to update the payload.
 // History saving is handled by the caller (Run) or Perform* internals.
+// It passes context down and propagates context errors or ErrInterrupted.
 func (s *Service) generateResponse(ctx context.Context, runCfg RunOptions) error {
 	s.payload.Stream = runCfg.StreamOutput // Ensure payload reflects current mode
 
 	var err error
 	if runCfg.StreamOutput {
 		s.logger.Debug("Generating streaming response...")
+		// Set state in active session *before* starting streaming
+		if s.activeSession != nil {
+			s.activeSession.SetResponseState(interactive.ResponseStateStreaming) // Signal streaming start
+		}
+
 		streamPayloads, streamErr := s.PerformCompletionStreaming(ctx, s.payload)
 		if streamErr != nil {
 			// Handle context cancellation from setup (unlikely)
 			if errors.Is(streamErr, context.Canceled) {
-				return streamErr
+				err = streamErr // Store error
+			} else {
+				err = fmt.Errorf("failed to initiate streaming: %w", streamErr) // Store error
 			}
-			return fmt.Errorf("failed to initiate streaming: %w", streamErr)
+			// Ensure state is reset on setup error
+			if s.activeSession != nil {
+				s.activeSession.SetResponseState(interactive.ResponseStateError)
+			}
+			return err
 		}
 
 		wasInterrupted := false
-		for r := range streamPayloads {
+	streamLoop:
+		for {
 			select {
 			case <-ctx.Done(): // Check context inside loop
 				wasInterrupted = true
-				break // Exit the loop
-			default:
-				// If using TUI, update TUI instead of direct write
-				if s.activeSession != nil && runCfg.UseTUI {
-					s.activeSession.AddResponsePart(r)
-				} else {
-					// Write directly to stdout if not using TUI or no active session
-					_, writeErr := runCfg.Stdout.Write([]byte(r))
-					if writeErr != nil {
-						s.logger.Warnf("Error writing stream chunk to stdout: %v", writeErr)
-						// Optionally break or continue on write error
+				s.logger.Info("Streaming context done.")
+				err = ctx.Err() // Assign context error
+				
+				// --- CRITICAL FIX ---
+				// Set interrupted state IMMEDIATELY when context is cancelled
+				// This must happen BEFORE any pending AddResponsePart calls try to write more data
+				if s.activeSession != nil {
+					// Setting this state will cause AddResponsePart to discard further chunks
+					s.logger.Debug("Setting ResponseStateSInterrupted immediately on context cancellation")
+					s.activeSession.SetResponseState(interactive.ResponseStateSInterrupted)
+				}
+				// --- END CRITICAL FIX ---
+				
+				break streamLoop // Exit the loop
+
+			case r, ok := <-streamPayloads:
+				if !ok {
+					// Channel closed normally
+					s.logger.Debug("Stream channel closed.")
+					break streamLoop // Exit the loop
+				}
+				// Check context again before processing the chunk
+				select {
+				case <-ctx.Done():
+					// Context was cancelled while we were receiving chunks
+					wasInterrupted = true
+					s.logger.Debug("Context cancelled before processing chunk")
+					err = ctx.Err()
+					
+					// Set interrupted state immediately
+					if s.activeSession != nil {
+						s.logger.Debug("Setting ResponseStateSInterrupted due to cancellation before processing chunk")
+						s.activeSession.SetResponseState(interactive.ResponseStateSInterrupted)
+					}
+					
+					break streamLoop
+				default:
+					// Context still active, proceed with processing
+					// Process the received chunk
+					if s.activeSession != nil {
+						// AddResponsePart will now check state before writing
+						s.activeSession.AddResponsePart(r) // Send to session UI
+					} else {
+						// Fallback: Write directly to stdout if no active session
+						_, writeErr := runCfg.Stdout.Write([]byte(r))
+						if writeErr != nil {
+							s.logger.Warnf("Error writing stream chunk to stdout: %v", writeErr)
+							// Optionally break or continue on write error
+						}
 					}
 				}
 			}
-			if wasInterrupted {
-				break
-			}
-		} // End range streamPayloads
+		} // End streamLoop
 
-		// Final newline and status message
-		if !runCfg.UseTUI { // Don't add extra newline if TUI is managing output
+		// Final newline and status update after loop finishes
+		if s.activeSession == nil { // Only write newline if not using session UI
 			_, _ = runCfg.Stdout.Write([]byte("\n")) // Ensure newline
 		}
 
-		if wasInterrupted || ctx.Err() != nil {
+		if wasInterrupted {
 			s.logger.Info("Response generation interrupted by context.")
-			if !runCfg.UseTUI { // TUI might handle its own interrupt message
-				s.logger.Info("Response interrupted.")
-			}
+			// State already set to SInterrupted above
 			// Payload was updated with partial response by PerformCompletionStreaming
-			err = ctx.Err() // Return context error
+			err = interactive.ErrInterrupted // Return specific interrupt error
+			
+			// Ensure we have a newline after interrupted output
+			if s.activeSession == nil {
+				_, _ = runCfg.Stdout.Write([]byte("\n"))
+			}
 		} else {
 			s.logger.Debug("Streaming response generation finished normally.")
 			// Payload was updated with full response by PerformCompletionStreaming
+			if s.activeSession != nil {
+				// Ensure there's a newline before returning to the prompt
+				s.activeSession.AddResponsePart("\n")
+				// Set state with a small delay to ensure proper display
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					s.activeSession.SetResponseState(interactive.ResponseStateReady) // Back to ready state
+				}()
+			}
 		}
 
 	} else { // Non-streaming
 		s.logger.Debug("Generating non-streaming response...")
+		// Set state before calling PerformCompletion
+		if s.activeSession != nil {
+			s.activeSession.SetResponseState(interactive.ResponseStateSubmitted) // Indicate processing start
+		}
+
 		response, performErr := s.PerformCompletion(ctx, s.payload)
 		if performErr != nil {
 			err = performErr // Assign error to return
-			// Error/cancellation logged within PerformCompletion
-		} else {
-			// If using TUI, add the whole response at once
-			if s.activeSession != nil && runCfg.UseTUI {
-				s.activeSession.AddResponsePart(response + "\n") // Add newline for TUI
+			// Check if it was cancellation/interrupt
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				// Error/cancellation logged within PerformCompletion
+				if s.activeSession != nil {
+					s.activeSession.SetResponseState(interactive.ResponseStateSInterrupted)
+				}
+				// Return a specific interrupt error if cancelled
+				err = interactive.ErrInterrupted
 			} else {
-				// Write directly if not TUI
+				// Other errors
+				if s.activeSession != nil {
+					s.activeSession.SetResponseState(interactive.ResponseStateError)
+				}
+			}
+		} else {
+			// Success
+			s.logger.Debug("Non-streaming response generation finished normally.")
+			if s.activeSession != nil {
+				s.activeSession.AddResponsePart(response + "\n")                   // Add whole response
+				s.activeSession.SetResponseState(interactive.ResponseStateReady) // Back to ready
+			} else {
+				// Fallback: Write directly if not TUI/session
 				_, writeErr := runCfg.Stdout.Write([]byte(response))
 				if writeErr != nil {
 					s.logger.Warnf("Error writing non-streaming response to stdout: %v", writeErr)
 				}
 				_, _ = runCfg.Stdout.Write([]byte("\n")) // Add newline
 			}
-			s.logger.Debug("Non-streaming response generation finished normally.")
 			// Payload was updated by PerformCompletion
 		}
 	}
 
-	// History saving is now handled outside this function (in Run or by Perform*)
-	// If we are in continuous mode, we might want to save history after each successful generation here?
-	// Let's stick to saving in Run for one-shot, and rely on Perform* updating payload for continuous.
+	// History saving is handled outside this function (in Run or by Perform*)
 	// Final save/rename for continuous happens after the loop exits in Run.
 
-	return err // Return any error encountered during generation/streaming
+	return err // Return any error encountered (including context/interrupt errors)
 }
 
 // SetNextCompletionPrefill sets the next completion prefill message.

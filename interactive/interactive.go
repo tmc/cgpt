@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/tmc/cgpt/ui/completion" // Use local completion package
+	"go.uber.org/zap"                   // Import zap
 )
 
 var ErrEmptyInput = errors.New("empty input")
@@ -49,6 +50,9 @@ type CommandFn func(ctx context.Context, command string) error
 // Config defines parameters for creating an interactive session.
 type Config struct {
 	Stdin io.ReadCloser
+	// Stdout and Stderr added for session output control
+	Stdout io.Writer
+	Stderr io.Writer
 
 	ConversationHistory []string
 	ProcessFn           func(ctx context.Context, input string) error // Handles normal input submission
@@ -64,6 +68,9 @@ type Config struct {
 
 	SingleLineHint string
 	MultiLineHint  string
+
+	// Logger is added to Config
+	Logger *zap.SugaredLogger
 }
 
 // InteractiveState (remains internal)
@@ -79,11 +86,11 @@ type ResponseState int
 const (
 	ResponseStateUndefined ResponseState = iota
 	ResponseStateReady
-	ResponseStateSubmitting
-	ResponseStateSubmitted
-	ResponseStateStreaming
-	ResponseStateSInterrupted
-	ResponseStateError
+	ResponseStateSubmitting // User submitted, waiting to start generation
+	ResponseStateSubmitted  // Generation started (non-streaming)
+	ResponseStateStreaming  // Generation started (streaming)
+	ResponseStateSInterrupted // Generation interrupted by user/context
+	ResponseStateError      // Error occurred during generation
 )
 
 // Defaults
@@ -128,10 +135,11 @@ func (r ResponseState) String() string {
 	}
 }
 
+// IsProcessing checks if the session is actively generating a response.
 func (r ResponseState) IsProcessing() bool {
-	// Only consider actively processing states as "processing"
-	// This is crucial for correctly handling Ctrl+C during generation
-	return r == ResponseStateSubmitting || 
-	       r == ResponseStateSubmitted || 
-	       r == ResponseStateStreaming
+	// Only consider states where the backend LLM is actively working
+	// or expected to be working soon.
+	return r == ResponseStateSubmitting || // Just submitted, about to call LLM
+		r == ResponseStateSubmitted || // LLM called (non-streaming)
+		r == ResponseStateStreaming // LLM called (streaming)
 }

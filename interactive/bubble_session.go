@@ -217,15 +217,23 @@ func (s *BubbleSession) Run(ctx context.Context) error {
 	case <-ctx.Done(): // Check if the parent context was cancelled
 		s.model.debug.Log(" > Context cancelled, quitting program...")
 		s.program.Quit() // Tell bubbletea to quit
-		<-progDone       // Wait for Run() to actually finish
+		runErr := <-progDone       // Wait for Run() to actually finish
+		s.model.debug.Log(" > Program finished after context cancel (err: %v)", runErr)
+		// BubbleTea's Run might return an error even after Quit is called
+		// Prioritize returning the context error
 		return ctx.Err() // Return the cancellation error
-		
+
 	case err := <-progDone: // Run finished on its own or via internal Quit
 		if ctx.Err() != nil { // Check if context was cancelled *during* Run
 			s.model.debug.Log(" > Program finished after context cancellation.")
-			return ctx.Err()
+			return ctx.Err() // Prioritize context error
 		}
 		s.model.debug.Log(" > Program finished.")
+		// If tea.Quit was called internally, err might be nil or a specific error
+		// Check if model requested quit and propagate ErrInterrupted if so
+		if s.model.quitting && err == nil {
+			return ErrInterrupted // Return our specific interrupt error
+		}
 		return err // Return error from Run() itself (can be nil)
 	}
 }
@@ -239,10 +247,11 @@ func (s *BubbleSession) SetStreaming(streaming bool) {
 
 // SetResponseState updates the response state.
 func (s *BubbleSession) SetResponseState(state ResponseState) {
+	s.ResponseState = state
 	if s.program != nil {
 		s.program.Send(processingMsg(state.IsProcessing()))
+		s.program.Send(streamingMsg(state == ResponseStateStreaming))
 	}
-	s.ResponseState = state
 }
 
 // AddResponsePart sends a part of the response to the Bubble Tea model via a message.
@@ -410,6 +419,7 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if trimmedInput != "" && !m.status.isProcessing { // Check status model
 			cmds = append(cmds, msgCmd(addUserMessageMsg{content: trimmedInput}))
 			m.status.isProcessing = true // Update status model
+			m.status.isStreaming = true  // Assume streaming for now
 			m.status.currentErr = nil
 			m.debug.Log(" > Submitting input (from msg): '%s'", trimmedInput)
 			cmds = append(cmds, m.status.spinner.Tick, m.triggerProcessFn(trimmedInput))
@@ -469,6 +479,12 @@ func (m *bubbleModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Delegate to mode-specific handlers below
 		// No action needed here, handled by mode switch below
+
+	// --- Other message types ---
+	case clearCtrlCHintMsg: // Handle the message to clear the Ctrl+C hint
+		if m.status.currentErr != nil && m.status.currentErr.Error() == "Press Ctrl+C again to exit." {
+			m.status.currentErr = nil
+		}
 
 		// --- Other message types ---
 		// case someOtherMsg:
@@ -632,7 +648,8 @@ func (m *bubbleModel) triggerProcessFn(input string) tea.Cmd {
 		// Check context before starting potentially long operation
 		if m.ctx.Err() != nil {
 			m.debug.Log(" > Context done before starting ProcessFn")
-			return errMsg{m.ctx.Err()} // Return context error
+			// Signal processing stopped due to context cancellation before start
+			return tea.Batch(msgCmd(errMsg{m.ctx.Err()}), msgCmd(processingMsg(false)))()
 		}
 
 		m.debug.Log(" > Starting ProcessFn for: '%s'", input)
@@ -644,18 +661,24 @@ func (m *bubbleModel) triggerProcessFn(input string) tea.Cmd {
 		if m.ctx.Err() != nil {
 			m.debug.Log(" > Context done during/after ProcessFn")
 			// If context was cancelled, prioritize that error unless ProcessFn had a different specific error
-			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && err != nil {
-				// ProcessFn failed *before* context cancellation was detected
-				m.debug.Log(" > ProcessFn error before context cancel: %v", err)
+			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ErrInterrupted) {
+				// ProcessFn failed *before* or *differently* than context cancellation/interrupt was detected
+				m.debug.Log(" > ProcessFn error before/besides context cancel: %v", err)
 				return tea.Batch(msgCmd(errMsg{err}), msgCmd(processingMsg(false)))()
 			}
-			return processingMsg(false) // Signal processing stopped due to cancellation
+			// If error was cancellation/interrupt, just signal processing stopped
+			return processingMsg(false)
 		}
 
 		// Handle other errors from ProcessFn
 		if err != nil {
 			m.debug.Log(" > ProcessFn error: %v", err)
-			// Return both an error message and a processing finished message
+			// Special handling for ErrInterrupted from ProcessFn itself
+			if errors.Is(err, ErrInterrupted) {
+				// Don't treat interrupt as an error message, just stop processing
+				return processingMsg(false)
+			}
+			// Return both an error message and a processing finished message for other errors
 			return tea.Batch(
 				msgCmd(errMsg{err}),
 				msgCmd(processingMsg(false)),
@@ -893,14 +916,16 @@ func handleCtrlC(m *bubbleModel) (tea.Model, tea.Cmd) {
 
 	if m.status.isProcessing || m.status.isStreaming { // Use status model
 		m.debug.Log(" > Ctrl+C: Attempting to cancel processing")
-		// Send cancellation signal via context if possible (depends on ProcessFn implementation)
-		// For now, just update local state
+		// Signal cancellation to the ProcessFn via context
+		// The triggerProcessFn command captures the context and handles cancellation
+		// Here, we just update the UI state and potentially signal tea.Quit if needed later
 		m.status.isProcessing = false // Update status model
 		m.status.isStreaming = false
 		m.conversationVM.respBuffer.Reset() // Update conversationVM
 		m.input.editor.Focus()
 		m.status.currentErr = nil // Update status model
 		// Return a system message indicating cancellation
+		// Let the triggerProcessFn command handle returning ErrInterrupted
 		return m, msgCmd(addSystemMessageMsg{content: "[Processing cancelled by user]"})
 	}
 

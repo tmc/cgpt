@@ -33,15 +33,20 @@ func (s *JSSession) Run(ctx context.Context) error {
 	// select {}
 }
 
+// SetResponseState is a no-op.
+func (s *JSSession) SetResponseState(state ResponseState) {
+	// No-op: No UI state to update in this stub.
+}
+
 // SetStreaming is a no-op.
 func (s *JSSession) SetStreaming(streaming bool) {
 	// No-op: No UI to update in this stub.
 }
 
 // SetLastInput stores the last input in the config (minimal state).
-func (s *JSSession) SetLastInput(input string) {
-	s.config.LastInput = input
-}
+// func (s *JSSession) SetLastInput(input string) {
+// 	s.config.LastInput = input
+// }
 
 // AddResponsePart is a no-op.
 func (s *JSSession) AddResponsePart(part string) {
@@ -50,7 +55,8 @@ func (s *JSSession) AddResponsePart(part string) {
 
 // GetHistory returns the loaded history or an empty slice.
 func (s *JSSession) GetHistory() []string {
-	return s.config.LoadedHistory // Return whatever was loaded initially
+	// return s.config.LoadedHistory // Return whatever was loaded initially
+	return s.config.ConversationHistory // Use ConversationHistory field
 }
 
 // GetHistoryFilename returns the configured filename.

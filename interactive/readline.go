@@ -12,26 +12,37 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chzyer/readline"
+	"go.uber.org/zap"
 	"golang.org/x/term"
 )
 
 // ReadlineSession implements an interactive terminal session using chzyer/readline.
 type ReadlineSession struct {
-	reader         *readline.Instance
-	config         Config
-	buffer         strings.Builder
-	state          InteractiveState
-	responeState   ResponseState
-	multiline      bool      // True when in explicit multiline mode (shows "..." prompt)
-	pendingSubmit  bool      // True when we've typed a line but need to press Enter again
+	reader *readline.Instance
+	config Config
+	log    *zap.SugaredLogger // Added logger field
+
+	// State management
+	mu            sync.Mutex // Protects access to shared state below
+	buffer        strings.Builder
+	state         InteractiveState
+	responseState atomic.Value // Use atomic.Value for ResponseState
+	multiline     bool         // True when in explicit multiline mode (shows "..." prompt)
+	pendingSubmit bool         // True when we've typed a line but need to press Enter again
+
+	// Other state
 	lastInput      string    // Track last successful input
 	expectingCtrlE bool      // For Ctrl+X, Ctrl+E support
 	interruptCount int       // Track consecutive Ctrl+C presses
 	lastCtrlCTime  time.Time // Track time of last Ctrl+C press
-	isStreaming    bool      // Track streaming state for prompt handling
+	isStreaming    bool      // Track streaming state for prompt handling (Redundant? Use responseState)
+
+	// Cancellation for ongoing processing
+	currentProcessCancel context.CancelFunc // Stores the cancel func for the current ProcessFn call
 }
 
 // Compile-time check for Session interface
@@ -46,7 +57,7 @@ func (s *ReadlineSession) GetHistoryFilename() string {
 func (s *ReadlineSession) LoadHistory(filename string) error {
 	// Readline handles history loading via HistoryFile config.
 	// This method could potentially reload if needed, but is complex.
-	fmt.Fprintf(os.Stderr, "Warning: LoadHistory not fully implemented for readline session.\n")
+	s.log.Warn("LoadHistory not fully implemented for readline session.")
 	return nil
 }
 
@@ -54,19 +65,28 @@ func (s *ReadlineSession) LoadHistory(filename string) error {
 func (s *ReadlineSession) SaveHistory(filename string) error {
 	// Readline handles history saving via HistoryFile config and Close().
 	// This method could force a save if needed.
-	fmt.Fprintf(os.Stderr, "Warning: SaveHistory not fully implemented for readline session.\n")
+	s.log.Warn("SaveHistory not fully implemented for readline session.")
 	return nil
 }
 
 // Quit closes the readline instance.
 func (s *ReadlineSession) Quit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.reader != nil {
-		s.reader.Close()
+		s.reader.Close() // Close should be thread-safe, but lock for consistency
 	}
 }
 
 // NewSession creates a new interactive readline session.
 func NewSession(cfg Config) (Session, error) {
+	// Setup logger
+	log := cfg.Logger
+	if log == nil {
+		log = zap.NewNop().Sugar() // Use Nop logger if none provided
+	}
+	log = log.Named("readline") // Add name to logger
+
 	if cfg.SingleLineHint == "" {
 		cfg.SingleLineHint = DefaultSingleLineHint
 	}
@@ -85,58 +105,57 @@ func NewSession(cfg Config) (Session, error) {
 	// Expand tilde for history file path
 	historyPath, err := expandTilde(cfg.HistoryFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not expand history file path '%s': %v\n", cfg.HistoryFile, err)
+		log.Warnf("Could not expand history file path '%s': %v", cfg.HistoryFile, err)
 		historyPath = cfg.HistoryFile // Use original path as fallback
 	}
 	cfg.HistoryFile = historyPath // Update config with expanded path
 
 	session := &ReadlineSession{
-		config:        cfg,
-		state:         StateSingleLine,
-		multiline:     false,
-		pendingSubmit: false,
+		config: cfg,
+		log:    log,
+		state:  StateSingleLine,
 	}
+	session.responseState.Store(ResponseStateReady) // Initialize atomic state
 
 	listener := session.createListener()
 	painter := PainterFunc(func(line []rune, pos int) []rune {
-		// Painter is called frequently, keep it fast.
-
 		// Don't show any hints while streaming responses
-		if session.isStreaming {
+		currentState := session.responseState.Load().(ResponseState)
+		if currentState == ResponseStateStreaming {
 			return line
 		}
-
-		// Don't modify non-empty lines - let the user see exactly what they type
+		// Don't modify non-empty lines
 		if len(line) > 0 {
 			return line
 		}
-
-		// For empty lines when in pendingSubmit mode - no need for extra indicators
-		// since we now show the ⏎ in the prompt itself
-
-		// For initial empty lines (when buffer is also empty)
+		// For empty lines when buffer is empty - no hints
 		if session.buffer.Len() == 0 {
-			// No text prompts at all - completely clean interface
 			return line
 		}
-
-		return line // Return original line
+		return line
 	})
 
 	// Determine if Stdin is a TTY
 	stdinFile, stdinIsFile := cfg.Stdin.(*os.File)
 	isTerminalFunc := func() bool {
 		if stdinIsFile {
-			// Ensure stdinFile is not nil before accessing Fd()
 			if stdinFile == nil {
-				// If stdin is not an os.File or is nil, assume not a terminal
-				// This might happen in tests or specific environments.
-				// Fallback to checking os.Stdout as a proxy?
-				return term.IsTerminal(int(os.Stdout.Fd()))
+				// Check os.Stdout if stdin isn't a usable os.File
+				if cfg.Stdout != nil {
+					if f, ok := cfg.Stdout.(*os.File); ok {
+						return term.IsTerminal(int(f.Fd()))
+					}
+				}
+				return term.IsTerminal(int(os.Stdout.Fd())) // Fallback
 			}
 			return term.IsTerminal(int(stdinFile.Fd()))
 		}
-		// Fallback: Check if os.Stdout is a TTY, assuming it's the interactive one
+		// Fallback: Check Stdout TTY status
+		if cfg.Stdout != nil {
+			if f, ok := cfg.Stdout.(*os.File); ok {
+				return term.IsTerminal(int(f.Fd()))
+			}
+		}
 		return term.IsTerminal(int(os.Stdout.Fd()))
 	}
 
@@ -148,27 +167,43 @@ func NewSession(cfg Config) (Session, error) {
 		HistoryLimit:      10000,
 		HistorySearchFold: true,                          // Case-insensitive history search
 		AutoComplete:      readline.NewPrefixCompleter(), // Basic prefix completer
-		// Stdin will be set below based on TTY detection
-		Listener:               listener, // Custom key handling
-		Painter:                painter,  // Custom hint display
-		ForceUseInteractive:    true,     // Try interactive features even if TTY detection fails
-		DisableAutoSaveHistory: true,     // We handle saving manually
+		Listener:          listener,                      // Custom key handling
+		Painter:           painter,                       // Custom hint display
+		// Stdin/out/err will be set below based on config/TTY
+		ForceUseInteractive:    true, // Try interactive features even if TTY detection fails
+		DisableAutoSaveHistory: true, // We handle saving manually
 		FuncIsTerminal:         isTerminalFunc,
-		// Consider adding other readline config options if needed
 	}
 
-	// Check if Stdin is specifically the TTY file we opened, and pass it directly
-	// to readline's TTY fields. Otherwise, let readline use defaults (os.Stdin/out/err).
-	if ttyFile, ok := cfg.Stdin.(*os.File); ok && ttyFile.Name() == "/dev/tty" {
-		readlineConfig.Stdin = ttyFile
-		// Also crucial: Tell readline to use the same TTY for output!
-		readlineConfig.Stdout = ttyFile
-		readlineConfig.Stderr = ttyFile // Or os.Stderr if you want errors separate
-		fmt.Fprintln(os.Stderr, "cgpt(readline): Using provided /dev/tty handle for Stdin/Stdout/Stderr.")
+	// Set Stdout/Stderr from config if provided
+	if cfg.Stdout != nil {
+		readlineConfig.Stdout = cfg.Stdout
+		log.Debug("Using provided Stdout for readline")
 	} else {
-		// Let readline use its defaults if Stdin isn't the specific TTY handle
-		readlineConfig.Stdin = cfg.Stdin
-		fmt.Fprintln(os.Stderr, "cgpt(readline): Using default Stdin/Stdout/Stderr.")
+		log.Debug("Using default os.Stdout for readline")
+	}
+	if cfg.Stderr != nil {
+		readlineConfig.Stderr = cfg.Stderr
+		log.Debug("Using provided Stderr for readline")
+	} else {
+		log.Debug("Using default os.Stderr for readline")
+	}
+
+	// Handle Stdin specifically for TTYs
+	if ttyFile, ok := cfg.Stdin.(*os.File); ok && isTerminalFunc() {
+		readlineConfig.Stdin = ttyFile
+		// If Stdin is the TTY, ensure Stdout/Stderr are also set, preferring config values
+		if cfg.Stdout == nil {
+			readlineConfig.Stdout = ttyFile
+		}
+		if cfg.Stderr == nil {
+			readlineConfig.Stderr = ttyFile // Or default os.Stderr
+		}
+		log.Debugf("Using provided TTY handle (%s) for readline Stdin.", ttyFile.Name())
+	} else {
+		// Stdin is not a TTY (pipe?) or wasn't provided as *os.File
+		readlineConfig.Stdin = cfg.Stdin // Use the provided reader directly
+		log.Debug("Using provided non-TTY Stdin or default for readline.")
 	}
 
 	reader, err := readline.NewEx(readlineConfig)
@@ -177,75 +212,92 @@ func NewSession(cfg Config) (Session, error) {
 	}
 	session.reader = reader
 
+	log.Info("Readline session initialized")
 	return session, nil
 }
 
-// SetStreaming updates the streaming state, affecting the prompt display.
-func (s *ReadlineSession) SetStreaming(streaming bool) {
-	changed := s.isStreaming != streaming
-	s.isStreaming = streaming
-	// Force a prompt redraw only if the state actually changed
-	if changed && s.reader != nil {
-		s.reader.SetPrompt(s.getPrompt())
-		s.reader.Refresh() // Redraw the line
+// SetResponseState updates the response state atomically and refreshes the prompt.
+func (s *ReadlineSession) SetResponseState(state ResponseState) {
+	// Store previous state first so we can detect transitions
+	prevState := s.responseState.Load().(ResponseState)
+	s.responseState.Store(state)
+	s.log.Debugf("Response state changed from %s to: %s", prevState, state)
+
+	// Refresh prompt when state changes, especially when becoming ready/interrupted
+	if state == ResponseStateReady || state == ResponseStateSInterrupted {
+		s.mu.Lock() // Lock needed for reader access
+		if s.reader != nil {
+			// Clear the current line completely for better visual transition
+			if prevState.IsProcessing() && (state == ResponseStateSInterrupted || state == ResponseStateReady) {
+				// Only clean line when we're transitioning from processing to interrupted/ready
+				fmt.Fprint(s.reader.Config.Stderr, "\r\033[K") // Clear current line
+			}
+			
+			s.reader.SetPrompt(s.getPrompt())
+			s.reader.Clean() // Ensure line is clean
+			s.reader.Refresh() // Redraw the line and prompt
+		}
+		s.mu.Unlock()
 	}
 }
 
-// AddResponsePart prints the response part directly. Attempts cleaner rendering.
+// AddResponsePart prints the response part directly.
+// Assumes it's called from the ProcessFn goroutine.
 func (s *ReadlineSession) AddResponsePart(part string) {
+	s.mu.Lock() // Lock for safe access to reader and its output writer
+	defer s.mu.Unlock()
+	
+	// --- CRITICAL CHECK ---
+	// Check state *before* writing. If interrupted or already ready for next prompt, discard the part.
+	currentState := s.responseState.Load().(ResponseState)
+	if currentState == ResponseStateSInterrupted || currentState == ResponseStateReady {
+		s.log.Debugf("Discarding response part in state %s: %q", currentState, part)
+		return // Do not print if interrupted or already finished
+	}
+	// --- END CHECK ---
+	
 	if s.reader == nil {
 		fmt.Print(part) // Fallback if reader not initialized
 		return
 	}
-	// Simple approach: Print the part and refresh the prompt.
-	// This might cause the current input line to flicker or be temporarily cleared.
+	// Use Clean/Refresh to minimize prompt interference
 	s.reader.Clean()
-	fmt.Print(part)
+	// Use the configured Stdout writer for output
+	fmt.Fprint(s.reader.Config.Stdout, part)
 	s.reader.Refresh() // Refresh might redraw the prompt and current input line
 }
 
-// getPrompt returns the appropriate prompt based on the current state.
+// getPrompt returns the appropriate prompt based on the current state. Needs locking.
 func (s *ReadlineSession) getPrompt() string {
-	if s.isStreaming {
-		return ""
-	} // No prompt during streaming
+	currentState := s.responseState.Load().(ResponseState)
+	if currentState == ResponseStateStreaming || currentState == ResponseStateSubmitted {
+		// Minimal prompt or empty while processing/streaming
+		return "" // Or maybe a spinner indicator if desired?
+	}
 	if s.multiline {
 		return s.config.AltPrompt
 	}
 
-	// Basic prompt without modifications
 	prompt := s.config.Prompt
-
-	// If we're waiting for the second Enter (pendingSubmit), add a simple ↵ symbol
 	if s.pendingSubmit {
-		// Remove trailing space if it exists
 		prompt = strings.TrimSuffix(prompt, " ")
-
-		// Append the enter symbol with no space
 		return prompt + ansiDimColor("↵")
 	}
-
-	// For normal mode, ensure prompt has a trailing space
 	if prompt != "" && !strings.HasSuffix(prompt, " ") {
 		prompt += " "
 	}
-
 	return prompt
-}
-
-// getPlaceHolder returns the hint text with ANSI codes for dim color.
-func (s *ReadlineSession) getPlaceHolder() string {
-	// We're using a minimal approach now with no initial hints
-	// Only showing hints when in pendingSubmit mode
-	return ""
 }
 
 // ansiDimColor applies dim ANSI color code.
 func ansiDimColor(text string) string { return fmt.Sprintf("\x1b[90m%s\x1b[0m", text) }
 
-// createListener returns a listener that handles specific key events.
+// createListener returns a listener that handles specific key events. Needs locking.
 func (s *ReadlineSession) createListener() readline.Listener {
 	return readline.FuncListener(func(line []rune, pos int, key rune) (newLine []rune, newPos int, ok bool) {
+		s.mu.Lock() // Lock for state access (lastInput, buffer, expectingCtrlE)
+		defer s.mu.Unlock()
+
 		processed := false
 		newLine = line
 		newPos = pos
@@ -263,16 +315,22 @@ func (s *ReadlineSession) createListener() readline.Listener {
 		if s.expectingCtrlE {
 			s.expectingCtrlE = false
 			if key == 5 { // Ctrl+E
-				fmt.Fprintln(os.Stderr, "\nEditing in $EDITOR...")
+				s.log.Debug("Ctrl+X, Ctrl+E detected, launching editor")
+				// Unlock before calling blocking editor function
+				s.mu.Unlock()
 				currentContent := s.buffer.String()
 				if s.buffer.Len() > 0 && len(line) > 0 {
 					currentContent += "\n"
 				}
 				currentContent += string(line)
 				editedText, err := s.editInEditor(currentContent)
+				// Re-lock after editor returns
+				s.mu.Lock()
+
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "Editor error: %v\n", err)
-					s.reader.Refresh()
+					s.log.Errorf("Editor error: %v", err)
+					fmt.Fprintf(s.reader.Config.Stderr, "Editor error: %v\n", err)
+					// No need to refresh here, readline will handle it
 				} else {
 					if strings.Contains(editedText, "\n") {
 						s.buffer.Reset()
@@ -292,11 +350,12 @@ func (s *ReadlineSession) createListener() readline.Listener {
 				return // Return directly
 			}
 		}
-		if key == 24 {
+		if key == 24 { // Ctrl+X
+			s.log.Debug("Ctrl+X detected, waiting for Ctrl+E")
 			s.expectingCtrlE = true
 			ok = true
 			return newLine, newPos, ok
-		} // Ctrl+X
+		}
 
 		ok = processed
 		return // Default handling
@@ -305,187 +364,224 @@ func (s *ReadlineSession) createListener() readline.Listener {
 
 // Run starts the interactive input loop for readline.
 func (s *ReadlineSession) Run(ctx context.Context) error {
-	closeDone := false
 	defer func() {
-		if !closeDone && s.reader != nil { // Check reader isn't nil
-			s.reader.Close()
+		s.mu.Lock()
+		// Ensure any ongoing process is cancelled on exit
+		if s.currentProcessCancel != nil {
+			s.log.Debug("Cancelling ongoing process on session exit")
+			s.currentProcessCancel()
+			s.currentProcessCancel = nil
 		}
+		// Close readline instance
+		if s.reader != nil {
+			s.log.Info("Closing readline instance")
+			s.reader.Close()
+			s.reader = nil // Prevent double close
+		}
+		s.mu.Unlock()
 	}()
 
-	done := make(chan struct{})
-	defer close(done)
-
-	// Only use context cancellation - signals are now handled at the top level
-	// We need a more specialized approach to context handling
-	// SIGINT has two different behaviors depending on state:
-	// 1. During response generation: Just interrupt the response
-	// 2. During input: Either clear input or exit if line is empty
-	
-	// We don't need to close the reader on context cancellation,
-	// as we'll handle that specially when it's a processing interrupt
+	// Goroutine to close readline instance when the main context is cancelled
+	// This helps unblock the Readline() call if the program is terminated externally.
+	contextDone := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			// CRITICAL FIX: Different handling for processing vs non-processing states
-			
-			// If we're processing a response (ResponseStateSubmitted or Streaming)
-			// we want the cancellation to be handled in the ProcessFn section
-			// and NOT exit the program
-			// Get the current state and immediately handle differently based on processing state
-			currentState := s.responeState
-			s.SetStreaming(false) // First make sure we're not in streaming display mode
-			
-			if !currentState.IsProcessing() {
-				// CASE 1: For non-processing states (like waiting for input):
-				// terminate the session by closing the reader
-				fmt.Fprintln(os.Stderr, "\nTerminating session...")
-				if s.reader != nil {
-					s.reader.Close() // Interrupt the blocking Readline call
-					closeDone = true
-				}
-			} else {
-				// CASE 2: For processing states (response generation):
-				// DO NOT terminate the session, just interrupt the current response
-				fmt.Fprintln(os.Stderr, ansiDimColor("\nInterrupting response generation only (press Ctrl+C twice rapidly to force exit)"))
-				
-				// Critical: explicitly set a flag to never propagate this cancellation
-				// This ensures we keep the session alive even if the parent context is cancelled
-				s.SetResponseState(ResponseStateSInterrupted)
-				
-				// Most important: return from this goroutine without doing anything else
-				// Let the goroutine monitoring processingDone channel handle cleanup
-				return
+			s.log.Infof("Main context cancelled (%v), closing readline.", ctx.Err())
+			s.mu.Lock()
+			if s.reader != nil {
+				s.reader.Close() // Interrupt the blocking Readline call
 			}
-		case <-done:
-			// Loop finished normally
+			s.mu.Unlock()
+		case <-contextDone:
+			// Normal exit, do nothing
 		}
 	}()
+	defer close(contextDone) // Signal goroutine to exit
 
 	inTripleQuoteMode := false
 	submitBuffer := false
 
 	for {
-		// Check context before blocking Readline call
+		// Check context before blocking Readline call - allows early exit if cancelled before prompt
 		if ctx.Err() != nil {
-			// If we're in a processing state, we want to return to the prompt
-			// rather than exiting the program
-			if s.responeState.IsProcessing() {
-				// Reset state and continue
-				s.SetResponseState(ResponseStateReady)
-				fmt.Fprintln(os.Stderr, ansiDimColor("Response interrupted - ready for next input."))
-				// Clear any pending operations
-				s.buffer.Reset()
-				inTripleQuoteMode = false
-				s.multiline = false
-				s.pendingSubmit = false
-				s.expectingCtrlE = false
-				continue
-			}
-			// Otherwise propagate the context error (when not in processing state)
-			// This is typically when user presses Ctrl+C while in prompt
+			s.log.Infof("Context cancelled before Readline call: %v", ctx.Err())
 			return ctx.Err()
 		}
 
-		s.reader.SetPrompt(s.getPrompt())
-		line, err := s.reader.Readline() // This blocks
+		s.mu.Lock() // Lock for state and reader access
+		if s.reader == nil {
+			s.mu.Unlock()
+			s.log.Warn("Readline instance is nil, exiting Run loop.")
+			return errors.New("readline instance closed unexpectedly")
+		}
+		currentReader := s.reader // Capture reader instance while locked
+		currentReader.SetPrompt(s.getPrompt())
+		s.mu.Unlock() // Unlock before blocking call
+
+		line, err := currentReader.Readline() // This blocks
 
 		// Check context *immediately* after Readline returns
-		// Skip context cancellation check here - handled above and also in each interrupt case
-		// This is crucial to prevent Ctrl+C during response generation from exiting the program
+		if ctx.Err() != nil {
+			s.log.Infof("Context cancelled after Readline call: %v", ctx.Err())
+			// Don't return immediately if we were processing, let interrupt handle it
+			if s.responseState.Load().(ResponseState).IsProcessing() {
+				s.log.Warn("Context cancelled during processing, relying on interrupt logic.")
+				// The ErrInterrupt block should handle this if reader was closed by context goroutine
+			} else {
+				return ctx.Err()
+			}
+		}
 
 		// --- Handle Readline Errors ---
+		s.mu.Lock() // Lock for state modification and potential cancel call
+
 		if errors.Is(err, readline.ErrInterrupt) { // Ctrl+C
-			// If there's text on the line, just clear it instead of exiting
-			if len(line) > 0 || s.buffer.Len() > 0 {
-				// Print "Input cleared" without adding extra newlines
-				fmt.Fprint(os.Stderr, "\r")                           // Carriage return to start of line
-				fmt.Fprint(os.Stderr, ansiDimColor("Input cleared"))  // Show message
-				fmt.Fprint(os.Stderr, "                         \r")  // Clear remainder of line and reset cursor
+			currentState := s.responseState.Load().(ResponseState)
+			s.log.Debugf("Ctrl+C received, current state: %s", currentState)
+
+			if currentState.IsProcessing() {
+				// --- Interrupt Processing ---
+				s.log.Info("Interrupting ongoing response generation.")
+				if s.currentProcessCancel != nil {
+					s.currentProcessCancel() // Signal the ProcessFn goroutine to stop
+					s.currentProcessCancel = nil
+				} else {
+					s.log.Warn("Interrupt received while processing, but no cancel function found!")
+				}
+				s.SetResponseState(ResponseStateSInterrupted) // Update state (atomic)
 				
-				// Reset state
+				// Ensure we have a clean line before showing feedback
+				fmt.Fprint(currentReader.Config.Stderr, "\r\033[K") // Clear current line completely
+				// Provide feedback directly to stderr
+				fmt.Fprintln(currentReader.Config.Stderr, ansiDimColor("[Interrupted]"))
+				
+				// Reset buffer/multiline state immediately
 				s.buffer.Reset()
 				inTripleQuoteMode = false
 				s.multiline = false
 				s.pendingSubmit = false
 				s.expectingCtrlE = false
-				continue // Continue the loop
+				
+				// Force refresh the prompt after a short delay to ensure proper display
+				go func() {
+					time.Sleep(50 * time.Millisecond) // Small delay to let other goroutines complete
+					s.mu.Lock()
+					if s.reader != nil {
+						s.reader.Clean()
+						s.reader.Refresh()
+					}
+					s.mu.Unlock()
+				}()
+				
+				s.mu.Unlock() // Unlock before continuing loop
+				continue      // Go back to prompt
 			} else {
-				// Exit on Ctrl+C when line is empty (with minimal output)
-				fmt.Fprint(os.Stderr, "\r")                       // Carriage return to start of line
-				fmt.Fprint(os.Stderr, ansiDimColor("Exiting (Ctrl+C at prompt, or press again to force)"))    // Show clear message
-				fmt.Fprint(os.Stderr, "                                      \r")   // Clear remainder of line
-
-				// No need to close reader here, defer and cancellation goroutine handle it
-				return err // Return the interrupt error
+				// --- Interrupt while Idle ---
+				// If there's text on the line or in buffer, just clear it
+				if len(line) > 0 || s.buffer.Len() > 0 {
+					s.log.Debug("Ctrl+C clearing input line/buffer")
+					// Print feedback directly
+					fmt.Fprint(currentReader.Config.Stderr, "\r"+ansiDimColor("Input cleared")+"        \r")
+					s.buffer.Reset()
+					inTripleQuoteMode = false
+					s.multiline = false
+					s.pendingSubmit = false
+					s.expectingCtrlE = false
+					s.mu.Unlock()
+					continue // Continue the loop
+				} else {
+					// Exit on Ctrl+C when line is empty
+					s.log.Info("Exiting on Ctrl+C at empty prompt.")
+					fmt.Fprint(currentReader.Config.Stderr, "\r"+ansiDimColor("Exiting...")+"        \r")
+					s.mu.Unlock()
+					return ErrInterrupted // Return specific interrupt error
+				}
 			}
-		} else if errors.Is(err, io.EOF) { // Ctrl+D or reader closed due to context cancel
+		} else if errors.Is(err, io.EOF) { // Ctrl+D or reader closed
+			s.log.Debug("EOF received from Readline")
 			if ctx.Err() != nil {
+				s.log.Infof("EOF received after context cancellation: %v", ctx.Err())
+				s.mu.Unlock()
 				return ctx.Err() // Prioritize context cancellation
 			}
 			// Handle Ctrl+D logic
 			if s.buffer.Len() > 0 || len(line) > 0 {
-				fmt.Fprintln(os.Stderr)
+				s.log.Debug("Ctrl+D submitting remaining buffer")
+				fmt.Fprintln(currentReader.Config.Stderr) // Newline for clarity
 				if s.buffer.Len() == 0 && len(line) > 0 {
 					s.buffer.WriteString(line)
 				}
 				submitBuffer = true // Submit remaining buffer on Ctrl+D
+				// Let the submit logic handle it below
 			} else {
-				// Exit with Ctrl+D (minimal output)
-				fmt.Fprint(os.Stderr, "\r")                       // Carriage return to start of line
-				fmt.Fprint(os.Stderr, ansiDimColor("Exiting"))    // Show message without dots
-				fmt.Fprint(os.Stderr, "                    \r")   // Clear remainder of line
-				return err // Return EOF to signal exit
+				// Exit cleanly on Ctrl+D at empty prompt
+				s.log.Info("Exiting on Ctrl+D at empty prompt.")
+				fmt.Fprint(currentReader.Config.Stderr, "\r"+ansiDimColor("Exiting...")+"        \r")
+				s.mu.Unlock()
+				return io.EOF // Return EOF to signal clean exit
 			}
 		} else if err != nil {
-			// Handle other potential readline errors
+			// Handle other potential readline errors (e.g., reader closed unexpectedly)
+			// Check if the error occurred *because* the context was cancelled
+			if ctx.Err() != nil {
+				s.log.Warnf("Readline error likely due to context cancellation: %v (context err: %v)", err, ctx.Err())
+				s.mu.Unlock()
+				return ctx.Err()
+			}
+			s.log.Errorf("Unexpected readline error: %v", err)
+			s.mu.Unlock()
 			return fmt.Errorf("readline error: %w", err)
 		}
 
-		// --- Process Input ---
+		// --- Process Input (still locked) ---
 		trimmedLine := strings.TrimSpace(line)
 		isTripleQuoteMarker := trimmedLine == "\"\"\""
 
 		if isTripleQuoteMarker {
 			if inTripleQuoteMode {
+				s.log.Debug("Exiting triple-quote mode, submitting buffer.")
 				inTripleQuoteMode = false
 				s.multiline = false
 				s.pendingSubmit = false
 				submitBuffer = true
 			} else {
-				if s.buffer.Len() > 0 {
+				s.log.Debug("Entering triple-quote mode.")
+				if s.buffer.Len() > 0 { // Clear buffer if entering """ after typing something
 					s.buffer.Reset()
 				}
 				inTripleQuoteMode = true
 				s.multiline = true
 				s.pendingSubmit = false
+				s.mu.Unlock() // Unlock before continue
 				continue
 			}
-		} else if len(line) == 0 {
-			// Empty line handling
-			// 1. If we're waiting for the second Enter press to submit (pendingSubmit)
-			// 2. If we're in multiline mode with content
-			if s.pendingSubmit || (s.multiline && s.buffer.Len() > 0) {
+		} else if len(line) == 0 && !inTripleQuoteMode { // Empty line handling (only outside ```)
+			if s.pendingSubmit {
+				s.log.Debug("Empty line confirming submission (pendingSubmit=true).")
 				submitBuffer = true
 				s.pendingSubmit = false
-			} else if inTripleQuoteMode {
-				// Add a newline in triple quote mode
-				s.buffer.WriteString("\n")
+			} else if s.multiline && s.buffer.Len() > 0 {
+				// If we somehow got into multiline=true without pendingSubmit (e.g., editor)
+				s.log.Debug("Empty line submitting multiline buffer.")
+				submitBuffer = true
+				s.multiline = false
 			} else {
 				// Empty line at top level - just ignore
+				s.mu.Unlock() // Unlock before continue
 				continue
 			}
-		} else {
-			// Special handling for the "exit" or "quit" commands
+		} else { // Non-empty line or empty line inside ```
+			// Special handling for the "exit" or "quit" commands outside ```
 			lineTrimmed := strings.TrimSpace(line)
-			if lineTrimmed == "exit" || lineTrimmed == "quit" {
-				// User typed "exit" or "quit" - exit the program cleanly
-				fmt.Fprint(os.Stderr, "\r")
-				fmt.Fprint(os.Stderr, ansiDimColor("Exiting"))
-				fmt.Fprint(os.Stderr, "                    \r")
+			if !inTripleQuoteMode && (lineTrimmed == "exit" || lineTrimmed == "quit") {
+				s.log.Info("Exit command received, exiting.")
+				fmt.Fprint(currentReader.Config.Stderr, "\r"+ansiDimColor("Exiting...")+"        \r")
+				s.mu.Unlock()
 				return io.EOF // Return EOF to signal exit
 			}
-			
-			// Add non-empty line to buffer
+
+			// Add line to buffer
 			if s.buffer.Len() > 0 {
 				s.buffer.WriteString("\n")
 			}
@@ -494,127 +590,96 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 			// If not in triple quote mode, mark that we need a second Enter press
 			if !inTripleQuoteMode {
 				s.pendingSubmit = true
-				// Don't enter multiline mode visually (no "..." prompt)
-				// Just remember we're waiting for another Enter while keeping the standard prompt
-				s.multiline = false
-
-				// No need for a separate indicator since we now show ⏎ in the prompt
+				s.multiline = false // Visually stay in single-line prompt mode
+			} else {
+				s.pendingSubmit = false // Don't require double enter in ``` mode
 			}
 		}
 
-		// --- Handle Submission ---
+		// --- Handle Submission (still locked) ---
 		if submitBuffer {
 			submitBuffer = false
 			s.multiline = false
 			s.pendingSubmit = false
 			inputToProcess := s.buffer.String()
-			s.buffer.Reset()
+			s.buffer.Reset() // Clear buffer *before* starting processing
 
 			if strings.TrimSpace(inputToProcess) != "" {
-				// Clean the readline display before starting processing
-				s.reader.Clean()
-				
-				// We'll use a different approach to handling interrupts that won't
-				// interfere with the main program's signal handling
-				
-				// First, create a detached context that won't be cancelled by signals
-				detachedCtx := context.Background()
-				responseCtx, cancelResponse := context.WithCancel(detachedCtx)
-				
-				// Create a done channel and cancellation monitor flag
-				processingDone := make(chan struct{})
-				interrupted := false
-				
-				// Set state to indicate we're processing a response
-				s.SetResponseState(ResponseStateStreaming)
-				
-				// Set up a goroutine to monitor the parent context
-				// When it's cancelled (likely by Ctrl+C), we'll handle it specially
-				go func() {
-					select {
-					case <-ctx.Done():
-						// The main context was cancelled (likely by Ctrl+C)
-						interrupted = true
-						
-						// Make the interruption visible with a small indicator
-						fmt.Fprint(os.Stderr, ansiDimColor(" [interrupted] "))
-						
-						// Cancel our response context to stop generation
-						cancelResponse()
-						
-						// Update state
-						s.SetResponseState(ResponseStateSInterrupted)
-						
-					case <-processingDone:
-						// Normal completion, do nothing
-						return
+				s.log.Debugf("Submitting input: %q", inputToProcess)
+				s.SetResponseState(ResponseStateSubmitting) // Update state
+
+				// Create context for this specific ProcessFn call
+				// Derive from the main context to allow external cancellation
+				responseCtx, cancel := context.WithCancel(ctx)
+				s.currentProcessCancel = cancel // Store cancel func
+
+				wg := sync.WaitGroup{}
+				wg.Add(1)
+
+				// Launch ProcessFn in a goroutine
+				go func(procCtx context.Context, input string) {
+					defer func() {
+						// Cleanup in goroutine
+						s.mu.Lock()
+						if s.currentProcessCancel != nil {
+							// If this goroutine finishes but cancel func still exists,
+							// it means it wasn't cancelled externally. Nullify it.
+							s.currentProcessCancel = nil
+						}
+						s.mu.Unlock()
+						wg.Done()
+						s.log.Debug("ProcessFn goroutine finished.")
+					}()
+
+					s.log.Debug("ProcessFn goroutine started.")
+					processErr := s.config.ProcessFn(procCtx, input)
+					finalState := ResponseStateReady // Assume success initially
+
+					// Handle ProcessFn result
+					if errors.Is(processErr, context.Canceled) || errors.Is(processErr, ErrInterrupted) {
+						s.log.Infof("ProcessFn cancelled or interrupted: %v", processErr)
+						finalState = ResponseStateSInterrupted
+						// Don't save history on interrupt
+					} else if lastMsg, ok := processErr.(ErrUseLastMessage); ok {
+						s.log.Debugf("ProcessFn returned ErrUseLastMessage: %q", string(lastMsg))
+						s.mu.Lock()
+						s.lastInput = string(lastMsg)
+						s.mu.Unlock()
+						// Use stderr for user hints
+						fmt.Fprintln(currentReader.Config.Stderr, ansiDimColor("Use Up Arrow to recall last input for editing."))
+						// Don't save history for /last command
+					} else if processErr != nil && !errors.Is(processErr, ErrEmptyInput) {
+						s.log.Errorf("ProcessFn error: %v", processErr)
+						fmt.Fprintf(currentReader.Config.Stderr, "Processing error: %v\n", processErr)
+						finalState = ResponseStateError
+						// Optionally save history even on error? Maybe not.
+					} else if processErr == nil { // Success
+						s.log.Debug("ProcessFn completed successfully.")
+						s.mu.Lock()
+						s.lastInput = input // Store last *successful* input
+						// Save successful input to readline's history
+						if err := currentReader.SaveHistory(input); err != nil {
+							s.log.Warnf("Failed to save history item: %v", err)
+						}
+						s.mu.Unlock()
 					}
-				}()
-				
-				// Process the input with our detached context
-				// This will continue even if the parent context is cancelled
-				processErr := s.config.ProcessFn(responseCtx, inputToProcess)
-				
-				// Signal that processing is done and clean up
-				close(processingDone)
-				cancelResponse()
-				
-				// Add newline after interrupted responses
-				if interrupted {
-					fmt.Fprintln(os.Stderr)
-				}
-				
-				// Reset response state for next prompt
-				// IMPORTANT FIX: Always reset to ready state after any interruption or cancellation
-				// This ensures we return to prompt rather than exiting
-				if processErr == nil || errors.Is(processErr, context.Canceled) || interrupted {
-					s.SetResponseState(ResponseStateReady)
-					// Clear interrupted flag if we need to handle another cycle
-					if interrupted {
-						fmt.Fprintln(os.Stderr, ansiDimColor("Ready for next input..."))
-					}
-				} else {
-					s.SetResponseState(ResponseStateError)
-				}
-				
-				// CRITICAL FIX: NEVER propagate context error after ProcessFn if we were in the stream
-				// Skip this check entirely if we just handled an interruption
-				// This prevents Ctrl+C during generation from exiting the program
-				if interrupted {
-					// Context was cancelled due to Ctrl+C, but we want to keep the session alive
-					// Skip all context error checks and continue the loop
-					continue
-				} else if ctx.Err() != nil {
-					// Only propagate context errors for non-interrupted cases
-					return ctx.Err()
-				}
-				// Handle ProcessFn result
-				if lastMsg, ok := processErr.(ErrUseLastMessage); ok {
-					fmt.Fprintln(os.Stderr, ansiDimColor("Use Up Arrow to recall last input for editing."))
-					s.lastInput = string(lastMsg)
-				} else if processErr != nil && !errors.Is(processErr, ErrEmptyInput) {
-					// Don't print error if context was cancelled during processing
-					if !errors.Is(processErr, context.Canceled) {
-						fmt.Fprintf(os.Stderr, "Processing error: %v\n", processErr)
-					}
-				} else if processErr == nil {
-					// Save successful input to readline's history
-					if err := s.reader.SaveHistory(inputToProcess); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to save history item: %v\n", err)
-					}
-					s.lastInput = inputToProcess
-				}
+					// Set final state (atomically)
+					s.SetResponseState(finalState)
+				}(responseCtx, inputToProcess)
+
+				// --- End of submit block ---
+			} else {
+				s.log.Debug("Submit triggered with empty buffer, ignoring.")
 			}
 			inTripleQuoteMode = false
 			s.expectingCtrlE = false
-		} else if !s.isStreaming {
-			s.reader.Refresh()
 		}
+		s.mu.Unlock() // Unlock before next loop iteration
 	}
 	// Unreachable in normal flow, loop exits via return
 }
 
-// editInEditor helper using Suspend/Resume.
+// editInEditor helper using Suspend/Resume. Needs locking by caller.
 func (s *ReadlineSession) editInEditor(currentContent string) (string, error) {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -634,18 +699,24 @@ func (s *ReadlineSession) editInEditor(currentContent string) (string, error) {
 	}
 
 	cmd := exec.Command(editor, tmpfile.Name())
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin   // Use original OS Stdin
+	cmd.Stdout = os.Stdout // Use original OS Stdout
+	cmd.Stderr = os.Stderr // Use original OS Stderr
 
-	// Readline Suspend/Resume might not be available or reliable
-	// Suspend/Resume removed as they might not exist on the instance
-	runErr := cmd.Run()
-	// Resume removed
+	s.log.Debug("Running external editor...")
+	// Note: We don't have proper Suspend/Resume in the readline library,
+	// so the terminal might be in a strange state during editing
 
+	runErr := cmd.Run() // Run the editor command
+
+	s.log.Debug("Finished external editor.")
+
+	// Handle editor command errors after resuming readline
 	if runErr != nil {
 		return "", fmt.Errorf("editor command failed: %w", runErr)
 	}
+
+	// Read content after successful editor run
 	contentBytes, err := os.ReadFile(tmpfile.Name())
 	if err != nil {
 		return "", fmt.Errorf("read temp file: %w", err)
@@ -653,16 +724,12 @@ func (s *ReadlineSession) editInEditor(currentContent string) (string, error) {
 	return strings.TrimSuffix(string(contentBytes), "\n"), nil
 }
 
-func (r *ReadlineSession) SetResponseState(state ResponseState) {
-	r.responeState = state
-}
-
-// GetHistory retrieves the current history from the readline instance.
+// GetHistory retrieves the current history from the readline instance. Needs locking.
 func (s *ReadlineSession) GetHistory() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.reader != nil {
 		// Readline doesn't expose its internal history slice directly.
-		// We could potentially read it from the history file if needed,
-		// but it's better if the main application manages the canonical history.
 		// Returning the config's initial history as a placeholder.
 		return s.config.ConversationHistory
 	}
@@ -671,32 +738,26 @@ func (s *ReadlineSession) GetHistory() []string {
 
 // Expand tilde in file paths
 func expandTilde(path string) (string, error) {
-	// Check if path starts with ~/
-	if strings.HasPrefix(path, "~/") {
+	if path == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(path, "~") {
+		return path, nil
+	}
+	// Handle "~" or "~/"
+	sep := string(os.PathSeparator)
+	if path == "~" || strings.HasPrefix(path, "~"+sep) {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("get home directory: %w", err)
 		}
+		if path == "~" {
+			return homeDir, nil
+		}
 		return strings.Replace(path, "~", homeDir, 1), nil
 	}
-	return path, nil
-}
-
-// Define LinePos struct (if needed for complex cursor logic)
-// type LinePos struct { Line []rune; Pos int; Key rune }
-
-// safeSpinnerWriter is a special io.Writer that prevents spinner
-// output from interfering with normal output streams
-type safeSpinnerWriter struct {
-	mu sync.Mutex
-	w  io.Writer
-}
-
-// Write implements io.Writer ensuring thread safety
-func (sw *safeSpinnerWriter) Write(p []byte) (n int, err error) {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
-	return sw.w.Write(p)
+	// Handle other ~user cases maybe later if needed
+	return path, nil // Return original if not recognized format
 }
 
 // Define painter type
