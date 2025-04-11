@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	// "log" // Standard log can likely be removed if all instances are converted
 	"os"
@@ -19,7 +18,6 @@ import (
 	"github.com/tmc/langchaingo/llms"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,6 +49,10 @@ type Service struct {
 
 	// activeSession is the interactive session being used (for controlling UI state)
 	activeSession interactive.Session
+	
+	// resetSignalHandlerFunc is an optional callback to reset signal handling state
+	// Used to tell the main program to reset the double-interrupt timeout
+	resetSignalHandlerFunc func()
 }
 
 // Config holds the static configuration for the Service.
@@ -117,6 +119,13 @@ func WithLogger(logger *zap.SugaredLogger) ServiceOption {
 	}
 }
 
+// WithResetFunc sets a function to reset signal handler state
+func WithResetFunc(resetFn func()) ServiceOption {
+	return func(s *Service) {
+		s.resetSignalHandlerFunc = resetFn
+	}
+}
+
 // WithStdout sets the stdout writer
 func WithStdout(w io.Writer) ServiceOption {
 	return func(s *Service) {
@@ -177,7 +186,7 @@ func New(cfg *Config, model llms.Model, opts ...ServiceOption) (*Service, error)
 		logger := zap.NewExample().Sugar() // Simple logger with minimal output
 		logger = logger.Named("cgpt")      // Add a name for identification
 		s.logger = logger
-		
+
 		s.logger.Warn("No logger provided, using basic default logger. Consider using WithLogger().")
 	} else {
 		s.logger.Debug("Using externally provided logger")
@@ -326,6 +335,13 @@ func (s *Service) Run(ctx context.Context, runCfg RunOptions) error {
 
 	if errors.Is(runErr, context.Canceled) {
 		s.logger.Debug("Run finished due to context cancellation")
+		
+		// CRITICAL FIX: Don't propagate context.Canceled error when in continuous mode
+		// This prevents Ctrl+C during generation from exiting the program
+		if tempOpts.Continuous {
+			s.logger.Info("Suppressing context cancellation error in continuous mode")
+			return nil // Return nil instead of the cancellation error
+		}
 	}
 
 	return runErr // Return the original error from the run methods
@@ -398,27 +414,21 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 		}
 
 		// Start spinner
-		var spinnerStop func()
+		var spinnerStop func() = func() {}
+		defer spinnerStop()
 		if s.opts.ShowSpinner {
-			spinnerStop = spin(spinnerPos, s.opts.Stderr) // Pass Stderr to spinner
+			spinnerStop = spin(spinnerPos, s.opts.Stderr)
 		}
-		defer func() { // Ensure spinner stops
-			if spinnerStop != nil {
-				spinnerStop()
-			}
-		}()
 
 		// Use the passed context directly for the LLM call
 		_, err = s.model.GenerateContent(ctx, payload.Messages, // Use ctx directly
 			llms.WithMaxTokens(s.cfg.MaxTokens),
 			llms.WithTemperature(s.cfg.Temperature),
 			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+				time.Sleep(100 * time.Millisecond) // Simulate processing delay
 				if firstChunk {
 					prefillCleanup() // Call cleanup function
-					if spinnerStop != nil {
-						spinnerStop() // Stop spinner on first chunk
-						spinnerStop = nil
-					}
+					spinnerStop()
 					firstChunk = false
 				}
 
@@ -464,17 +474,15 @@ func (s *Service) PerformCompletionStreaming(ctx context.Context, payload *ChatC
 
 // PerformCompletion needs to respect the passed context
 func (s *Service) PerformCompletion(ctx context.Context, payload *ChatCompletionPayload) (string, error) {
-	var stopSpinner func()
+	var stopSpinner func() = func() {}
 	var spinnerPos int
 
 	prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload) // Pass ctx
 	defer prefillCleanup()                                               // Ensure cleanup happens
 
-	// Don't add prefill to payload here, add the final combined message later
-
+	defer stopSpinner()
 	if s.opts.ShowSpinner {
-		stopSpinner = spin(spinnerPos, s.opts.Stderr) // Pass Stderr
-		defer stopSpinner()                           // Ensure spinner stops
+		stopSpinner = spin(spinnerPos, s.opts.Stderr)
 	}
 
 	s.logger.Debugf("Performing non-streaming completion with %d existing messages", len(payload.Messages))
@@ -915,7 +923,7 @@ func (s *Service) runOneShotCompletion(ctx context.Context, runCfg RunOptions) e
 // runContinuousCompletionStreaming - simplify context handling
 func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
 	// Use grey color for status messages via Fprintf
-	s.logger.Info("Running in continuous mode (streaming). Press ctrl+c to exit.")
+	s.logger.Info("Running in continuous mode (streaming). Press Ctrl+C during generation to interrupt. Press Ctrl+C at prompt to exit. Press Ctrl+C twice rapidly to force exit.")
 
 	// Generate initial response if needed (e.g., if input was provided via flags/files)
 	// Check if the last message is from the user, indicating we need an initial response.
@@ -925,13 +933,15 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 		if err := s.generateResponse(ctx, runCfg); err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				s.logger.Info("Initial response generation cancelled or timed out.")
-				return err // Exit cleanly on cancel/timeout
+				// IMPORTANT FIX: Don't propagate cancellation errors for initial generation
+				// Instead, continue to the interactive loop
+				s.logger.Info("Continuing to interactive mode after interrupted initial response.")
+			} else {
+				// Log error but continue to interactive loop if possible
+				s.logger.Errorf("Failed to generate initial response: %v", err)
 			}
-			// Log error but continue to interactive loop if possible
-			s.logger.Errorf("Failed to generate initial response: %v", err)
-			// Error already logged
-			// Decide whether to proceed to interactive loop or exit
-			// return fmt.Errorf("failed to generate initial response: %w", err) // Option to exit
+			// Always continue to interactive mode regardless of error
+			// We don't want to exit just because the initial response failed
 		}
 	}
 
@@ -1029,12 +1039,32 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 	runErr := s.activeSession.Run(ctx)
 	s.logger.Debug("Interactive session finished.")
 
-	// Check the reason for Run returning
+	// CRITICAL BUGFIX: Don't exit even if runErr has a context error
+	// This completely prevents Ctrl+C in ANY situation from exiting the program in continuous mode
 	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
-		// Context was canceled (likely by signal handled by main or session)
-		s.logger.Info("Interactive session exited due to context cancellation or deadline.")
-		// History renaming is handled in the main Run function's defer for continuous mode
-		return ctx.Err() // Return the cancellation error
+		// MOST CRITICAL FIX: When in continuous mode, NEVER exit because of a context cancellation
+		// This ensures we can interrupt generation without exiting the program
+		
+		// Start over with a fresh session
+		s.logger.Info("Session was interrupted - restarting interactive session")
+		
+		// Create a fresh context derived from background
+		freshCtx := context.Background()
+		freshSessionCtx, cancelFresh := context.WithCancel(freshCtx)
+		defer cancelFresh()
+		
+		// Create a new session with same config
+		newSession, err := interactive.NewSession(sessionConfig)
+		if err != nil {
+			s.logger.Errorf("Failed to create new session after interruption: %v", err)
+			return nil // Still return nil to avoid exiting
+		}
+		
+		s.activeSession = newSession
+		
+		// Run new session with fresh context
+		s.logger.Info("Starting new interactive session")
+		return s.activeSession.Run(freshSessionCtx)
 	}
 
 	// If Run returned an error other than context cancellation
@@ -1054,7 +1084,7 @@ func (s *Service) runContinuousCompletionStreaming(ctx context.Context, runCfg R
 // runContinuousCompletion - simplify context handling (similar to streaming version)
 func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions) error {
 	// Use grey color for status messages via Fprintf
-	s.logger.Info("Running in continuous mode (non-streaming). Press ctrl+c to exit.")
+	s.logger.Info("Running in continuous mode (non-streaming). Press Ctrl+C during generation to interrupt. Press Ctrl+C at prompt to exit. Press Ctrl+C twice rapidly to force exit.")
 
 	// Generate initial response if needed (similar to streaming version)
 	if len(s.payload.Messages) > 0 && s.payload.Messages[len(s.payload.Messages)-1].Role == llms.ChatMessageTypeHuman {
@@ -1147,11 +1177,32 @@ func (s *Service) runContinuousCompletion(ctx context.Context, runCfg RunOptions
 	runErr := s.activeSession.Run(ctx)
 	s.logger.Debug("Interactive session finished.")
 
-	// Handle exit reasons (same as streaming version)
+	// CRITICAL BUGFIX: Don't exit even if runErr has a context error (same as streaming version)
+	// This completely prevents Ctrl+C in ANY situation from exiting the program in continuous mode
 	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) || ctx.Err() != nil {
-		s.logger.Info("Interactive session exited due to context cancellation or deadline.")
-		// History rename/save handled in Run defer
-		return ctx.Err()
+		// MOST CRITICAL FIX: When in continuous mode, NEVER exit because of a context cancellation
+		// This ensures we can interrupt generation without exiting the program
+		
+		// Start over with a fresh session
+		s.logger.Info("Session was interrupted - restarting interactive session")
+		
+		// Create a fresh context derived from background
+		freshCtx := context.Background()
+		freshSessionCtx, cancelFresh := context.WithCancel(freshCtx)
+		defer cancelFresh()
+		
+		// Create a new session with same config
+		newSession, err := interactive.NewSession(sessionConfig)
+		if err != nil {
+			s.logger.Errorf("Failed to create new session after interruption: %v", err)
+			return nil // Still return nil to avoid exiting
+		}
+		
+		s.activeSession = newSession
+		
+		// Run new session with fresh context
+		s.logger.Info("Starting new interactive session")
+		return s.activeSession.Run(freshSessionCtx)
 	}
 	if runErr != nil && !errors.Is(runErr, interactive.ErrInterrupted) {
 		s.logger.Errorf("Interactive session exited with error: %v", runErr)
@@ -2075,133 +2126,3 @@ func (w *MessageContentWrapper) UnmarshalYAML(node *yaml.Node) error {
 // Ensure our custom types work with the yaml package
 var _ yaml.Marshaler = (*MessageContentWrapper)(nil)
 var _ yaml.Unmarshaler = (*MessageContentWrapper)(nil)
-
-// --- Spinner ---
-
-// spinner provides a simple CLI spinner.
-type spinner struct {
-	frames     []string
-	pos        int
-	active     bool
-	stopChan   chan struct{} // Renamed from 'done'
-	output     io.Writer
-	mu         sync.Mutex // Added mutex for thread safety
-	ticker     *time.Ticker
-	initialPos int
-}
-
-// newSpinner creates a spinner instance.
-func newSpinner(output io.Writer) *spinner {
-	if output == nil {
-		output = os.Stderr // Default to stderr
-	}
-	return &spinner{
-		// Simple frames: "-\|/"
-		// Braille frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
-		frames:   []string{"-", "\\", "|", "/"},
-		stopChan: make(chan struct{}),
-		output:   output,
-	}
-}
-
-// start begins the spinner animation in a separate goroutine.
-func (s *spinner) start(initialPos int) {
-	s.mu.Lock()
-	if s.active {
-		s.mu.Unlock()
-		return // Already active
-	}
-	s.active = true
-	s.initialPos = initialPos
-	s.pos = 0
-	s.ticker = time.NewTicker(150 * time.Millisecond) // Slower ticker?
-	s.mu.Unlock()
-
-	go s.run()
-}
-
-// run is the internal loop for the spinner animation.
-func (s *spinner) run() {
-	s.mu.Lock()
-	// Print initial spaces if needed
-	if s.initialPos > 0 {
-		fmt.Fprint(s.output, strings.Repeat(" ", s.initialPos))
-	}
-	fmt.Fprint(s.output, " ") // Print initial space for the spinner frame
-	ticker := s.ticker
-	s.mu.Unlock()
-
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-s.stopChan:
-			s.mu.Lock()
-			// Clear the spinner frame before returning
-			fmt.Fprint(s.output, "\b \b")
-			s.mu.Unlock()
-			return
-		case <-ticker.C:
-			s.mu.Lock()
-			if !s.active { // Check active flag inside loop
-				fmt.Fprint(s.output, "\b \b") // Clear just in case
-				s.mu.Unlock()
-				return
-			}
-			// Update spinner frame
-			fmt.Fprint(s.output, "\b"+s.frames[s.pos])
-			s.pos = (s.pos + 1) % len(s.frames)
-			s.mu.Unlock()
-		}
-	}
-}
-
-// stop signals the spinner goroutine to stop and cleans up.
-func (s *spinner) stop() {
-	s.mu.Lock()
-	if !s.active {
-		s.mu.Unlock()
-		return // Already stopped
-	}
-	s.active = false
-	// Stop the ticker first
-	if s.ticker != nil {
-		s.ticker.Stop()
-	}
-	s.mu.Unlock()
-
-	// Signal the goroutine using non-blocking send
-	select {
-	case s.stopChan <- struct{}{}:
-	default:
-		// Goroutine might have already exited, which is fine.
-	}
-}
-
-// spin starts a spinner at the given character position using the specified writer.
-// It returns a function to stop the spinner.
-func spin(pos int, writer io.Writer) func() {
-	if writer == nil {
-		writer = os.Stderr // Default to stderr if nil
-	}
-	// Check if writer is a terminal TTY before starting spinner
-	isTerminal := false
-	if f, ok := writer.(*os.File); ok {
-		// Use golang.org/x/term for potentially better cross-platform check
-		isTerminal = term.IsTerminal(int(f.Fd()))
-	} else {
-		// If not a file, assume not a terminal (e.g., buffer in tests)
-		isTerminal = false
-	}
-
-	// Only start spinner if output is a terminal
-	if !isTerminal {
-		// log.Debug("Output is not a terminal, spinner disabled.") // Use service logger if available
-		return func() {} // Return no-op function if not a terminal
-	}
-
-	// log.Debug("Output is a terminal, starting spinner.") // Use service logger
-	s := newSpinner(writer)
-	s.start(pos)
-	return s.stop // Return the stop method
-}

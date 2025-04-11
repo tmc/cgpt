@@ -135,28 +135,81 @@ func main() {
 	// This allows the shell to remain responsive for user input in continuous mode
 
 	// Create a context with signal handling
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	defer stop() // Ensure the signal handling is stopped
+	// We'll use a custom signal handling approach for better control
+	// Standard NotifyContext can be too aggressive with cancellation
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	// Start a goroutine to handle graceful shutdown
+	// Set up custom signal handling that's more controlled
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+
+	// Track interruption time to implement a "double-interrupt" feature
+	var lastInterruptTime time.Time
+	// Use a very short threshold to make it harder to trigger accidentally
+	// Require a very quick double-tap to force exit (within 250ms)
+	// Most users pressing Ctrl+C twice in different contexts won't trigger this
+	const doubleInterruptThreshold = 250 * time.Millisecond
+
+	// No longer needed - we'll use a simpler approach
+
 	go func() {
-		<-ctx.Done()
-		// Set a timeout for graceful shutdown
-		time.AfterFunc(5*time.Second, func() {
-			fmt.Fprintln(os.Stderr, "Forced exit after timeout.")
-			os.Exit(1)
-		})
+		for _ = range sigChan {
+			// Record current time
+			now := time.Now()
+
+			// Check if this is a rapid double-interrupt (Ctrl+C pressed twice quickly)
+			if !lastInterruptTime.IsZero() && now.Sub(lastInterruptTime) < doubleInterruptThreshold {
+				// Double interrupt - force exit
+				fmt.Fprintln(os.Stderr, "\nReceived rapid double interrupt, exiting immediately.")
+				os.Exit(1)
+			}
+
+			// Update last interrupt time
+			lastInterruptTime = now
+
+			// Cancel the context but don't exit immediately
+			// This allows our handlers to process the cancellation gracefully
+			cancel()
+
+			// For very long-running process that might hang, set a safety timeout
+			// This is just a safeguard in case the cancellation isn't processed properly
+			go func() {
+				time.Sleep(10 * time.Second)
+				fmt.Fprintln(os.Stderr, "\nForced exit after timeout.")
+				os.Exit(1)
+			}()
+
+			// Removed case - simplified approach
+		}
 	}()
+	// Clean up signal handling when done
+	defer signal.Stop(sigChan)
+
+	// Shutdown handling is now done in the signal handler above
 
 	if err = run(ctx, opts, flagSet); err != nil {
-		// Don't report context canceled errors as application errors
-		if !errors.Is(err, context.Canceled) {
-			fmt.Fprintf(os.Stderr, "cgpt: error: %v\n", err)
+		// Don't report expected ways to exit as errors (context canceled, interrupt, EOF, etc)
+		exitError := false
+		
+		// Check for any of the "normal" ways to exit
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			// Context cancellation (Ctrl+C handling) is expected
+			exitError = true
+		} else if err.Error() == "Interrupt" { 
+			// Readline's ErrInterrupt comes from the interactive session (Ctrl+C at prompt)
+			exitError = true
+		} else if errors.Is(err, io.EOF) {
+			// EOF (Ctrl+D) is an expected way to exit
+			exitError = true
+		}
+		
+		if !exitError {
+			// Only show error for unexpected issues
+			fmt.Fprintf(os.Stderr, "cgpt: error: %T %v\n", err, err)
 			os.Exit(1)
 		}
-		// If it *was* context.Canceled, exit cleanly (status 0)
-		// Optional: print a message indicating graceful exit on signal
-		// fmt.Fprintln(os.Stderr, "\ncgpt: Shutting down...")
+		// For expected ways to exit, just exit cleanly (status 0)
 	}
 	// Exit 0 on success or context cancellation
 }
@@ -263,7 +316,11 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 
 	// --- TTY Handling ---
 	var ttyFile *os.File
-	if tryReattachTTY {
+	// We need to reattach to /dev/tty for interactive mode in these cases:
+	// 1. Input processor explicitly requested reattachment (tryReattachTTY=true)
+	//    This happens when stdin was consumed but was originally a terminal, or in continuous mode
+	// 2. We're running in continuous mode AND stdin is still a terminal (direct terminal input)
+	if tryReattachTTY || (opts.Continuous && isStdinTerminal) {
 		var errTTY error
 		ttyFile, errTTY = os.OpenFile("/dev/tty", os.O_RDWR, 0)
 		if errTTY != nil {
@@ -348,7 +405,7 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		// For continuous mode with TTY, override both STDIN and STDOUT
 		// This is crucial for the interactive prompt to work correctly
 		svcOpts.Stdout = ttyFile
-		
+
 		// We need to explicitly override stdin in RunOptions to use the TTY file
 		// Since RunOptions.Stdin may have been set to read from pipe/file already
 		opts.Stdin = ttyFile
@@ -360,7 +417,11 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		return fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	s, err := completion.New(compCfg, model, completion.WithOptions(svcOpts), completion.WithLogger(logger))
+	// Not needed anymore - simplified approach
+
+	s, err := completion.New(compCfg, model,
+		completion.WithOptions(svcOpts),
+		completion.WithLogger(logger))
 	if err != nil {
 		return fmt.Errorf("cgpt: failed to create completion service: %w", err)
 	}
@@ -406,13 +467,27 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		Stderr:              opts.Stderr,
 		// Pass the stdin directly to allow proper TTY handling in interactive mode
 		// The ttyFile has already been set as opts.Stdin above if needed
-		Stdin:                    io.NopCloser(opts.Stdin),
+		// Handle stdin specially to avoid wrapping TTY files in NopCloser
+		Stdin:                    getReadCloser(opts.Stdin),
 		MaximumTimeout:           opts.CompletionTimeout,
 		ConfigPath:               opts.ConfigPath,
 		OpenAIUseLegacyMaxTokens: opts.OpenAIUseLegacyMaxTokens,
 	}
 	// Pass the main ctx directly
 	return s.Run(ctx, runOpts)
+}
+
+// getReadCloser returns an io.ReadCloser for the given reader.
+// If the reader is already an io.ReadCloser or an *os.File, it is returned as is.
+// Otherwise, it is wrapped in an io.NopCloser.
+func getReadCloser(r io.Reader) io.ReadCloser {
+	if rc, ok := r.(io.ReadCloser); ok {
+		return rc
+	}
+	if f, ok := r.(*os.File); ok {
+		return f // *os.File implements ReadCloser
+	}
+	return io.NopCloser(r)
 }
 
 // NewCompletionConfig creates a completion.Config from options.RunOptions
@@ -529,7 +604,6 @@ func initFlags(args []string, stdin io.Reader) (options.RunOptions, *pflag.FlagS
 
 	return opts, fs, nil
 }
-
 
 // Import usage examples file when available
 // Usage examples are defined in usage_examples.go

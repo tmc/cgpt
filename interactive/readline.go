@@ -1,4 +1,5 @@
 //go:build !js
+// +build !js
 
 package interactive
 
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chzyer/readline"
@@ -23,7 +25,8 @@ type ReadlineSession struct {
 	buffer         strings.Builder
 	state          InteractiveState
 	responeState   ResponseState
-	multiline      bool
+	multiline      bool      // True when in explicit multiline mode (shows "..." prompt)
+	pendingSubmit  bool      // True when we've typed a line but need to press Enter again
 	lastInput      string    // Track last successful input
 	expectingCtrlE bool      // For Ctrl+X, Ctrl+E support
 	interruptCount int       // Track consecutive Ctrl+C presses
@@ -88,20 +91,36 @@ func NewSession(cfg Config) (Session, error) {
 	cfg.HistoryFile = historyPath // Update config with expanded path
 
 	session := &ReadlineSession{
-		config:    cfg,
-		state:     StateSingleLine,
-		multiline: false,
+		config:        cfg,
+		state:         StateSingleLine,
+		multiline:     false,
+		pendingSubmit: false,
 	}
 
 	listener := session.createListener()
 	painter := PainterFunc(func(line []rune, pos int) []rune {
 		// Painter is called frequently, keep it fast.
-		// Only show hint on empty line at pos 0 when NOT streaming.
-		if len(line) == 0 && pos == 0 && !session.isStreaming {
-			// Removed submitReady check
-			return []rune(session.getPlaceHolder())
+
+		// Don't show any hints while streaming responses
+		if session.isStreaming {
+			return line
 		}
-		return line // Return original line otherwise
+
+		// Don't modify non-empty lines - let the user see exactly what they type
+		if len(line) > 0 {
+			return line
+		}
+
+		// For empty lines when in pendingSubmit mode - no need for extra indicators
+		// since we now show the ⏎ in the prompt itself
+
+		// For initial empty lines (when buffer is also empty)
+		if session.buffer.Len() == 0 {
+			// No text prompts at all - completely clean interface
+			return line
+		}
+
+		return line // Return original line
 	})
 
 	// Determine if Stdin is a TTY
@@ -122,20 +141,34 @@ func NewSession(cfg Config) (Session, error) {
 	}
 
 	readlineConfig := &readline.Config{
-		Prompt:                 cfg.Prompt, // Base prompt
-		InterruptPrompt:        "^C",       // Prompt shown after Ctrl+C clears line
-		EOFPrompt:              "exit",     // Shown on Ctrl+D exit
-		HistoryFile:            cfg.HistoryFile,
-		HistoryLimit:           10000,
-		HistorySearchFold:      true,                          // Case-insensitive history search
-		AutoComplete:           readline.NewPrefixCompleter(), // Basic prefix completer
-		Stdin:                  cfg.Stdin,
+		Prompt:            cfg.Prompt, // Base prompt
+		InterruptPrompt:   "^C",       // Prompt shown after Ctrl+C clears line
+		EOFPrompt:         "exit",     // Shown on Ctrl+D exit
+		HistoryFile:       cfg.HistoryFile,
+		HistoryLimit:      10000,
+		HistorySearchFold: true,                          // Case-insensitive history search
+		AutoComplete:      readline.NewPrefixCompleter(), // Basic prefix completer
+		// Stdin will be set below based on TTY detection
 		Listener:               listener, // Custom key handling
 		Painter:                painter,  // Custom hint display
 		ForceUseInteractive:    true,     // Try interactive features even if TTY detection fails
 		DisableAutoSaveHistory: true,     // We handle saving manually
 		FuncIsTerminal:         isTerminalFunc,
 		// Consider adding other readline config options if needed
+	}
+
+	// Check if Stdin is specifically the TTY file we opened, and pass it directly
+	// to readline's TTY fields. Otherwise, let readline use defaults (os.Stdin/out/err).
+	if ttyFile, ok := cfg.Stdin.(*os.File); ok && ttyFile.Name() == "/dev/tty" {
+		readlineConfig.Stdin = ttyFile
+		// Also crucial: Tell readline to use the same TTY for output!
+		readlineConfig.Stdout = ttyFile
+		readlineConfig.Stderr = ttyFile // Or os.Stderr if you want errors separate
+		fmt.Fprintln(os.Stderr, "cgpt(readline): Using provided /dev/tty handle for Stdin/Stdout/Stderr.")
+	} else {
+		// Let readline use its defaults if Stdin isn't the specific TTY handle
+		readlineConfig.Stdin = cfg.Stdin
+		fmt.Fprintln(os.Stderr, "cgpt(readline): Using default Stdin/Stdout/Stderr.")
 	}
 
 	reader, err := readline.NewEx(readlineConfig)
@@ -179,22 +212,31 @@ func (s *ReadlineSession) getPrompt() string {
 	if s.multiline {
 		return s.config.AltPrompt
 	}
-	// Ensure the prompt is visible by adding a space after it if not already present
+
+	// Basic prompt without modifications
 	prompt := s.config.Prompt
+
+	// If we're waiting for the second Enter (pendingSubmit), add a simple ↵ symbol
+	if s.pendingSubmit {
+		// Remove trailing space if it exists
+		prompt = strings.TrimSuffix(prompt, " ")
+
+		// Append the enter symbol with no space
+		return prompt + ansiDimColor("↵")
+	}
+
+	// For normal mode, ensure prompt has a trailing space
 	if prompt != "" && !strings.HasSuffix(prompt, " ") {
 		prompt += " "
 	}
+
 	return prompt
 }
 
 // getPlaceHolder returns the hint text with ANSI codes for dim color.
 func (s *ReadlineSession) getPlaceHolder() string {
-	// readline has a bug that make hint handling tough.,
-	// hint := s.config.SingleLineHint
-	// if s.multiline {
-	// 	hint = s.config.MultiLineHint
-	// }
-	// return ansiDimColor(hint)
+	// We're using a minimal approach now with no initial hints
+	// Only showing hints when in pendingSubmit mode
 	return ""
 }
 
@@ -207,8 +249,6 @@ func (s *ReadlineSession) createListener() readline.Listener {
 		processed := false
 		newLine = line
 		newPos = pos
-
-		// Removed submitReady usage
 
 		// Handle Up Arrow only when the line is empty to recall last input
 		if key == readline.CharPrev && len(line) == 0 && s.buffer.Len() == 0 && s.lastInput != "" {
@@ -274,16 +314,47 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 
 	done := make(chan struct{})
 	defer close(done)
-	
+
 	// Only use context cancellation - signals are now handled at the top level
+	// We need a more specialized approach to context handling
+	// SIGINT has two different behaviors depending on state:
+	// 1. During response generation: Just interrupt the response
+	// 2. During input: Either clear input or exit if line is empty
+	
+	// We don't need to close the reader on context cancellation,
+	// as we'll handle that specially when it's a processing interrupt
 	go func() {
 		select {
 		case <-ctx.Done():
-			// When context is cancelled (e.g., by SIGINT), force close the reader
-			fmt.Fprintln(os.Stderr, "\nTerminating session...")
-			if s.reader != nil {
-				s.reader.Close() // This should interrupt the blocking Readline call
-				closeDone = true
+			// CRITICAL FIX: Different handling for processing vs non-processing states
+			
+			// If we're processing a response (ResponseStateSubmitted or Streaming)
+			// we want the cancellation to be handled in the ProcessFn section
+			// and NOT exit the program
+			// Get the current state and immediately handle differently based on processing state
+			currentState := s.responeState
+			s.SetStreaming(false) // First make sure we're not in streaming display mode
+			
+			if !currentState.IsProcessing() {
+				// CASE 1: For non-processing states (like waiting for input):
+				// terminate the session by closing the reader
+				fmt.Fprintln(os.Stderr, "\nTerminating session...")
+				if s.reader != nil {
+					s.reader.Close() // Interrupt the blocking Readline call
+					closeDone = true
+				}
+			} else {
+				// CASE 2: For processing states (response generation):
+				// DO NOT terminate the session, just interrupt the current response
+				fmt.Fprintln(os.Stderr, ansiDimColor("\nInterrupting response generation only (press Ctrl+C twice rapidly to force exit)"))
+				
+				// Critical: explicitly set a flag to never propagate this cancellation
+				// This ensures we keep the session alive even if the parent context is cancelled
+				s.SetResponseState(ResponseStateSInterrupted)
+				
+				// Most important: return from this goroutine without doing anything else
+				// Let the goroutine monitoring processingDone channel handle cleanup
+				return
 			}
 		case <-done:
 			// Loop finished normally
@@ -292,11 +363,26 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 
 	inTripleQuoteMode := false
 	submitBuffer := false
-	submitReady := false
 
 	for {
 		// Check context before blocking Readline call
 		if ctx.Err() != nil {
+			// If we're in a processing state, we want to return to the prompt
+			// rather than exiting the program
+			if s.responeState.IsProcessing() {
+				// Reset state and continue
+				s.SetResponseState(ResponseStateReady)
+				fmt.Fprintln(os.Stderr, ansiDimColor("Response interrupted - ready for next input."))
+				// Clear any pending operations
+				s.buffer.Reset()
+				inTripleQuoteMode = false
+				s.multiline = false
+				s.pendingSubmit = false
+				s.expectingCtrlE = false
+				continue
+			}
+			// Otherwise propagate the context error (when not in processing state)
+			// This is typically when user presses Ctrl+C while in prompt
 			return ctx.Err()
 		}
 
@@ -304,33 +390,34 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 		line, err := s.reader.Readline() // This blocks
 
 		// Check context *immediately* after Readline returns
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+		// Skip context cancellation check here - handled above and also in each interrupt case
+		// This is crucial to prevent Ctrl+C during response generation from exiting the program
 
 		// --- Handle Readline Errors ---
 		if errors.Is(err, readline.ErrInterrupt) { // Ctrl+C
-			// This is often handled internally by readline closing, but handle explicitly
-			fmt.Fprintln(os.Stderr) // Newline
-			now := time.Now()
-			if now.Sub(s.lastCtrlCTime) < 2*time.Second && s.interruptCount > 0 && len(line) == 0 {
-				fmt.Fprintln(os.Stderr, ansiDimColor("Exiting..."))
+			// If there's text on the line, just clear it instead of exiting
+			if len(line) > 0 || s.buffer.Len() > 0 {
+				// Print "Input cleared" without adding extra newlines
+				fmt.Fprint(os.Stderr, "\r")                           // Carriage return to start of line
+				fmt.Fprint(os.Stderr, ansiDimColor("Input cleared"))  // Show message
+				fmt.Fprint(os.Stderr, "                         \r")  // Clear remainder of line and reset cursor
+				
+				// Reset state
+				s.buffer.Reset()
+				inTripleQuoteMode = false
+				s.multiline = false
+				s.pendingSubmit = false
+				s.expectingCtrlE = false
+				continue // Continue the loop
+			} else {
+				// Exit on Ctrl+C when line is empty (with minimal output)
+				fmt.Fprint(os.Stderr, "\r")                       // Carriage return to start of line
+				fmt.Fprint(os.Stderr, ansiDimColor("Exiting (Ctrl+C at prompt, or press again to force)"))    // Show clear message
+				fmt.Fprint(os.Stderr, "                                      \r")   // Clear remainder of line
+
 				// No need to close reader here, defer and cancellation goroutine handle it
 				return err // Return the interrupt error
 			}
-			s.interruptCount++
-			s.lastCtrlCTime = now
-			s.buffer.Reset()
-			inTripleQuoteMode = false
-			s.multiline = false
-			s.expectingCtrlE = false
-			submitReady = false
-			msg := "Input cleared."
-			if len(line) == 0 {
-				msg = "Press Ctrl+C again quickly to exit."
-			}
-			fmt.Fprintln(os.Stderr, ansiDimColor(msg))
-			continue // Continue the loop
 		} else if errors.Is(err, io.EOF) { // Ctrl+D or reader closed due to context cancel
 			if ctx.Err() != nil {
 				return ctx.Err() // Prioritize context cancellation
@@ -343,7 +430,10 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 				}
 				submitBuffer = true // Submit remaining buffer on Ctrl+D
 			} else {
-				fmt.Fprintln(os.Stderr, ansiDimColor("Exiting..."))
+				// Exit with Ctrl+D (minimal output)
+				fmt.Fprint(os.Stderr, "\r")                       // Carriage return to start of line
+				fmt.Fprint(os.Stderr, ansiDimColor("Exiting"))    // Show message without dots
+				fmt.Fprint(os.Stderr, "                    \r")   // Clear remainder of line
 				return err // Return EOF to signal exit
 			}
 		} else if err != nil {
@@ -351,7 +441,7 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 			return fmt.Errorf("readline error: %w", err)
 		}
 
-		// --- Process Input (remains the same) ---
+		// --- Process Input ---
 		trimmedLine := strings.TrimSpace(line)
 		isTripleQuoteMarker := trimmedLine == "\"\"\""
 
@@ -359,42 +449,56 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 			if inTripleQuoteMode {
 				inTripleQuoteMode = false
 				s.multiline = false
+				s.pendingSubmit = false
 				submitBuffer = true
-				submitReady = false // Reset local submitReady
 			} else {
 				if s.buffer.Len() > 0 {
 					s.buffer.Reset()
 				}
 				inTripleQuoteMode = true
 				s.multiline = true
-				submitReady = false // Reset local submitReady
+				s.pendingSubmit = false
 				continue
 			}
 		} else if len(line) == 0 {
-			if !inTripleQuoteMode && s.buffer.Len() > 0 {
-				if submitReady {
-					submitBuffer = true
-					submitReady = false // Reset local submitReady
-				} else {
-					submitReady = true // Set local submitReady
-					s.reader.Refresh()
-					continue
-				}
+			// Empty line handling
+			// 1. If we're waiting for the second Enter press to submit (pendingSubmit)
+			// 2. If we're in multiline mode with content
+			if s.pendingSubmit || (s.multiline && s.buffer.Len() > 0) {
+				submitBuffer = true
+				s.pendingSubmit = false
 			} else if inTripleQuoteMode {
+				// Add a newline in triple quote mode
 				s.buffer.WriteString("\n")
-				submitReady = false // Reset local submitReady
 			} else {
-				submitReady = false // Reset local submitReady
+				// Empty line at top level - just ignore
 				continue
 			}
 		} else {
-			submitReady = false // Reset local submitReady
+			// Special handling for the "exit" or "quit" commands
+			lineTrimmed := strings.TrimSpace(line)
+			if lineTrimmed == "exit" || lineTrimmed == "quit" {
+				// User typed "exit" or "quit" - exit the program cleanly
+				fmt.Fprint(os.Stderr, "\r")
+				fmt.Fprint(os.Stderr, ansiDimColor("Exiting"))
+				fmt.Fprint(os.Stderr, "                    \r")
+				return io.EOF // Return EOF to signal exit
+			}
+			
+			// Add non-empty line to buffer
 			if s.buffer.Len() > 0 {
 				s.buffer.WriteString("\n")
 			}
 			s.buffer.WriteString(line)
-			if !s.multiline && !isTripleQuoteMarker {
-				s.multiline = true
+
+			// If not in triple quote mode, mark that we need a second Enter press
+			if !inTripleQuoteMode {
+				s.pendingSubmit = true
+				// Don't enter multiline mode visually (no "..." prompt)
+				// Just remember we're waiting for another Enter while keeping the standard prompt
+				s.multiline = false
+
+				// No need for a separate indicator since we now show ⏎ in the prompt
 			}
 		}
 
@@ -402,22 +506,89 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 		if submitBuffer {
 			submitBuffer = false
 			s.multiline = false
-			submitReady = false
+			s.pendingSubmit = false
 			inputToProcess := s.buffer.String()
 			s.buffer.Reset()
 
 			if strings.TrimSpace(inputToProcess) != "" {
-				s.reader.Clean() // Clean before calling potentially blocking function
-
-				// Pass the main ctx to ProcessFn
-				processErr := s.config.ProcessFn(ctx, inputToProcess)
-
-				// Check context error *after* ProcessFn returns
-				if ctx.Err() != nil {
+				// Clean the readline display before starting processing
+				s.reader.Clean()
+				
+				// We'll use a different approach to handling interrupts that won't
+				// interfere with the main program's signal handling
+				
+				// First, create a detached context that won't be cancelled by signals
+				detachedCtx := context.Background()
+				responseCtx, cancelResponse := context.WithCancel(detachedCtx)
+				
+				// Create a done channel and cancellation monitor flag
+				processingDone := make(chan struct{})
+				interrupted := false
+				
+				// Set state to indicate we're processing a response
+				s.SetResponseState(ResponseStateStreaming)
+				
+				// Set up a goroutine to monitor the parent context
+				// When it's cancelled (likely by Ctrl+C), we'll handle it specially
+				go func() {
+					select {
+					case <-ctx.Done():
+						// The main context was cancelled (likely by Ctrl+C)
+						interrupted = true
+						
+						// Make the interruption visible with a small indicator
+						fmt.Fprint(os.Stderr, ansiDimColor(" [interrupted] "))
+						
+						// Cancel our response context to stop generation
+						cancelResponse()
+						
+						// Update state
+						s.SetResponseState(ResponseStateSInterrupted)
+						
+					case <-processingDone:
+						// Normal completion, do nothing
+						return
+					}
+				}()
+				
+				// Process the input with our detached context
+				// This will continue even if the parent context is cancelled
+				processErr := s.config.ProcessFn(responseCtx, inputToProcess)
+				
+				// Signal that processing is done and clean up
+				close(processingDone)
+				cancelResponse()
+				
+				// Add newline after interrupted responses
+				if interrupted {
+					fmt.Fprintln(os.Stderr)
+				}
+				
+				// Reset response state for next prompt
+				// IMPORTANT FIX: Always reset to ready state after any interruption or cancellation
+				// This ensures we return to prompt rather than exiting
+				if processErr == nil || errors.Is(processErr, context.Canceled) || interrupted {
+					s.SetResponseState(ResponseStateReady)
+					// Clear interrupted flag if we need to handle another cycle
+					if interrupted {
+						fmt.Fprintln(os.Stderr, ansiDimColor("Ready for next input..."))
+					}
+				} else {
+					s.SetResponseState(ResponseStateError)
+				}
+				
+				// CRITICAL FIX: NEVER propagate context error after ProcessFn if we were in the stream
+				// Skip this check entirely if we just handled an interruption
+				// This prevents Ctrl+C during generation from exiting the program
+				if interrupted {
+					// Context was cancelled due to Ctrl+C, but we want to keep the session alive
+					// Skip all context error checks and continue the loop
+					continue
+				} else if ctx.Err() != nil {
+					// Only propagate context errors for non-interrupted cases
 					return ctx.Err()
 				}
-
-				// Handle ProcessFn result (remains the same)
+				// Handle ProcessFn result
 				if lastMsg, ok := processErr.(ErrUseLastMessage); ok {
 					fmt.Fprintln(os.Stderr, ansiDimColor("Use Up Arrow to recall last input for editing."))
 					s.lastInput = string(lastMsg)
@@ -513,6 +684,20 @@ func expandTilde(path string) (string, error) {
 
 // Define LinePos struct (if needed for complex cursor logic)
 // type LinePos struct { Line []rune; Pos int; Key rune }
+
+// safeSpinnerWriter is a special io.Writer that prevents spinner
+// output from interfering with normal output streams
+type safeSpinnerWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+// Write implements io.Writer ensuring thread safety
+func (sw *safeSpinnerWriter) Write(p []byte) (n int, err error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+	return sw.w.Write(p)
+}
 
 // Define painter type
 type PainterFunc func(line []rune, pos int) []rune

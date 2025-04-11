@@ -186,10 +186,17 @@ func (p *Processor) GetCombinedReader(ctx context.Context) (reader io.Reader, wa
 	}
 
 	// Determine if we need to reattach to TTY
-	// If continuous mode flag is explicitly set (-c), we'll need to try to reattach
-	// to the terminal for interactive mode, even if stdin wasn't used or is already a terminal
-	// This ensures we get a prompt in continuous mode regardless of input source
+	// If any of these conditions are true, we should reattach to TTY:
+	// 1. Explicit continuous mode (-c flag) was set
+	// 2. We're using stdin (which means we've consumed it) AND stdin was a terminal
+	//    (meaning we need to reattach to continue getting input from the terminal)
 	tryReattachTTY = p.forceContinuous
+	
+	// Also set tryReattachTTY if we consumed stdin and it was a terminal
+	// This is important for implicit continuous mode (when stdin is a terminal with no other inputs)
+	if stdinUsed && p.isStdinTerminal {
+		tryReattachTTY = true
+	}
 
 	// Combine all readers
 	reader = io.MultiReader(readers...)

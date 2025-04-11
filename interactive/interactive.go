@@ -129,17 +129,9 @@ func (r ResponseState) String() string {
 }
 
 func (r ResponseState) IsProcessing() bool {
-	if r == ResponseStateUndefined {
-		return false
-	}
-	if r == ResponseStateReady {
-		return false
-	}
-	if r == ResponseStateError {
-		return false
-	}
-	if r == ResponseStateSInterrupted {
-		return false
-	}
-	return true
+	// Only consider actively processing states as "processing"
+	// This is crucial for correctly handling Ctrl+C during generation
+	return r == ResponseStateSubmitting || 
+	       r == ResponseStateSubmitted || 
+	       r == ResponseStateStreaming
 }
