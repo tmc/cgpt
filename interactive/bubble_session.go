@@ -216,8 +216,8 @@ func (s *BubbleSession) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done(): // Check if the parent context was cancelled
 		s.model.debug.Log(" > Context cancelled, quitting program...")
-		s.program.Quit() // Tell bubbletea to quit
-		runErr := <-progDone       // Wait for Run() to actually finish
+		s.program.Quit()     // Tell bubbletea to quit
+		runErr := <-progDone // Wait for Run() to actually finish
 		s.model.debug.Log(" > Program finished after context cancel (err: %v)", runErr)
 		// BubbleTea's Run might return an error even after Quit is called
 		// Prioritize returning the context error

@@ -48,6 +48,12 @@ type Config struct {
 
 	Debug bool `yaml:"debug"`
 
+	// SlowResponses is a testing flag to simulate slow response generation
+	SlowResponses bool `yaml:"slowResponses"`
+
+	// HTTPRecordFile is the path to the HTTP record/replay file
+	HTTPRecordFile string `yaml:"httpRecordFile"`
+
 	OpenAIAPIKey    string `yaml:"openaiAPIKey"`
 	AnthropicAPIKey string `yaml:"anthropicAPIKey"`
 	GoogleAPIKey    string `yaml:"googleAPIKey"`

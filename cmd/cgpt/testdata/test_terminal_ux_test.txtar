@@ -1,0 +1,21 @@
+This will test the terminal UX features including slow responses, bracketed paste mode, and interrupt handling.
+-- stdout --
+This is a dummy backend response. It will stream out a few hundred tokens to simulate a real backend. The quick brown fox jumps over the lazy dog. This pangram contains every letter of the English alphabet at least once. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. This concludes the dummy backend response. Thank you for using the dummy backend! 
+-- stderr --
+-- http_payload --
+httprr trace v1
+218 120
+GET /api/model HTTP/1.1
+Host: dummy.example.com
+User-Agent: cgpt terminal UX test
+Accept: */*
+Content-Type: application/json
+
+{"query": "Test terminal UX with slow responses", "options": {"stream": true, "slowResponses": true}}
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+Date: Fri, 12 Apr 2025 12:00:00 GMT
+Content-Length: 67
+
+{"response": "This is a dummy backend response for terminal UX testing."}

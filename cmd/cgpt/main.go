@@ -111,6 +111,12 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 
 	// Config file path
 	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
+	
+	// Test flags
+	fs.BoolVar(&opts.Config.SlowResponses, "slow-responses", false, "Simulate slow response generation (for UX testing)")
+	fs.StringVar(&opts.Config.HTTPRecordFile, "http-record", "", "Path to HTTP record/replay file for tests")
+	// Add alias for http-record to match what's used in tests
+	fs.StringVar(&opts.Config.HTTPRecordFile, "httprecord", "", "Path to HTTP record/replay file for tests (alias)")
 }
 
 func main() {
@@ -162,6 +168,11 @@ func main() {
 			if !lastInterruptTime.IsZero() && now.Sub(lastInterruptTime) < doubleInterruptThreshold {
 				// Double interrupt - force exit
 				fmt.Fprintln(os.Stderr, "\nReceived rapid double interrupt, exiting immediately.")
+				// Log the double-interrupt for debugging
+				if opts.DebugMode {
+					fmt.Fprintf(os.Stderr, "Debug: Double interrupt detected (%v ms apart)\n", 
+						now.Sub(lastInterruptTime).Milliseconds())
+				}
 				os.Exit(1)
 			}
 

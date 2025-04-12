@@ -86,11 +86,20 @@ type ResponseState int
 const (
 	ResponseStateUndefined ResponseState = iota
 	ResponseStateReady
-	ResponseStateSubmitting // User submitted, waiting to start generation
-	ResponseStateSubmitted  // Generation started (non-streaming)
-	ResponseStateStreaming  // Generation started (streaming)
+	ResponseStateSubmitting   // User submitted, waiting to start generation
+	ResponseStateSubmitted    // Generation started (non-streaming)
+	ResponseStateStreaming    // Generation started (streaming)
 	ResponseStateSInterrupted // Generation interrupted by user/context
-	ResponseStateError      // Error occurred during generation
+	ResponseStateError        // Error occurred during generation
+)
+
+// PasteMode represents the current paste mode state
+type PasteMode int
+
+const (
+	PasteModeNormal PasteMode = iota // Normal input mode
+	PasteModeActive                  // Currently in bracketed paste mode
+	PasteModeComplete                // Paste operation completed
 )
 
 // Defaults

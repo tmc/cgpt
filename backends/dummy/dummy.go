@@ -13,5 +13,15 @@ func init() {
 
 // Constructor creates a new dummy backend
 func Constructor(cfg *options.Config, opts *options.InferenceProviderOptions) (llms.Model, error) {
-	return NewDummyBackend()
+	backend, err := NewDummyBackend()
+	if err != nil {
+		return nil, err
+	}
+	
+	// Configure the backend with options from config
+	if cfg.SlowResponses {
+		backend.SlowResponses = true
+	}
+	
+	return backend, nil
 }

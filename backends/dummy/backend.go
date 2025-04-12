@@ -10,7 +10,8 @@ import (
 
 // DummyBackend is a mock LLM implementation for testing
 type DummyBackend struct {
-	GenerateText func() string
+	GenerateText  func() string
+	SlowResponses bool // When true, adds significant delay between tokens
 }
 
 // NewDummyBackend creates a new DummyBackend with default settings
@@ -78,7 +79,15 @@ func (d *DummyBackend) GenerateContent(ctx context.Context, messages []llms.Mess
 						return response, err
 					}
 				}
-				time.Sleep(40 * time.Millisecond) // Simulate streaming delay
+				
+				// Determine delay based on SlowResponses flag
+				var delay time.Duration
+				if d.SlowResponses {
+					delay = 300 * time.Millisecond // Significantly slower response
+				} else {
+					delay = 40 * time.Millisecond // Normal streaming delay
+				}
+				time.Sleep(delay)
 			}
 		}
 

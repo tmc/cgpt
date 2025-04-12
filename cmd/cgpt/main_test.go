@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tmc/cgpt/backends"
 	"github.com/tmc/cgpt/completion"
+	"github.com/tmc/cgpt/internal/rr"
 	"github.com/tmc/cgpt/options"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -57,6 +59,18 @@ func Test(t *testing.T) {
 				`-s`, `you are a yq expert`,
 				`-i`, `how can i force "pipe" mode in yq`,
 			},
+		},
+		{
+			name:    "dummy with slow responses",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--slow-responses"},
+		},
+		{
+			name:    "terminal UX test",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--slow-responses", "--http-record=testdata/terminal_ux_test.httprr"},
 		},
 		{
 			name:    "ollama model",
@@ -144,6 +158,21 @@ func runTest(t *testing.T, ctx context.Context, opts options.RunOptions, fs *pfl
 		t.Fatalf("failed to load config: %v", err)
 	}
 	opts.Config = fileCfg
+
+	// Setup HTTP record/replay if specified
+	var httpRecorder *rr.RecordReplay
+	if opts.Config.HTTPRecordFile != "" {
+		t.Logf("Using HTTP record/replay file: %s", opts.Config.HTTPRecordFile)
+		httpRecorder, err = rr.Open(opts.Config.HTTPRecordFile, http.DefaultTransport)
+		if err != nil {
+			t.Fatalf("failed to open HTTP record/replay file: %v", err)
+		}
+		defer httpRecorder.Close()
+		
+		// Replace the default transport with our recorder
+		http.DefaultTransport = httpRecorder
+		t.Logf("HTTP recorder mode: %v", httpRecorder.Recording())
+	}
 
 	// Special case for ollama backend - just skip model initialization on error
 	// since it requires the ollama service to be running
