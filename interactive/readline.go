@@ -293,9 +293,9 @@ func (s *ReadlineSession) SetResponseState(state ResponseState) {
 	if state == ResponseStateReady || state == ResponseStateSInterrupted {
 		s.mu.Lock() // Lock needed for reader access
 		if s.reader != nil {
-			// Clear the current line completely for better visual transition
-			if prevState.IsProcessing() && (state == ResponseStateSInterrupted || state == ResponseStateReady) {
-				// Only clean line when we're transitioning from processing to interrupted/ready
+			// Clear the current line only when transitioning to ready state, not when interrupted
+			if prevState.IsProcessing() && state == ResponseStateReady {
+				// Only clean line when transitioning from processing to ready, NOT when interrupted
 				fmt.Fprint(s.reader.Config.Stderr, "\r\033[K") // Clear current line
 			}
 
@@ -333,11 +333,10 @@ func (s *ReadlineSession) AddResponsePart(part string) {
 		return
 	}
 
-	// Use Clean/Refresh to minimize prompt interference
-	s.reader.Clean()
-	// Use the configured Stdout writer for output
+	// Don't use Clean/Refresh for streaming output as it causes line reset issues
+	// Just write directly to stdout
 	fmt.Fprint(s.reader.Config.Stdout, part)
-	s.reader.Refresh() // Refresh might redraw the prompt and current input line
+	// Don't call Refresh() as it causes the cursor to return to the beginning of the line
 }
 
 // getPrompt returns the appropriate prompt based on the current state. Needs locking.
@@ -678,8 +677,7 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 				// --- Interrupt Processing ---
 				s.log.Info("Interrupting ongoing response generation.")
 
-				// Ensure line is clear before showing interrupt message
-				fmt.Fprint(currentReader.Config.Stderr, "\r\033[K") // Clear current line
+				// Do NOT clear the current line - we want to append to existing output
 
 				// Set state *immediately* - this will block further response parts
 				s.SetResponseState(ResponseStateSInterrupted) // Update state (atomic)
@@ -692,9 +690,8 @@ func (s *ReadlineSession) Run(ctx context.Context) error {
 					s.log.Warn("Interrupt received while processing, but no cancel function found!")
 				}
 
-				// Provide clear feedback that processing was interrupted
-				// We use a newline at the end to ensure prompt appears on a fresh line
-				fmt.Fprintln(currentReader.Config.Stderr, ansiDimColor("[Interrupted]"))
+				// Provide clear feedback that processing was interrupted by appending to the current line
+				fmt.Fprintf(currentReader.Config.Stdout, "%s\n", ansiDimColor(" [Interrupted]"))
 
 				// Reset buffer/multiline state immediately
 				s.buffer.Reset()
