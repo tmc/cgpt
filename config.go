@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var defaultBackend = "anthropic" // Configurable via 'CGPT_BACKEND" (or via configuration files).
+var defaultBackend = "dummy" // Configurable via 'CGPT_BACKEND" (or via configuration files).
 
 var defaultModels = map[string]string{
 	"anthropic": "claude-3-7-sonnet-20250219",
@@ -49,6 +49,8 @@ type Config struct {
 	OpenAIAPIKey    string `yaml:"openaiAPIKey"`
 	AnthropicAPIKey string `yaml:"anthropicAPIKey"`
 	GoogleAPIKey    string `yaml:"googleAPIKey"`
+	OpenAIBaseURL 	string `yaml:"openai_base_url"`
+
 }
 
 // LoadConfig loads the configuration from various sources in the following order of precedence:
@@ -158,6 +160,8 @@ func setupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
 	v.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
 	v.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
 	v.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
+	v.BindEnv("openai_base_url", "OPENAI_BASE_URL")
+
 
 	// Set config file if specified in flags
 	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath.Changed {

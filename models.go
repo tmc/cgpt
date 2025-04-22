@@ -59,6 +59,16 @@ var modelConstructors = map[string]modelConstructor{
 		if cfg.OpenAIAPIKey != "" {
 			options = append(options, openai.WithToken(cfg.OpenAIAPIKey))
 		}
+
+	
+		if cfg.OpenAIBaseURL != "" {
+			fmt.Printf("cgpt: using OpenAI base URL: %s\n", cfg.OpenAIBaseURL)
+			options = append(options, openai.WithBaseURL(cfg.OpenAIBaseURL))
+		} else {
+			fmt.Printf("cgpt: using ")
+
+		}
+
 		if mo.httpClient != nil {
 			options = append(options, openai.WithHTTPClient(mo.httpClient))
 		}
