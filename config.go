@@ -51,6 +51,11 @@ type Config struct {
 	GoogleAPIKey    string `yaml:"googleAPIKey"`
 	OpenAIBaseURL 	string `yaml:"openaiBaseURL"`
 
+
+	// Reference on the similarly named variables:
+	// OpenAIBaseURL is used in struct pulled in models.go
+	// openaiBaseURL is used in YAML file (config.yaml) by end user
+	// OPENAI_BASE_URL is used if they set through bash `export OPENAI_BASE_URL="xyz"`
 }
 
 // LoadConfig loads the configuration from various sources in the following order of precedence:

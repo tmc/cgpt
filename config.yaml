@@ -1,4 +1,0 @@
-# backend: "openai"
-# model: "Meta-Llama-4-Maverick-17B-128E-Instruct-FP8"
-# openaiBaseURL: "https://chatapi.akash.network/api/v1/"
-# openaiAPIKey: "sk-it1KlU6reat-WDeEecz5lg"
