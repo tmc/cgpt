@@ -4,7 +4,7 @@ cgpt is a command-line tool for interacting with Large Language Models (LLMs) us
 
 ## Features
 
-- Supports multiple backends: Anthropic, OpenAI, Ollama, and Google AI
+- Supports multiple backends: Anthropic, OpenAI (and OpenAI compatible endpoints with a provided base url), Ollama, and Google AI
 - Interactive mode for continuous conversations
 - Streaming output
 - History management
