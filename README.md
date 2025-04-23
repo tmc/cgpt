@@ -4,7 +4,7 @@ cgpt is a command-line tool for interacting with Large Language Models (LLMs) us
 
 ## Features
 
-- Supports multiple backends: Anthropic, OpenAI, Ollama, and Google AI
+- Supports multiple backends: Anthropic, OpenAI (and OpenAI compatible endpoints with a provided base url), Ollama, and Google AI
 - Interactive mode for continuous conversations
 - Streaming output
 - History management
@@ -175,3 +175,29 @@ This project is licensed under the ISC License. See the [LICENSE](LICENSE) file 
 This README provides an overview of the cgpt tool, including its features, installation instructions, usage examples, configuration options, and information about the Vim plugin. It also includes details about the supported backends and environment variables for API keys.
 
 Happy hacking! 🚀
+
+
+## Local Development
+1. Clone and CD into the repository:
+```bash
+git clone https://github.com/tmc/cgpt
+cd cgpt
+```
+
+2. Ensure GO is installed locally [Or, install:](https://go.dev/doc/install)
+```bash
+go version
+```
+
+3. Setup environment variables, type this into terminal
+```bash
+export ANTHROPIC_API_KEY='your-anthropic-api-key'
+export OPENAI_API_KEY='your-openai-api-key'
+export GOOGLE_API_KEY='your-google-ai-api-key'
+```
+
+4. Build project locally and run
+```bash
+go build -o cgpt ./cmd/cgpt
+./cgpt [flags] [prompt]
+```

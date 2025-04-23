@@ -49,6 +49,13 @@ type Config struct {
 	OpenAIAPIKey    string `yaml:"openaiAPIKey"`
 	AnthropicAPIKey string `yaml:"anthropicAPIKey"`
 	GoogleAPIKey    string `yaml:"googleAPIKey"`
+	OpenAIBaseURL 	string `yaml:"openaiBaseURL"`
+
+
+	// Reference on the similarly named variables:
+	// OpenAIBaseURL is used in struct pulled in models.go
+	// openaiBaseURL is used in YAML file (config.yaml) by end user
+	// OPENAI_BASE_URL is used if they set through bash `export OPENAI_BASE_URL="xyz"`
 }
 
 // LoadConfig loads the configuration from various sources in the following order of precedence:
@@ -158,6 +165,8 @@ func setupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
 	v.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
 	v.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
 	v.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
+	v.BindEnv("openaiBaseURL", "OPENAI_BASE_URL")
+
 
 	// Set config file if specified in flags
 	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath.Changed {
