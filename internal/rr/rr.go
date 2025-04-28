@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -133,6 +134,14 @@ func Recording(file string) (bool, error) {
 
 // creates creates a new record-mode RecordReplay in the file.
 func create(file string, rt http.RoundTripper) (*RecordReplay, error) {
+	// Ensure the parent directory exists
+	dir := filepath.Dir(file)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
 	f, err := os.Create(file)
 	if err != nil {
 		return nil, err

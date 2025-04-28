@@ -17,19 +17,21 @@ type RunOptions struct {
 	InputStrings   []string `json:"inputStrings,omitempty" yaml:"inputStrings,omitempty"`
 	InputFiles     []string `json:"inputFiles,omitempty" yaml:"inputFiles,omitempty"`
 	PositionalArgs []string `json:"positionalArgs,omitempty" yaml:"positionalArgs,omitempty"`
-	Prefill        string   `json:"prefill,omitempty" yaml:"prefill,omitempty"`
+	Prefill        string   `json:"prefill,omitempty" yaml:"prefill,omitempty"`         // Prefill assistant response
+	PrefillEcho    bool     `json:"prefillEcho,omitempty" yaml:"prefillEcho,omitempty"` // Echo the prefill string
 
 	// Output options
 	Continuous   bool `json:"continuous,omitempty" yaml:"continuous,omitempty"`
 	StreamOutput bool `json:"streamOutput,omitempty" yaml:"streamOutput,omitempty"`
 	ShowSpinner  bool `json:"showSpinner,omitempty" yaml:"showSpinner,omitempty"`
-	EchoPrefill  bool `json:"echoPrefill,omitempty" yaml:"echoPrefill,omitempty"`
 	UseTUI       bool `json:"useTUI,omitempty" yaml:"useTUI,omitempty"` // Use BubbleTea UI for interactive mode
 	PrintUsage   bool
 
 	// Verbosity options
-	Verbose   bool `json:"verbose,omitempty" yaml:"verbose,omitempty"`
-	DebugMode bool `json:"debugMode,omitempty" yaml:"debugMode,omitempty"`
+	Verbose   bool   `json:"verbose,omitempty" yaml:"verbose,omitempty"`
+	DebugMode bool   `json:"debugMode,omitempty" yaml:"debugMode,omitempty"`
+	LogFile   string `json:"logFile,omitempty" yaml:"logFile,omitempty"` // Log file path
+	LogLevel  string `json:"logLevel,omitempty" yaml:"logLevel,omitempty"` // Logging level
 
 	// History options
 	HistoryIn           string `json:"historyIn,omitempty" yaml:"historyIn,omitempty"`

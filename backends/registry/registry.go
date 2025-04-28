@@ -41,7 +41,6 @@ func InitializeModel(cfg *options.Config, providerOpts ...options.InferenceProvi
 	for _, option := range providerOpts {
 		option(opts)
 	}
-	// fmt.Println("Using environment variable lookup function:", opts.EnvLookupFunc) // Commented out debug print
 
 	constructor, ok := registry[cfg.Backend]
 	if !ok {

@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 
 	"github.com/tmc/cgpt/ui/completion" // Use local completion package
-	"go.uber.org/zap"                   // Import zap
 )
 
 var ErrEmptyInput = errors.New("empty input")
@@ -70,7 +70,7 @@ type Config struct {
 	MultiLineHint  string
 
 	// Logger is added to Config
-	Logger *zap.SugaredLogger
+	Logger *slog.Logger
 }
 
 // InteractiveState (remains internal)
@@ -97,9 +97,9 @@ const (
 type PasteMode int
 
 const (
-	PasteModeNormal PasteMode = iota // Normal input mode
-	PasteModeActive                  // Currently in bracketed paste mode
-	PasteModeComplete                // Paste operation completed
+	PasteModeNormal   PasteMode = iota // Normal input mode
+	PasteModeActive                    // Currently in bracketed paste mode
+	PasteModeComplete                  // Paste operation completed
 )
 
 // Defaults

@@ -23,6 +23,7 @@ func Constructor(cfg *options.Config, opts *options.InferenceProviderOptions) (l
 
 	anthropicOpts := []anthropic.Option{
 		anthropic.WithToken(apiKey),
+		anthropic.WithModel(cfg.Model),
 	}
 
 	if opts.HTTPClient != nil {

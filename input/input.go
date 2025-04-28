@@ -180,9 +180,9 @@ func (p *Processor) GetCombinedReader(ctx context.Context) (reader io.Reader, wa
 		}
 	}
 
-	// Add positional args - treat each one like a separate -i flag
-	for _, arg := range p.args {
-		readers = append(readers, strings.NewReader(arg))
+	// Add positional args - join them with spaces
+	if len(p.args) > 0 {
+		readers = append(readers, strings.NewReader(strings.Join(p.args, " ")))
 	}
 
 	// Determine if we need to reattach to TTY

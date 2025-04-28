@@ -17,7 +17,7 @@ var DefaultBackend = "anthropic" // Configurable via 'CGPT_BACKEND" (or via conf
 
 // DefaultModels is a map of backend names to their default models
 var DefaultModels = map[string]string{
-	"anthropic": "claude-3-7-sonnet-20250219",
+	"anthropic": "claude-3-7-sonnet-latest",
 	"openai":    "gpt-4o",
 	"ollama":    "llama3.2",
 	"googleai":  "gemini-pro",
@@ -96,10 +96,6 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 
 	// Get backend (respecting precedence)
 	backend := v.GetString("backend")
-	if verbose, _ := flagSet.GetBool("debug"); verbose {
-		fmt.Fprintf(stderr, "cgpt: backend is %q\n", backend)
-	}
-
 	// Check if model is explicitly set anywhere before setting default
 	hasModel := false
 	if flagSet.Changed("model") {
@@ -115,7 +111,12 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 	if !hasModel {
 		if defaultModel, ok := DefaultModels[backend]; ok {
 			v.Set("model", defaultModel)
+			fmt.Fprintf(stderr, "cgpt: using default model for %s backend: %s\n", backend, defaultModel)
 		}
+	}
+
+	if verbose, _ := flagSet.GetBool("debug"); verbose {
+		fmt.Fprintf(stderr, "cgpt: backend: %q model: %q\n", backend, v.GetString("model"))
 	}
 
 	if err := v.Unmarshal(cfg); err != nil {

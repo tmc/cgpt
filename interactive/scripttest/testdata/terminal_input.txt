@@ -1,0 +1,10 @@
+help
+test input
+multiline
+input
+"""
+code block
+with multiple
+lines
+"""
+exit

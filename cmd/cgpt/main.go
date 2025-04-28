@@ -12,22 +12,29 @@
 //
 // Flags:
 //
-//	-b, --backend string             The backend to use (default "anthropic")
-//	-m, --model string               The model to use (default "claude-3-7-sonnet-20250219")
-//	-i, --input string               Direct string input (can be used multiple times)
-//	-f, --file string                Input file path. Use '-' for stdin (can be used multiple times)
-//	-c, --continuous                 Run in continuous mode (interactive)
-//	-s, --system-prompt string       System prompt to use
-//	-p, --prefill string             Prefill the assistant's response
-//	-I, --history-load string        File to read completion history from
-//	-O, --history-save string        File to store completion history in
-//	    --config string              Path to the configuration file (default "config.yaml")
-//	-v, --verbose                    Verbose output
-//	    --debug                      Debug output
-//	-n, --completions int            Number of completions (when running non-interactively with history)
-//	-t, --max-tokens int             Maximum tokens to generate (default 8000)
-//	    --completion-timeout duration Maximum time to wait for a response (default 2m0s)
-//	-h, --help                       Display help information
+//	-b, --backend string                The backend to use (default "anthropic")
+//	-m, --model string                  The model to use (default "claude-3-7-sonnet-latest")
+//	-f, --file stringArray              Input file path. Use '-' for stdin (can be used multiple times) (default [-])
+//	-c, --continuous                    Run in continuous mode (interactive)
+//	    --tui                           Use terminal UI mode for interactive sessions
+//	-v, --verbose                       Verbose output
+//	    --debug                         Debug output
+//	    --log-file string               File to write logs to instead of stderr (supports full paths with directories)
+//	    --log-level string              Set logging level explicitly (debug, info, warn, error)
+//	-p, --prefill string                Prefill the assistant's response
+//	    --prefill-echo                  Print the prefill message (default true)
+//	    --print-usage                   Print token usage information
+//	    --openai-use-max-tokens         If true, uses 'max_tokens' vs 'max_output_tokens' for openai backends
+//	    --completion-timeout duration   Maximum time to wait for a response (default 2m0s)
+//	-I, --history-in string             File to read completion history from
+//	-O, --history-out string            File to store completion history in
+//	-n, --completions int               Number of completions (when running non-interactively with history)
+//	-s, --system-prompt string          System prompt to use
+//	-t, --max-tokens int                Maximum tokens to generate
+//	-T, --temperature float             Temperature for sampling (default 0.05)
+//	    --config string                 Path to the configuration file (default "config.yaml")
+//	    --show-advanced-usage string    Show advanced usage examples (comma separated list of sections, or 'all')
+//	-h, --help                          Display help information
 //
 // The -c/--continuous flag enables interactive mode, where the program runs in a loop,
 // using the previous output as input for the next request. In this mode, inference
@@ -66,18 +73,20 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 	// Default to false for continuous mode - if stdin is a terminal with no other inputs,
 	// we'll set this to true automatically later
 	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Run in continuous mode (interactive)")
-	fs.BoolVar(&opts.UseTUI, "tui", false, "Use terminal UI mode (BubbleTea) for interactive sessions")
+	fs.BoolVar(&opts.UseTUI, "tui", false, "Use terminal UI mode for interactive sessions")
 	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
 	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")
+	fs.StringVar(&opts.LogFile, "log-file", "", "File to write logs to instead of stderr (supports full paths with directories)")
+	fs.StringVar(&opts.LogLevel, "log-level", "", "Set logging level explicitly (debug, info, warn, error)")
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
 	fs.StringVarP(&opts.Prefill, "prefill", "p", "", "Prefill the assistant's response")
+	fs.BoolVar(&opts.PrefillEcho, "prefill-echo", true, "Print the prefill message")
 	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
 
 	fs.BoolVar(&opts.PrintUsage, "print-usage", false, "Print token usage information")
 
 	fs.BoolVar(&opts.OpenAIUseLegacyMaxTokens, "openai-use-max-tokens", false, "If true, uses 'max_tokens' vs 'max_output_tokens' for openai backends")
 
-	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
 	fs.DurationVar(&opts.CompletionTimeout, "completion-timeout", 2*time.Minute, "Maximum time to wait for a response")
 
 	// History flags
@@ -92,7 +101,7 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 	// Config flags
 	// Check if opts.Config is nil before accessing fields
 	backend := "anthropic"
-	model := "claude-3-7-sonnet-20250219"
+	model := "claude-3-7-sonnet-latest"
 	sysPrompt := ""
 	maxTokens := 0
 	temp := 0.05
@@ -111,12 +120,10 @@ func defineFlags(fs *pflag.FlagSet, opts *options.RunOptions) {
 
 	// Config file path
 	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
-	
+
 	// Test flags
 	fs.BoolVar(&opts.Config.SlowResponses, "slow-responses", false, "Simulate slow response generation (for UX testing)")
-	fs.StringVar(&opts.Config.HTTPRecordFile, "http-record", "", "Path to HTTP record/replay file for tests")
-	// Add alias for http-record to match what's used in tests
-	fs.StringVar(&opts.Config.HTTPRecordFile, "httprecord", "", "Path to HTTP record/replay file for tests (alias)")
+	fs.StringVar(&opts.Config.HTTPRecordFile, "http-record-replay", "", "Path to HTTP record/replay file for tests")
 }
 
 func main() {
@@ -170,7 +177,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "\nReceived rapid double interrupt, exiting immediately.")
 				// Log the double-interrupt for debugging
 				if opts.DebugMode {
-					fmt.Fprintf(os.Stderr, "Debug: Double interrupt detected (%v ms apart)\n", 
+					fmt.Fprintf(os.Stderr, "Debug: Double interrupt detected (%v ms apart)\n",
 						now.Sub(lastInterruptTime).Milliseconds())
 				}
 				os.Exit(1)
@@ -202,19 +209,19 @@ func main() {
 	if err = run(ctx, opts, flagSet); err != nil {
 		// Don't report expected ways to exit as errors (context canceled, interrupt, EOF, etc)
 		exitError := false
-		
+
 		// Check for any of the "normal" ways to exit
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			// Context cancellation (Ctrl+C handling) is expected
 			exitError = true
-		} else if err.Error() == "Interrupt" { 
+		} else if err.Error() == "Interrupt" {
 			// Readline's ErrInterrupt comes from the interactive session (Ctrl+C at prompt)
 			exitError = true
 		} else if errors.Is(err, io.EOF) {
 			// EOF (Ctrl+D) is an expected way to exit
 			exitError = true
 		}
-		
+
 		if !exitError {
 			// Only show error for unexpected issues
 			fmt.Fprintf(os.Stderr, "cgpt: error: %T %v\n", err, err)
@@ -395,7 +402,7 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 	svcOpts.Stdout = opts.Stdout
 	svcOpts.Stderr = opts.Stderr
 	svcOpts.ShowSpinner = opts.ShowSpinner
-	svcOpts.EchoPrefill = opts.EchoPrefill
+	svcOpts.PrefillEcho = opts.PrefillEcho
 	svcOpts.PrintUsage = opts.PrintUsage
 	svcOpts.StreamOutput = opts.StreamOutput
 	svcOpts.Continuous = opts.Continuous
@@ -410,25 +417,30 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		svcOpts.CompletionTimeout = opts.CompletionTimeout
 	}
 
-	// If we need to use the TTY, use it for stdout in the completion service
-	// The stdin handling is managed separately through RunOptions.Stdin
-	if ttyFile != nil && opts.Continuous {
-		// For continuous mode with TTY, override both STDIN and STDOUT
-		// This is crucial for the interactive prompt to work correctly
-		svcOpts.Stdout = ttyFile
+	// // If we need to use the TTY, use it for stdout in the completion service
+	// // The stdin handling is managed separately through RunOptions.Stdin
+	// if ttyFile != nil && opts.Continuous {
+	// 	// For continuous mode with TTY, override both STDIN and STDOUT
+	// 	// This is crucial for the interactive prompt to work correctly
+	// 	svcOpts.Stdout = ttyFile
 
-		// We need to explicitly override stdin in RunOptions to use the TTY file
-		// Since RunOptions.Stdin may have been set to read from pipe/file already
-		opts.Stdin = ttyFile
-	}
+	// 	// We need to explicitly override stdin in RunOptions to use the TTY file
+	// 	// Since RunOptions.Stdin may have been set to read from pipe/file already
+	// 	opts.Stdin = ttyFile
+	// }
 
 	// Create a logger for the completion service
-	logger, err := NewLogger(opts.Stderr, opts.Verbose, opts.DebugMode)
+	logger, err := NewLogger(opts.Stderr, opts.Verbose, opts.DebugMode, opts.LogFile, opts.LogLevel)
 	if err != nil {
 		return fmt.Errorf("failed to create logger: %w", err)
 	}
 
-	// Not needed anymore - simplified approach
+	// Output initial debug logs with the newly created logger
+	if opts.DebugMode {
+		logger.Debug("Using externally provided logger")
+		logger.Info("cgpt service initialized")
+		logger.Debug(fmt.Sprintf("Service options: %+v", svcOpts))
+	}
 
 	s, err := completion.New(compCfg, model,
 		completion.WithOptions(svcOpts),
@@ -465,7 +477,7 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 		Continuous:          opts.Continuous,
 		StreamOutput:        opts.StreamOutput,
 		ShowSpinner:         opts.ShowSpinner,
-		EchoPrefill:         opts.EchoPrefill,
+		PrefillEcho:         opts.PrefillEcho,
 		UseTUI:              opts.UseTUI,
 		PrintUsage:          opts.PrintUsage,
 		Verbose:             opts.Verbose,
@@ -492,11 +504,11 @@ func run(ctx context.Context, opts options.RunOptions, flagSet *pflag.FlagSet) e
 // If the reader is already an io.ReadCloser or an *os.File, it is returned as is.
 // Otherwise, it is wrapped in an io.NopCloser.
 func getReadCloser(r io.Reader) io.ReadCloser {
-	if rc, ok := r.(io.ReadCloser); ok {
-		return rc
-	}
 	if f, ok := r.(*os.File); ok {
 		return f // *os.File implements ReadCloser
+	}
+	if rc, ok := r.(io.ReadCloser); ok {
+		return rc
 	}
 	return io.NopCloser(r)
 }
@@ -530,7 +542,7 @@ func initFlags(args []string, stdin io.Reader) (options.RunOptions, *pflag.FlagS
 	}
 	// Default values for Config fields if not set by flags/config file
 	opts.Config.Backend = "anthropic"
-	opts.Config.Model = "claude-3-7-sonnet-20250219"
+	opts.Config.Model = "claude-3-7-sonnet-latest"
 	opts.Config.Temperature = 0.05
 	opts.CompletionTimeout = 2 * time.Minute
 
@@ -569,11 +581,13 @@ func initFlags(args []string, stdin io.Reader) (options.RunOptions, *pflag.FlagS
 	// Keep hidden flags as they are
 	fs.MarkHidden("stream") // Correct name for the stream flag
 	fs.MarkHidden("readline-history-file")
-	fs.MarkHidden("prefill-echo")
 	fs.MarkHidden("show-spinner")
 	// Mark deprecated history flags as hidden
 	fs.MarkHidden("history-load")
 	fs.MarkHidden("history-save")
+	// Test flags:
+	fs.MarkHidden("http-record-replay")
+	fs.MarkHidden("slow-responses")
 
 	fs.Usage = func() {
 		// Use Stderr for usage to match convention
