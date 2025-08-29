@@ -18,21 +18,12 @@ type InferenceProviderOption func(*inferenceProviderOptions)
 
 type inferenceProviderOptions struct {
 	httpClient *http.Client
-
-	openaiCompatUseLegacyMaxTokens bool
 }
 
 // WithHTTPClient sets a custom HTTP client for the model
 func WithHTTPClient(client *http.Client) InferenceProviderOption {
 	return func(mo *inferenceProviderOptions) {
 		mo.httpClient = client
-	}
-}
-
-// WithUseLegacyMaxTokens sets whether to use legacy max tokens behavior for OpenAI compatibility
-func WithUseLegacyMaxTokens(useLegacy bool) InferenceProviderOption {
-	return func(mo *inferenceProviderOptions) {
-		mo.openaiCompatUseLegacyMaxTokens = useLegacy
 	}
 }
 
@@ -62,8 +53,24 @@ var modelConstructors = map[string]modelConstructor{
 		if mo.httpClient != nil {
 			options = append(options, openai.WithHTTPClient(mo.httpClient))
 		}
-		if mo.openaiCompatUseLegacyMaxTokens {
-			options = append(options, openai.WithUseLegacyMaxTokens(true))
+
+		return openai.New(options...)
+	},
+	"openrouter": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
+		options := []openai.Option{
+			openai.WithModel(cfg.Model),
+			openai.WithBaseURL("https://openrouter.ai/api/v1"),
+		}
+		// Use OpenRouter API key from config or fallback to OpenAI key
+		apiKey := cfg.OpenRouterAPIKey
+		if apiKey == "" {
+			apiKey = cfg.OpenAIAPIKey // Fallback to OpenAI key field
+		}
+		if apiKey != "" {
+			options = append(options, openai.WithToken(apiKey))
+		}
+		if mo.httpClient != nil {
+			options = append(options, openai.WithHTTPClient(mo.httpClient))
 		}
 
 		return openai.New(options...)
@@ -96,7 +103,7 @@ var modelConstructors = map[string]modelConstructor{
 		if mo.httpClient != nil {
 			options = append(options, googleai.WithHTTPClient(mo.httpClient))
 		}
-		return googleai.New(context.TODO(), options...)
+		return googleai.New(context.Background(), options...)
 	},
 	"dummy": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
 		return NewDummyBackend()

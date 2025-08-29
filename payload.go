@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/tmc/langchaingo/llms"
+	"github.com/tmc/langchaingo/llms/openai"
 )
 
 // The default maximum number of tokens allowed in a single request.
@@ -92,27 +93,33 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			}
 		}()
 
-		_, err := s.model.GenerateContent(genCtx, payload.Messages,
+		callOpts := []llms.CallOption{
 			llms.WithMaxTokens(s.cfg.MaxTokens),
 			llms.WithTemperature(s.cfg.Temperature),
-			llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
-				if firstChunk {
-					prefillCleanup()
-					if spinnerStop != nil {
-						spinnerStop()
-						spinnerStop = nil
-					}
-					firstChunk = false
+		}
+		if s.useLegacyMaxTokens {
+			callOpts = append(callOpts, openai.WithLegacyMaxTokensField())
+		}
+		callOpts = append(callOpts, llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+			if firstChunk {
+				prefillCleanup()
+				if spinnerStop != nil {
+					spinnerStop()
+					spinnerStop = nil
 				}
+				firstChunk = false
+			}
 
-				select {
-				case ch <- string(chunk):
-					fullResponse.Write(chunk)
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-			}))
+			select {
+			case ch <- string(chunk):
+				fullResponse.Write(chunk)
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}))
+
+		_, err := s.model.GenerateContent(genCtx, payload.Messages, callOpts...)
 
 		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("failed to generate content: %v", err)
@@ -152,9 +159,14 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		defer stopSpinner()
 	}
 
-	response, err := s.model.GenerateContent(ctx, payload.Messages,
+	callOpts := []llms.CallOption{
 		llms.WithMaxTokens(s.cfg.MaxTokens),
-		llms.WithTemperature(s.cfg.Temperature))
+		llms.WithTemperature(s.cfg.Temperature),
+	}
+	if s.useLegacyMaxTokens {
+		callOpts = append(callOpts, openai.WithLegacyMaxTokensField())
+	}
+	response, err := s.model.GenerateContent(ctx, payload.Messages, callOpts...)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}

@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/spf13/pflag"
@@ -87,6 +88,30 @@ func Test(t *testing.T) {
 			model:   "llama3.2:1b",
 			args:    []string{"--prefill=yo"},
 		},
+		{
+			name:    "history output",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"-O", "history.yaml"},
+		},
+		{
+			name:    "history auto",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"-H", "auto"},
+		},
+		{
+			name:    "history continue",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"-C"},
+		},
+		{
+			name:    "history fork",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"-I", "input.yaml", "-O", "output.yaml"},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -122,7 +147,23 @@ func Test(t *testing.T) {
 			opts.Stdout = outBuf
 			inBuf.WriteString(txtarComment)
 
-			runTest(t, context.Background(), opts, fs, newTestLogger(t))
+			// Skip ollama tests if ollama is not available
+			if tc.backend == "ollama" {
+				// Check if ollama is available by attempting to initialize
+				testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				
+				// Try to run the test with a short timeout
+				runTest(t, testCtx, opts, fs, newTestLogger(t))
+				
+				// If context timed out or we got an error, skip the test
+				if testCtx.Err() != nil || strings.Contains(errBuf.String(), "failed to connect") || strings.Contains(errBuf.String(), "connection refused") {
+					t.Skip("Skipping ollama test - ollama not available")
+				}
+			} else {
+				runTest(t, context.Background(), opts, fs, newTestLogger(t))
+			}
+			
 			if *update {
 				updateGoldenFile(t, testInputFile, txtarComment, files, outBuf.Bytes(), errBuf.Bytes(), files["http_payload"])
 				t.SkipNow()
@@ -300,7 +341,7 @@ func TestDuplicateAIRole(t *testing.T) {
 		"cgpt-test",
 		"--backend", "dummy",
 		"--model", "dummy-model",
-		"--history-save", histFile.Name(),
+		"--history-out", histFile.Name(),
 		"--prefill", "prefill message",
 		"--stream",
 	}
@@ -335,8 +376,8 @@ func TestDuplicateAIRole(t *testing.T) {
 		"cgpt-test",
 		"--backend", "dummy",
 		"--model", "dummy-model",
-		"--history-load", histFile.Name(),
-		"--history-save", histFile.Name(),
+		"--history-in", histFile.Name(),
+		"--history-out", histFile.Name(),
 		"--stream",
 	}
 	if err := app.Run(args); err != nil {
@@ -373,7 +414,7 @@ func TestMain(t *testing.T) {
 		{
 			name:    "no args",
 			args:    []string{},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {

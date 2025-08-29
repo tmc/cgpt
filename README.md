@@ -7,9 +7,18 @@ cgpt is a command-line tool for interacting with Large Language Models (LLMs) us
 - Supports multiple backends: Anthropic, OpenAI, Ollama, and Google AI
 - Interactive mode for continuous conversations
 - Streaming output
-- History management
+- History management with automatic metadata tracking
 - Configurable via YAML file and environment variables
 - Vim plugin for easy integration
+
+### History Management
+
+cgpt provides sophisticated session history management:
+- **Auto-generated sessions**: Use `-H auto` to create timestamped session files in `~/.cgpt/history/sessions/`
+- **Session metadata**: Each session includes creation time, auto-generated description, and fork tracking
+- **Fork tracking**: When using `-I input.yaml -O output.yaml`, cgpt tracks the parent session
+- **Quick continuation**: Use `-C` to continue your most recent session
+- **Descriptive metadata**: Sessions automatically generate descriptions from the first user message
 
 ## Prerequisites
 
@@ -74,8 +83,10 @@ cgpt [flags]
 - `-c, --continuous`: Run in continuous mode (interactive)
 - `-s, --system-prompt string`: System prompt to use
 - `-p, --prefill string`: Prefill the assistant's response
-- `-I, --history-load string`: File to read completion history from
-- `-O, --history-save string`: File to store completion history in
+- `-I, --history-in string`: File to read completion history from
+- `-O, --history-out string`: File to store completion history in (or - for stdout)
+- `-H, --history string`: Read and write same history file (or 'auto' for auto-generated)
+- `-C, --continue`: Continue most recent session
 - `--config string`: Path to the configuration file (default "config.yaml")
 - `-v, --verbose`: Verbose output
 - `--debug`: Debug output
@@ -164,8 +175,17 @@ cgpt -c
 # Use a specific backend and model
 cgpt -b openai -m gpt-4 -i "Translate 'Hello, world!' to French"
 
-# Load and save history
-cgpt -I input_history.yaml -O output_history.yaml -i "Continue the conversation"
+# Save conversation history
+cgpt -H auto -i "Explain quantum computing"
+
+# Continue a specific session
+cgpt -H session.yaml -i "Continue our discussion"
+
+# Continue the most recent session
+cgpt -C -i "What did we talk about?"
+
+# Read from one file, write to another (fork)
+cgpt -I old_session.yaml -O new_session.yaml -i "Let's try a different approach"
 ```
 
 ## License

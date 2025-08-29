@@ -13,14 +13,16 @@
 // Flags:
 //
 //	-b, --backend string             The backend to use (default "anthropic")
-//	-m, --model string               The model to use (default "claude-3-7-sonnet-20250219")
+//	-m, --model string               The model to use (default "claude-sonnet-4-20250514")
 //	-i, --input string               Direct string input (can be used multiple times)
 //	-f, --file string                Input file path. Use '-' for stdin (can be used multiple times)
 //	-c, --continuous                 Run in continuous mode (interactive)
 //	-s, --system-prompt string       System prompt to use
 //	-p, --prefill string             Prefill the assistant's response
-//	-I, --history-load string        File to read completion history from
-//	-O, --history-save string        File to store completion history in
+//	-I, --history-in string          File to read completion history from
+//	-O, --history-out string         File to store completion history in (or - for stdout)
+//	-H, --history string             Read and write same history file (or 'auto' for auto-generated)
+//	-C, --continue                   Continue most recent session
 //	    --config string              Path to the configuration file (default "config.yaml")
 //	-v, --verbose                    Verbose output
 //	    --debug                      Debug output
@@ -28,6 +30,15 @@
 //	-t, --max-tokens int             Maximum tokens to generate (default 8000)
 //	    --completion-timeout duration Maximum time to wait for a response (default 2m0s)
 //	-h, --help                       Display help information
+//
+// History Management:
+//
+// cgpt supports session history with automatic metadata tracking:
+//   - Use -H auto to create timestamped session files in ~/.cgpt/history/sessions/
+//   - Use -H filename to read from and write to the same file
+//   - Use -I and -O for explicit input/output control
+//   - Use -C to continue the most recent session
+//   - Sessions include metadata: creation time, description, and fork tracking
 //
 // The -c/--continuous flag enables interactive mode, where the program runs in a loop,
 // using the previous output as input for the next request. In this mode, inference
@@ -59,24 +70,23 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.StringVarP(&opts.Prefill, "prefill", "p", "", "Prefill the assistant's response")
 	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
 
-	fs.BoolVar(&opts.OpenAIUseLegacyMaxTokens, "openai-use-max-tokens", false, "If true, uses 'max_tokens' vs 'max_output_tokens' for openai backends")
+	fs.BoolVar(&opts.OpenAIUseLegacyMaxTokens, "openai-use-max-tokens", false, "If true, uses 'max_tokens' vs 'max_completion_tokens' for openai backends")
 
 	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
 	fs.DurationVar(&opts.CompletionTimeout, "completion-timeout", 2*time.Minute, "Maximum time to wait for a response")
 
 	// History flags
 	fs.StringVarP(&opts.HistoryIn, "history-in", "I", "", "File to read completion history from")
-	fs.StringVarP(&opts.HistoryOut, "history-out", "O", "", "File to store completion history in")
-	fs.StringVar(&opts.HistoryIn, "history-load", "", "File to read completion history from (deprecated)")
-	fs.StringVar(&opts.HistoryOut, "history-save", "", "File to store completion history in (deprecated)")
-	fs.BoolVar(&opts.DisableHistory, "no-history", false, "Disable saving chat history")
+	fs.StringVarP(&opts.HistoryOut, "history-out", "O", "", "File to store completion history in (or - for stdout)")
+	fs.StringVarP(&opts.History, "history", "H", "", "Read and write same history file (or 'auto' for auto-generated)")
+	fs.BoolVarP(&opts.Continue, "continue", "C", false, "Continue most recent session")
 
 	fs.StringVar(&opts.ReadlineHistoryFile, "readline-history-file", "~/.cgpt_history", "File to store readline history in")
 	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of completions (when running non-interactively with history)")
 
 	// Config flags
 	fs.StringVarP(&opts.Config.Backend, "backend", "b", "anthropic", "The backend to use")
-	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-3-7-sonnet-20250219", "The model to use")
+	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-sonnet-4-20250514", "The model to use")
 	fs.StringVarP(&opts.Config.SystemPrompt, "system-prompt", "s", "", "System prompt to use")
 	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum tokens to generate")
 	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0.05, "Temperature for sampling")
@@ -130,9 +140,6 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
 		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.DebugHTTPClient))
 	}
-	if opts.OpenAIUseLegacyMaxTokens {
-		modelOpts = append(modelOpts, cgpt.WithUseLegacyMaxTokens(true))
-	}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize model: %w", err)
@@ -147,11 +154,14 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	opts.ShowSpinner = opts.ShowSpinner && term.IsTerminal(int(os.Stdout.Fd()))
 
 	// Create the completion service
-	s, err := cgpt.NewCompletionService(opts.Config, model,
+	completionOpts := []cgpt.CompletionServiceOption{
 		cgpt.WithStdout(opts.Stdout),
 		cgpt.WithStderr(opts.Stderr),
-		cgpt.WithDisableHistory(opts.DisableHistory),
-	)
+	}
+	if opts.OpenAIUseLegacyMaxTokens {
+		completionOpts = append(completionOpts, cgpt.WithUseLegacyMaxTokens(true))
+	}
+	s, err := cgpt.NewCompletionService(opts.Config, model, completionOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create completion service: %w", err)
 	}

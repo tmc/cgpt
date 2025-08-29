@@ -16,11 +16,128 @@ import (
 var defaultBackend = "anthropic" // Configurable via 'CGPT_BACKEND" (or via configuration files).
 
 var defaultModels = map[string]string{
-	"anthropic": "claude-3-7-sonnet-20250219",
-	"openai":    "gpt-4o",
-	"ollama":    "llama3.2",
-	"googleai":  "gemini-pro",
-	"dummy":     "dummy",
+	"anthropic":  "claude-sonnet-4-20250514",
+	"openai":     "gpt-5",
+	"openrouter": "anthropic/claude-sonnet-4",
+	"ollama":     "gpt-oss",
+	"googleai":   "gemini-2.5-pro",
+	"dummy":      "dummy",
+}
+
+// modelPatterns maps model name patterns to their corresponding backends
+var modelPatterns = map[string]string{
+	// OpenRouter models (provider/model format takes precedence)
+	"anthropic/":  "openrouter",
+	"openai/":     "openrouter",
+	"google/":     "openrouter",
+	"meta-llama/": "openrouter",
+	"mistralai/":  "openrouter",
+	"cohere/":     "openrouter",
+	"perplexity/": "openrouter",
+	"deepmind/":   "openrouter",
+	"nvidia/":     "openrouter",
+
+	// Anthropic models
+	"claude": "anthropic",
+	"opus":   "anthropic",
+	"sonnet": "anthropic",
+	"haiku":  "anthropic",
+
+	// OpenAI models
+	"gpt":     "openai",
+	"davinci": "openai",
+	"curie":   "openai",
+	"babbage": "openai",
+	"ada":     "openai",
+	"o1":      "openai",
+	"o3":      "openai",
+
+	// Google models
+	"gemini": "googleai",
+	"bard":   "googleai",
+
+	// Ollama models (common ones)
+	"llama":     "ollama",
+	"mistral":   "ollama",
+	"mixtral":   "ollama",
+	"phi":       "ollama",
+	"qwen":      "ollama",
+	"deepseek":  "ollama",
+	"codellama": "ollama",
+
+	// Dummy
+	"dummy": "dummy",
+}
+
+// Common model aliases/shortcuts
+var modelAliases = map[string]string{
+	// Anthropic shortcuts
+	"opus-4.1": "claude-opus-4-1-20250805",
+	"opus-4":   "claude-opus-4-1-20250805",
+	"opus":     "claude-opus-4-1-20250805",
+	"sonnet-4": "claude-4-sonnet-20250522",
+	"sonnet":   "claude-3-5-sonnet-20241022",
+	"haiku":    "claude-3-haiku-20240307",
+
+	// OpenAI shortcuts
+	"gpt-5":       "gpt-5",
+	"gpt-4":       "gpt-4-turbo-preview",
+	"gpt-4-turbo": "gpt-4-turbo-preview",
+	"gpt-3.5":     "gpt-3.5-turbo",
+	"o1":          "o1-preview",
+	"o1-mini":     "o1-mini",
+	"o3":          "o3",
+	"o3-mini":     "o3-mini",
+
+	// Google shortcuts
+	"gemini":     "gemini-pro",
+	"gemini-pro": "gemini-pro",
+	"gemini-1.5": "gemini-1.5-pro",
+
+	// Ollama shortcuts
+	"llama":     "llama3.2",
+	"llama3":    "llama3.2",
+	"mistral":   "mistral",
+	"mixtral":   "mixtral",
+	"codellama": "codellama",
+	"deepseek":  "deepseek-coder",
+}
+
+// expandModelAlias expands a model alias to its full name
+func expandModelAlias(model string) string {
+	modelLower := strings.ToLower(model)
+	if expanded, ok := modelAliases[modelLower]; ok {
+		return expanded
+	}
+	return model
+}
+
+// detectBackendFromModel attempts to determine the backend based on the model name
+func detectBackendFromModel(model string) (string, bool) {
+	if model == "" {
+		return "", false
+	}
+
+	modelLower := strings.ToLower(model)
+
+	// First check for OpenRouter format (provider/model)
+	// These patterns are more specific and should take precedence
+	if strings.Contains(modelLower, "/") {
+		for pattern, backend := range modelPatterns {
+			if strings.HasSuffix(pattern, "/") && strings.HasPrefix(modelLower, pattern) {
+				return backend, true
+			}
+		}
+	}
+
+	// Then check other patterns
+	for pattern, backend := range modelPatterns {
+		if !strings.HasSuffix(pattern, "/") && strings.Contains(modelLower, pattern) {
+			return backend, true
+		}
+	}
+
+	return "", false
 }
 
 // tokenLimits is a map of regex patterns to token limits for each backend.
@@ -29,6 +146,8 @@ var defaultModels = map[string]string{
 var tokenLimits = map[string]int{
 	"*":                    4096,
 	"google:*":             8192,
+	"anthropic:.*opus-4.*": 8192,
+	"anthropic:.*sonnet-4": 8192,
 	"anthropic:.*sonnet.*": 8000,
 }
 
@@ -46,9 +165,10 @@ type Config struct {
 
 	Debug bool `yaml:"debug"`
 
-	OpenAIAPIKey    string `yaml:"openaiAPIKey"`
-	AnthropicAPIKey string `yaml:"anthropicAPIKey"`
-	GoogleAPIKey    string `yaml:"googleAPIKey"`
+	OpenAIAPIKey     string `yaml:"openaiAPIKey"`
+	OpenRouterAPIKey string `yaml:"openrouterAPIKey"`
+	AnthropicAPIKey  string `yaml:"anthropicAPIKey"`
+	GoogleAPIKey     string `yaml:"googleAPIKey"`
 }
 
 // LoadConfig loads the configuration from various sources in the following order of precedence:
@@ -86,30 +206,57 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 		return nil, fmt.Errorf("unable to bind flags: %w", err)
 	}
 
-	// Get backend (respecting precedence)
-	backend := v.GetString("backend")
-	if verbose, _ := flagSet.GetBool("verbose"); verbose {
-		fmt.Fprintf(stderr, "cgpt: backend is %q\n", backend)
-	}
-
 	// Check if model is explicitly set anywhere before setting default
 	hasModel := false
+	modelName := ""
 	if flagSet.Changed("model") {
+		modelName = flagSet.Lookup("model").Value.String()
 		if verbose, _ := flagSet.GetBool("verbose"); verbose {
-			fmt.Fprintf(stderr, "cgpt: model set by flag: %s\n", flagSet.Lookup("model").Value.String())
+			fmt.Fprintf(stderr, "cgpt: model set by flag: %s\n", modelName)
 		}
 		hasModel = true
 	} else if isEnvSet("CGPT_MODEL") {
+		modelName = os.Getenv("CGPT_MODEL")
 		if verbose, _ := flagSet.GetBool("verbose"); verbose {
-			fmt.Fprintf(stderr, "cgpt: model set by env: %s\n", os.Getenv("CGPT_MODEL"))
+			fmt.Fprintf(stderr, "cgpt: model set by env: %s\n", modelName)
 		}
 		hasModel = true
-		v.Set("model", os.Getenv("CGPT_MODEL"))
 	} else if v.InConfig("model") {
+		modelName = v.GetString("model")
 		if verbose, _ := flagSet.GetBool("verbose"); verbose {
-			fmt.Fprintf(stderr, "cgpt: model set in config: %s\n", v.GetString("model"))
+			fmt.Fprintf(stderr, "cgpt: model set in config: %s\n", modelName)
 		}
 		hasModel = true
+	}
+
+	// Expand model alias if one was provided
+	if hasModel && modelName != "" {
+		expandedModel := expandModelAlias(modelName)
+		if expandedModel != modelName {
+			if verbose, _ := flagSet.GetBool("verbose"); verbose {
+				fmt.Fprintf(stderr, "cgpt: expanded model alias %q to %q\n", modelName, expandedModel)
+			}
+			modelName = expandedModel
+			v.Set("model", modelName)
+		}
+	}
+
+	// Get backend (respecting precedence)
+	backend := v.GetString("backend")
+
+	// If model is set but backend is not explicitly set, try to detect backend from model name
+	if hasModel && modelName != "" && !flagSet.Changed("backend") && !isEnvSet("CGPT_BACKEND") && !v.InConfig("backend") {
+		if detectedBackend, ok := detectBackendFromModel(modelName); ok {
+			backend = detectedBackend
+			v.Set("backend", backend)
+			if verbose, _ := flagSet.GetBool("verbose"); verbose {
+				fmt.Fprintf(stderr, "cgpt: auto-detected backend %q from model %q\n", backend, modelName)
+			}
+		}
+	}
+
+	if verbose, _ := flagSet.GetBool("verbose"); verbose {
+		fmt.Fprintf(stderr, "cgpt: backend is %q\n", backend)
 	}
 
 	// Only set default model if no explicit model is set
@@ -156,11 +303,12 @@ func setupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
 	v.SetEnvPrefix("CGPT")
 	v.AutomaticEnv()
 	v.BindEnv("openaiAPIKey", "OPENAI_API_KEY")
+	v.BindEnv("openrouterAPIKey", "OPENROUTER_API_KEY")
 	v.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
 	v.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
 
 	// Set config file if specified in flags
-	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath.Changed {
+	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath != nil && flagConfigFilePath.Changed {
 		v.SetConfigFile(flagConfigFilePath.Value.String())
 	}
 }
