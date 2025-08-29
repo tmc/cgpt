@@ -451,7 +451,10 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 	content := strings.Builder{}
 	for r := range streamPayloads {
 		content.WriteString(r)
-		s.Stdout.Write([]byte(r))
+		// Only write response to stdout if we're not outputting history to stdout
+		if s.historyOutFile != "-" {
+			s.Stdout.Write([]byte(r))
+		}
 	}
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
@@ -475,7 +478,10 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 	if err != nil {
 		return err
 	}
-	s.Stdout.Write([]byte(response))
+	// Only write response to stdout if we're not outputting history to stdout
+	if s.historyOutFile != "-" {
+		s.Stdout.Write([]byte(response))
+	}
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
 	}
@@ -572,8 +578,11 @@ func (s *CompletionService) runContinuousCompletion(ctx context.Context, runCfg 
 		if err != nil {
 			return err
 		}
-		s.Stdout.Write([]byte(response))
-		s.Stdout.Write([]byte("\n"))
+		// Only write response to stdout if we're not outputting history to stdout
+		if s.historyOutFile != "-" {
+			s.Stdout.Write([]byte(response))
+			s.Stdout.Write([]byte("\n"))
+		}
 		if err := s.saveHistory(); err != nil {
 			return fmt.Errorf("failed to save history: %w", err)
 		}
@@ -615,9 +624,14 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 		content := strings.Builder{}
 		for r := range streamPayloads {
 			content.WriteString(r)
-			s.Stdout.Write([]byte(r))
+			// Only write response to stdout if we're not outputting history to stdout
+			if s.historyOutFile != "-" {
+				s.Stdout.Write([]byte(r))
+			}
 		}
-		s.Stdout.Write([]byte("\n"))
+		if s.historyOutFile != "-" {
+			s.Stdout.Write([]byte("\n"))
+		}
 	} else {
 		response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
 			ShowSpinner: runCfg.ShowSpinner,
@@ -626,7 +640,10 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 		if err != nil {
 			return err
 		}
-		s.Stdout.Write([]byte(response))
+		// Only write response to stdout if we're not outputting history to stdout
+		if s.historyOutFile != "-" {
+			s.Stdout.Write([]byte(response))
+		}
 	}
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
