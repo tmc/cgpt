@@ -29,10 +29,10 @@ type RunOptions struct {
 	DebugMode bool `json:"debugMode,omitempty" yaml:"debugMode,omitempty"`
 
 	// History options
-	HistoryIn           string `json:"historyIn,omitempty" yaml:"historyIn,omitempty"`       // Read history from file (-I)
-	HistoryOut          string `json:"historyOut,omitempty" yaml:"historyOut,omitempty"`     // Write history to file (-O)
-	History             string `json:"history,omitempty" yaml:"history,omitempty"`           // Read+write same file (-H)
-	Continue            bool   `json:"continue,omitempty" yaml:"continue,omitempty"`         // Continue most recent (-C)
+	HistoryIn           string `json:"historyIn,omitempty" yaml:"historyIn,omitempty"`   // Read history from file (-I)
+	HistoryOut          string `json:"historyOut,omitempty" yaml:"historyOut,omitempty"` // Write history to file (-O)
+	History             string `json:"history,omitempty" yaml:"history,omitempty"`       // Read+write same file (-H)
+	Continue            bool   `json:"continue,omitempty" yaml:"continue,omitempty"`     // Continue most recent (-C)
 	ReadlineHistoryFile string `json:"readlineHistoryFile,omitempty" yaml:"readlineHistoryFile,omitempty"`
 	NCompletions        int    `json:"nCompletions,omitempty" yaml:"nCompletions,omitempty"`
 

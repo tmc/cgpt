@@ -33,13 +33,13 @@ type CompletionService struct {
 
 	historyIn           io.Reader
 	historyOutFile      string
-	historyFile         *os.File      // File handle for new history system
+	historyFile         *os.File // File handle for new history system
 	historyManager      *historyManager
 	historyMetadata     *historyMetadata // Metadata for the history file
 	readlineHistoryFile string
 	disableHistory      bool
 	autoNameHistory     bool
-	autoHistory         bool  // Whether this is an auto-generated session
+	autoHistory         bool // Whether this is an auto-generated session
 
 	performCompletionConfig PerformCompletionConfig
 
@@ -92,7 +92,6 @@ func WithUseLegacyMaxTokens(useLegacy bool) CompletionServiceOption {
 		s.useLegacyMaxTokens = useLegacy
 	}
 }
-
 
 // NewCompletionService creates a new CompletionService with the given configuration.
 func NewCompletionService(cfg *Config, model llms.Model, opts ...CompletionServiceOption) (*CompletionService, error) {
@@ -159,10 +158,10 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
 		return fmt.Errorf("input handling error: %w", err)
 	}
 	err := s.executeCompletion(ctx, runCfg)
-	
+
 	// Handle post-completion tasks (naming, cleanup)
 	s.finalizeHistory(ctx, runCfg)
-	
+
 	return err
 }
 
@@ -181,7 +180,7 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 	if err := s.setupHistory(runCfg); err != nil {
 		fmt.Fprintln(s.Stderr, err)
 	}
-	
+
 	if runCfg.Prefill != "" {
 		s.SetNextCompletionPrefill(runCfg.Prefill)
 	}
@@ -258,7 +257,6 @@ func (s *CompletionService) loadedWithHistory() bool {
 	return s.historyIn != nil
 }
 
-
 // setupHistory handles all history flag combinations
 func (s *CompletionService) setupHistory(runCfg RunOptions) error {
 	// Validate flag combinations
@@ -272,24 +270,24 @@ func (s *CompletionService) setupHistory(runCfg RunOptions) error {
 	if runCfg.Continue {
 		flagCount++
 	}
-	
+
 	if flagCount > 1 {
 		return fmt.Errorf("cannot combine -H/--history with -I/-O or -C flags")
 	}
-	
+
 	// Handle each flag type
 	if runCfg.Continue {
 		return s.setupContinue()
 	}
-	
+
 	if runCfg.History != "" {
 		return s.setupHistoryFile(runCfg.History)
 	}
-	
+
 	if runCfg.HistoryIn != "" || runCfg.HistoryOut != "" {
 		return s.setupExplicitHistory(runCfg.HistoryIn, runCfg.HistoryOut)
 	}
-	
+
 	// No history flags = no history
 	s.disableHistory = true
 	return nil
@@ -301,17 +299,17 @@ func (s *CompletionService) setupContinue() error {
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
-	
+
 	pattern := filepath.Join(sessionsDir, "*.yaml")
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return fmt.Errorf("failed to find sessions: %w", err)
 	}
-	
+
 	if len(matches) == 0 {
 		return fmt.Errorf("no previous sessions found")
 	}
-	
+
 	// Find most recent
 	var latest string
 	var latestTime time.Time
@@ -325,7 +323,7 @@ func (s *CompletionService) setupContinue() error {
 			latestTime = info.ModTime()
 		}
 	}
-	
+
 	return s.setupHistoryFile(latest)
 }
 
@@ -339,15 +337,15 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 		}
 		s.historyOutFile = path
 		s.historyFile = file
-		s.autoHistory = true  // Mark this as an auto-generated session
-		
+		s.autoHistory = true // Mark this as an auto-generated session
+
 		// Initialize metadata for new session
 		s.historyMetadata = &historyMetadata{
 			Created: time.Now().Format(time.RFC3339),
 		}
 		return nil
 	}
-	
+
 	// Explicit file - read from it if exists, write to it
 	if _, err := os.Stat(historySpec); err == nil {
 		// File exists, load it
@@ -357,18 +355,18 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 		}
 		s.historyIn = f
 		defer f.Close()
-		
+
 		if err := s.loadHistory(); err != nil {
 			return fmt.Errorf("failed to load history: %w", err)
 		}
 	}
-	
+
 	// Setup for writing
 	f, err := os.OpenFile(historySpec, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open history file for writing: %w", err)
 	}
-	
+
 	s.historyOutFile = historySpec
 	s.historyFile = f
 	return nil
@@ -384,11 +382,11 @@ func (s *CompletionService) setupExplicitHistory(historyIn, historyOut string) e
 		}
 		s.historyIn = f
 		defer f.Close()
-		
+
 		if err := s.loadHistory(); err != nil {
 			return fmt.Errorf("failed to load history: %w", err)
 		}
-		
+
 		// Track fork if outputting to a different file
 		if historyOut != "" && historyOut != historyIn && historyOut != "-" {
 			if s.historyMetadata == nil {
@@ -401,7 +399,7 @@ func (s *CompletionService) setupExplicitHistory(historyIn, historyOut string) e
 			}
 		}
 	}
-	
+
 	// Setup output if specified
 	if historyOut != "" {
 		if historyOut == "-" {
@@ -419,10 +417,9 @@ func (s *CompletionService) setupExplicitHistory(historyIn, historyOut string) e
 		// If only input specified, disable saving
 		s.disableHistory = true
 	}
-	
+
 	return nil
 }
-
 
 func (s *CompletionService) getLastUserMessage() string {
 	if len(s.payload.Messages) == 0 {
@@ -662,7 +659,7 @@ func (s *CompletionService) finalizeHistory(ctx context.Context, runCfg RunOptio
 	// Close history file if open
 	if s.historyFile != nil && s.historyFile != os.Stdout {
 		s.historyFile.Close()
-		
+
 		// Note: Named session functionality removed for simplicity
 	}
 }

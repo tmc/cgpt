@@ -43,7 +43,7 @@ func (s *CompletionService) loadHistory() error {
 		s.payload.Model = h.Model
 	}
 	s.payload.Messages = h.Messages
-	
+
 	// Load metadata if present
 	if h.Metadata != nil {
 		s.historyMetadata = h.Metadata
@@ -55,12 +55,12 @@ func (s *CompletionService) saveHistory() error {
 	if s.disableHistory {
 		return nil
 	}
-	
+
 	// New history system with file handle
 	if s.historyFile != nil {
 		return s.saveHistoryToFile(s.historyFile)
 	}
-	
+
 	// Legacy history system
 	if s.historyOutFile == "" {
 		home, err := os.UserHomeDir()
@@ -88,31 +88,31 @@ func (s *CompletionService) saveHistoryToFile(f *os.File) error {
 	if s.historyMetadata != nil && s.historyMetadata.Description == "" && len(s.payload.Messages) >= 2 {
 		s.historyMetadata.Description = s.generateDescription()
 	}
-	
+
 	h := history{
 		Metadata: s.historyMetadata,
 		Backend:  s.cfg.Backend,
 		Model:    s.payload.Model,
 		Messages: s.payload.Messages,
 	}
-	
+
 	// Marshal to YAML
 	ybytes, err := yaml.Marshal(h)
 	if err != nil {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}
-	
+
 	if f != os.Stdout {
 		// Truncate and seek to beginning for updates
 		f.Truncate(0)
 		f.Seek(0, 0)
 	}
-	
+
 	// Write the YAML content
 	if _, err := f.Write(ybytes); err != nil {
 		return fmt.Errorf("failed to write history: %w", err)
 	}
-	
+
 	if f != os.Stdout {
 		return f.Sync()
 	}
@@ -181,7 +181,7 @@ func (s *CompletionService) generateDescription() string {
 	if len(s.payload.Messages) < 2 {
 		return ""
 	}
-	
+
 	// Get first user message
 	var firstUserMsg string
 	for _, msg := range s.payload.Messages {
@@ -197,11 +197,11 @@ func (s *CompletionService) generateDescription() string {
 			}
 		}
 	}
-	
+
 	if firstUserMsg == "" {
 		return ""
 	}
-	
+
 	// Simple keyword extraction (take first 50 chars, clean up)
 	desc := strings.TrimSpace(firstUserMsg)
 	if len(desc) > 50 {
@@ -211,17 +211,17 @@ func (s *CompletionService) generateDescription() string {
 			desc = desc[:idx]
 		}
 	}
-	
+
 	// Remove problematic characters
 	desc = strings.ReplaceAll(desc, "\n", " ")
 	desc = strings.ReplaceAll(desc, "\r", " ")
 	desc = strings.ReplaceAll(desc, "\t", " ")
-	
+
 	// Collapse multiple spaces
 	for strings.Contains(desc, "  ") {
 		desc = strings.ReplaceAll(desc, "  ", " ")
 	}
-	
+
 	return strings.TrimSpace(desc)
 }
 
