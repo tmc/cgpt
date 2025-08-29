@@ -406,6 +406,9 @@ func TestDuplicateAIRole(t *testing.T) {
 }
 
 func TestMain(t *testing.T) {
+	// Set dummy backend to avoid trying to connect to ollama
+	t.Setenv("CGPT_BACKEND", "dummy")
+	
 	tests := []struct {
 		name    string
 		args    []string
