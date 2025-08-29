@@ -14,6 +14,7 @@ func TestBackendDefaultModel(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("GOOGLE_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 	t.Setenv("CGPT_BACKEND", "dummy")
 
 	def := Config{Stream: true, MaxTokens: 4096, Temperature: 0.05}
