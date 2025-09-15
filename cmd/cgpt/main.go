@@ -91,6 +91,14 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum tokens to generate")
 	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0.05, "Temperature for sampling")
 
+	// Prompt caching and reasoning features
+	fs.BoolVar(&opts.Config.PromptCaching, "prompt-caching", false, "Enable prompt caching (reduces costs for repeated prompts)")
+	fs.StringVar(&opts.Config.ThinkingMode, "thinking-mode", "none", "Thinking mode for reasoning models (none, low, medium, high, auto)")
+	fs.IntVar(&opts.Config.ThinkingBudget, "thinking-budget", 0, "Explicit token budget for thinking/reasoning (overrides thinking-mode)")
+	fs.BoolVar(&opts.Config.ShowCosts, "show-costs", false, "Show token usage and cost estimates after completion")
+	fs.BoolVar(&opts.Config.ShowReasoning, "show-reasoning", false, "Show reasoning/thinking content when available")
+	fs.BoolVar(&opts.Config.InterleavedThinking, "interleaved-thinking", false, "Enable interleaved thinking mode (Claude 4+ only)")
+
 	// Config file path
 	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
 }
@@ -120,6 +128,13 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Validate thinking mode configuration and show warnings
+	if warnings := opts.Config.ValidateThinkingConfig(); len(warnings) > 0 {
+		for _, warning := range warnings {
+			fmt.Fprintln(opts.Stderr, warning)
+		}
+	}
+
 	// Creates the default save path if it doesn't exist
 	if dir, _ := os.UserHomeDir(); dir != "" {
 		cgptDir := filepath.Join(dir, ".cgpt")
@@ -138,7 +153,8 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	// if debug mode is on, attach the debug http client:
 	if opts.DebugMode {
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
-		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.DebugHTTPClient))
+		// Use SSEDebugClient for pretty-printed JSON requests and raw SSE streaming output
+		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.SSEDebugClient))
 	}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {
