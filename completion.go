@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/tmc/cgpt/interactive"
+	"github.com/tmc/cgpt/lmhist"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"go.uber.org/zap"
@@ -46,6 +47,8 @@ type CompletionService struct {
 
 	// nextCompletionPrefill is the message to prefill the assistant with for the next completion.
 	nextCompletionPrefill string
+	// lmhistManager handles structured history with prefill tracking
+	lmhistManager *lmhist.Manager
 
 	// Stdout is the writer for standard output. If nil, os.Stdout will be used.
 	Stdout io.Writer
@@ -183,6 +186,11 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 	}
 
 	if runCfg.Prefill != "" {
+		// Check for prefill/thinking incompatibility
+		hasThinking := (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none"))
+		if hasThinking && s.cfg.Backend == "anthropic" {
+			fmt.Fprintf(s.Stderr, "Note: Prefill will be ignored when using Anthropic extended thinking mode (incompatible features)\n")
+		}
 		s.SetNextCompletionPrefill(runCfg.Prefill)
 	}
 	if runCfg.Stdout == nil {
@@ -489,6 +497,12 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 			s.Stdout.Write([]byte(r))
 		}
 	}
+
+	// Add the complete AI response to payload messages for history
+	if content.Len() > 0 {
+		s.payload.addAssistantMessage(content.String())
+	}
+
 	if err := s.saveHistory(); err != nil {
 		return fmt.Errorf("failed to save history: %w", err)
 	}
