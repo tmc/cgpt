@@ -134,7 +134,8 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			// Ensure max_tokens > budget_tokens
 			if maxTokens <= effectiveBudget {
 				// Auto-adjust max_tokens to be greater than budget
-				maxTokens = effectiveBudget + 1000
+				// Add the original max_tokens value to the thinking budget
+				maxTokens = effectiveBudget + s.cfg.MaxTokens
 				// Log the adjustment when it happens
 				fmt.Fprintf(s.Stderr, "Note: Auto-adjusted max_tokens from %d to %d (must be > thinking budget of %d)\n",
 					s.cfg.MaxTokens, maxTokens, effectiveBudget)
@@ -333,7 +334,8 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		// Ensure max_tokens > budget_tokens
 		if maxTokens <= effectiveBudget {
 			// Auto-adjust max_tokens to be greater than budget
-			maxTokens = effectiveBudget + 1000
+			// Add the original max_tokens value to the thinking budget
+			maxTokens = effectiveBudget + s.cfg.MaxTokens
 			// Log the adjustment when it happens
 			fmt.Fprintf(s.Stderr, "Note: Auto-adjusted max_tokens from %d to %d (must be > thinking budget of %d)\n",
 				s.cfg.MaxTokens, maxTokens, effectiveBudget)

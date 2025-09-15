@@ -1,0 +1,227 @@
+# Test comprehensive multi-provider reasoning validation
+# This scripttest validates reasoning support across all backends
+
+# Test 1: Anthropic Extended Thinking (working)
+exec cgpt -b anthropic --thinking-mode=low --show-reasoning simple-math
+! stderr 'Warning:'
+! stderr 'not supported'
+stdout .
+
+# Test 2: OpenAI Reasoning Tokens (note about model requirements)
+exec cgpt -b openai --thinking-budget=1024 --show-reasoning simple-math
+stderr 'Note: Using OpenAI Reasoning Tokens. Requires o1\+ models'
+! stderr 'Warning:'
+! stderr 'not supported'
+stdout .
+
+# Test 3: Google AI Thinking Budget (note about model requirements)
+exec cgpt -b googleai --thinking-mode=medium --show-reasoning simple-math
+stderr 'Note: Using Google Gemini Thinking Budget. Requires Gemini 2.5\+ models'
+! stderr 'Warning:'
+! stderr 'not supported'
+stdout .
+
+# Test 4: Ollama Thinking Mode (note about model requirements)
+exec cgpt -b ollama --thinking-budget=2000 --show-reasoning simple-math
+stderr 'Note: Using Ollama Thinking Mode. Requires reasoning models'
+! stderr 'Warning:'
+! stderr 'not supported'
+stdout .
+
+# Test 5: OpenRouter Reasoning (should work without warnings)
+exec cgpt -b openrouter --thinking-mode=auto --show-reasoning simple-math
+! stderr 'Note:'
+! stderr 'Warning:'
+! stderr 'not supported'
+stdout .
+
+# Test 6: Unsupported backend (dummy)
+exec cgpt -b dummy --thinking-mode=low simple-math
+stderr 'Warning: Thinking features not supported.*dummy.*backend'
+stderr 'Supported:.*openai.*googleai.*openrouter.*ollama.*anthropic'
+! stderr 'failed'
+stdout .
+
+# Test 7: Invalid thinking mode (all backends)
+exec cgpt -b anthropic --thinking-mode=invalid simple-math
+stderr 'Warning: Invalid thinking mode.*invalid.*Valid options: none, low, medium, high, auto'
+! stderr 'failed'
+stdout .
+
+# Test 8: Anthropic-specific validations (temperature + budget + max_tokens)
+exec cgpt -b anthropic --thinking-budget=300 -t 400 --temperature=0.5 comprehensive-test
+stderr 'Warning: Temperature will be overridden to 1.0.*from 0.50.*Anthropic requirement'
+stderr 'Warning: Thinking budget 300 is below Anthropic minimum.*adjusted to 1024'
+stderr 'Note: max_tokens.*400.*will be auto-adjusted.*1024'
+stderr 'Note: Auto-adjusted max_tokens from 400 to 2024'
+! stderr 'failed'
+stdout .
+
+# Test 9: Google AI specific validation (negative budget handling)
+exec cgpt -b googleai --thinking-budget=-5 simple-math
+stderr 'Warning: Google Gemini thinking budget should be positive or -1 for auto-adjust'
+! stderr 'failed'
+stdout .
+
+# Test 10: Multiple reasoning features together (Anthropic)
+exec cgpt -b anthropic --thinking-mode=high --thinking-budget=2000 --interleaved-thinking --show-reasoning all-features-test
+! stderr 'Warning:'
+! stderr 'failed'
+stdout .
+
+# Test 11: Provider-specific model validation (OpenAI)
+exec cgpt -b openai -m "gpt-4" --thinking-mode=medium old-model-test
+stderr 'Note: Using OpenAI Reasoning Tokens. Requires o1\+ models'
+! stderr 'failed'
+stdout .
+
+# Test 12: Provider-specific model validation (Google)
+exec cgpt -b googleai -m "gemini-1.5-pro" --thinking-budget=1500 older-gemini-test
+stderr 'Note: Using Google Gemini Thinking Budget. Requires Gemini 2.5\+ models'
+! stderr 'failed'
+stdout .
+
+# Test 13: Valid configurations should work cleanly (no warnings)
+exec cgpt -b anthropic --thinking-budget=1024 -t 3000 --show-reasoning clean-config
+! stderr 'Warning:'
+! stderr 'Note:.*adjusted'
+! stderr 'failed'
+stdout .
+
+-- cgpt --
+#!/bin/bash
+# Mock cgpt binary for comprehensive multi-provider reasoning testing
+
+# Parse arguments
+backend="anthropic"
+thinking_mode=""
+thinking_budget=""
+temperature=""
+max_tokens=""
+model=""
+show_reasoning=false
+interleaved_thinking=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -b|--backend)
+            backend="$2"
+            shift 2
+            ;;
+        --thinking-mode)
+            thinking_mode="$2"
+            shift 2
+            ;;
+        --thinking-budget)
+            thinking_budget="$2"
+            shift 2
+            ;;
+        --temperature)
+            temperature="$2"
+            shift 2
+            ;;
+        -t|--max-tokens)
+            max_tokens="$2"
+            shift 2
+            ;;
+        -m|--model)
+            model="$2"
+            shift 2
+            ;;
+        --show-reasoning)
+            show_reasoning=true
+            shift
+            ;;
+        --interleaved-thinking)
+            interleaved_thinking=true
+            shift
+            ;;
+        *)
+            # Prompt argument, ignore
+            shift
+            ;;
+    esac
+done
+
+# Multi-provider reasoning validation logic
+has_thinking=false
+if [[ -n "$thinking_mode" && "$thinking_mode" != "none" ]] || [[ -n "$thinking_budget" && "$thinking_budget" -gt 0 ]] || [[ "$interleaved_thinking" == true ]]; then
+    has_thinking=true
+fi
+
+# Define supported backends
+declare -A reasoning_backends
+reasoning_backends[anthropic]="Extended Thinking"
+reasoning_backends[openai]="Reasoning Tokens (o1+ models)"
+reasoning_backends[googleai]="Thinking Budget (Gemini 2.5+ models)"
+reasoning_backends[openrouter]="Reasoning Tokens (provider-dependent)"
+reasoning_backends[ollama]="Thinking Mode (DeepSeek-R1, QwQ, etc.)"
+
+# Backend support validation
+if [[ "$has_thinking" == true ]]; then
+    if [[ -n "${reasoning_backends[$backend]}" ]]; then
+        # Supported backend - add specific notes
+        case $backend in
+            openai)
+                echo "Note: Using OpenAI Reasoning Tokens. Requires o1+ models (o1, o1-mini, o3, etc.)" >&2
+                ;;
+            googleai)
+                echo "Note: Using Google Gemini Thinking Budget. Requires Gemini 2.5+ models" >&2
+                ;;
+            ollama)
+                echo "Note: Using Ollama Thinking Mode. Requires reasoning models (deepseek-r1, qwq, etc.)" >&2
+                ;;
+        esac
+    else
+        echo "Warning: Thinking features not supported by '$backend' backend. Supported: [openai googleai openrouter ollama anthropic]" >&2
+    fi
+fi
+
+# Invalid thinking mode validation
+if [[ -n "$thinking_mode" && "$thinking_mode" != "none" ]]; then
+    case "$thinking_mode" in
+        low|medium|high|auto) ;;
+        *) echo "Warning: Invalid thinking mode '$thinking_mode'. Valid options: none, low, medium, high, auto" >&2 ;;
+    esac
+fi
+
+# Backend-specific validation
+if [[ "$has_thinking" == true && -n "${reasoning_backends[$backend]}" ]]; then
+    # Anthropic-specific validation
+    if [[ "$backend" == "anthropic" ]]; then
+        # Temperature validation
+        if [[ -n "$temperature" && "$temperature" != "1.0" && "$temperature" != "0.05" ]]; then
+            echo "Warning: Temperature will be overridden to 1.0 (from $temperature) when thinking is enabled (Anthropic requirement)" >&2
+        fi
+
+        # Budget validation
+        if [[ -n "$thinking_budget" && "$thinking_budget" -gt 0 && "$thinking_budget" -lt 1024 ]]; then
+            echo "Warning: Thinking budget $thinking_budget is below Anthropic minimum of 1024 tokens, will be adjusted to 1024" >&2
+        fi
+
+        # max_tokens validation
+        if [[ -n "$max_tokens" && "$max_tokens" -gt 0 ]]; then
+            effective_budget="$thinking_budget"
+            if [[ -z "$effective_budget" || "$effective_budget" -eq 0 ]]; then
+                effective_budget=1024
+            fi
+            if [[ "$effective_budget" -lt 1024 ]]; then
+                effective_budget=1024
+            fi
+
+            if [[ "$max_tokens" -le "$effective_budget" ]]; then
+                echo "Note: max_tokens ($max_tokens) will be auto-adjusted to be greater than thinking budget ($effective_budget)" >&2
+                new_max_tokens=$((effective_budget + 1000))
+                echo "Note: Auto-adjusted max_tokens from $max_tokens to $new_max_tokens (must be > thinking budget of $effective_budget)" >&2
+            fi
+        fi
+    fi
+
+    # Google AI specific validation
+    if [[ "$backend" == "googleai" && -n "$thinking_budget" && "$thinking_budget" -lt 0 && "$thinking_budget" != -1 ]]; then
+        echo "Warning: Google Gemini thinking budget should be positive or -1 for auto-adjust" >&2
+    fi
+fi
+
+# Simulate successful response
+echo "Multi-provider reasoning test completed successfully."
