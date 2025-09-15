@@ -112,6 +112,42 @@ func Test(t *testing.T) {
 			model:   "dummy-model",
 			args:    []string{"-I", "input.yaml", "-O", "output.yaml"},
 		},
+		{
+			name:    "prompt caching",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--prompt-caching"},
+		},
+		{
+			name:    "thinking mode",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--thinking-mode", "medium"},
+		},
+		{
+			name:    "thinking budget",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--thinking-budget", "2000"},
+		},
+		{
+			name:    "show costs",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--show-costs"},
+		},
+		{
+			name:    "combined features",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--prompt-caching", "--thinking-mode", "high", "--show-costs"},
+		},
+		{
+			name:    "prompt caching env",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{},
+		},
 	}
 
 	for _, tc := range testCases {

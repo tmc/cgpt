@@ -15,6 +15,7 @@ import (
 
 	"github.com/tmc/cgpt/interactive"
 	"github.com/tmc/langchaingo/llms"
+	"github.com/tmc/langchaingo/llms/anthropic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -206,7 +207,22 @@ func (s *CompletionService) setupSystemPrompt() error {
 	}
 
 	s.payload.Messages = append([]llms.MessageContent(nil), s.payload.Messages...)
-	sysMsg := llms.TextParts(llms.ChatMessageTypeSystem, s.cfg.SystemPrompt)
+
+	// Use addSystemMessage to properly handle cache control when prompt caching is enabled
+	var sysMsg llms.MessageContent
+	if s.cfg.PromptCaching {
+		// When prompt caching is enabled, add cache control to system messages
+		cachedPart := llms.WithCacheControl(
+			llms.TextPart(s.cfg.SystemPrompt),
+			anthropic.EphemeralCache(),
+		)
+		sysMsg = llms.MessageContent{
+			Role:  llms.ChatMessageTypeSystem,
+			Parts: []llms.ContentPart{cachedPart},
+		}
+	} else {
+		sysMsg = llms.TextParts(llms.ChatMessageTypeSystem, s.cfg.SystemPrompt)
+	}
 
 	sysIdx := slices.IndexFunc(s.payload.Messages, func(m llms.MessageContent) bool {
 		return m.Role == "system"
@@ -437,6 +453,26 @@ func (s *CompletionService) getLastUserMessage() string {
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion with streaming")
 
+	// In debug mode, the SSEDebugClient shows the request JSON and raw SSE frames.
+	// We still call the normal streaming but consume the processed output silently
+	// since the raw HTTP response is handled by the debug client.
+	if runCfg.DebugMode {
+		s.payload.Stream = true
+		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
+			ShowSpinner: false, // No spinner in debug mode
+			EchoPrefill: runCfg.EchoPrefill,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to perform completion streaming: %w", err)
+		}
+		// In debug mode, consume the processed chunks but don't output them
+		// The raw HTTP response (including SSE frames) is handled by SSEDebugClient
+		for range streamPayloads {
+			// Consume processed chunks silently - raw SSE already shown
+		}
+		return nil
+	}
+
 	s.payload.Stream = true
 	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
 		ShowSpinner: runCfg.ShowSpinner,
@@ -466,6 +502,18 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 // Non-streaming version of one-shot completion.
 func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion")
+
+	// In debug mode, the SSEDebugClient shows the request JSON and response.
+	// Skip normal processing to avoid duplicate output
+	if runCfg.DebugMode {
+		s.payload.Stream = false
+		_, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
+			ShowSpinner: false, // No spinner in debug mode
+			EchoPrefill: runCfg.EchoPrefill,
+		})
+		// Don't process the response - raw output already shown by SSEDebugClient
+		return err
+	}
 
 	s.payload.Stream = false
 	response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
