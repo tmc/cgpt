@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
@@ -148,10 +149,14 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		if s.useLegacyMaxTokens {
 			callOpts = append(callOpts, openai.WithLegacyMaxTokensField())
 		}
-		// Add prompt caching if enabled
+		// Add prompt caching if enabled (works for all backends)
 		if s.cfg.PromptCaching {
-			if s.cfg.Backend == "anthropic" {
-				callOpts = append(callOpts, anthropic.WithPromptCaching())
+			if s.cfg.CacheTTL != "" {
+				if duration, err := time.ParseDuration(s.cfg.CacheTTL); err == nil {
+					callOpts = append(callOpts, llms.WithCacheTTL(duration))
+				} else {
+					callOpts = append(callOpts, llms.WithPromptCaching(true))
+				}
 			} else {
 				callOpts = append(callOpts, llms.WithPromptCaching(true))
 			}
@@ -347,9 +352,17 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	if s.useLegacyMaxTokens {
 		callOpts = append(callOpts, openai.WithLegacyMaxTokensField())
 	}
-	// Add prompt caching if enabled
+	// Add prompt caching if enabled (works for all backends)
 	if s.cfg.PromptCaching {
-		callOpts = append(callOpts, llms.WithPromptCaching(true))
+		if s.cfg.CacheTTL != "" {
+			if duration, err := time.ParseDuration(s.cfg.CacheTTL); err == nil {
+				callOpts = append(callOpts, llms.WithCacheTTL(duration))
+			} else {
+				callOpts = append(callOpts, llms.WithPromptCaching(true))
+			}
+		} else {
+			callOpts = append(callOpts, llms.WithPromptCaching(true))
+		}
 	}
 	// Add thinking mode or budget if specified (multi-provider support)
 	if s.cfg.ThinkingBudget > 0 {
