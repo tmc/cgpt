@@ -437,9 +437,10 @@ func (s *CompletionService) getLastUserMessage() string {
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion with streaming")
 
+	// In debug mode, SSEDebugClient adds extra output to stderr but normal processing continues
 	s.payload.Stream = true
 	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
-		ShowSpinner: runCfg.ShowSpinner,
+		ShowSpinner: runCfg.ShowSpinner && !runCfg.DebugMode, // No spinner in debug mode
 		EchoPrefill: runCfg.EchoPrefill,
 	})
 	if err != nil {
@@ -467,9 +468,10 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion")
 
+	// In debug mode, SSEDebugClient adds extra output to stderr but normal processing continues
 	s.payload.Stream = false
 	response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
-		ShowSpinner: runCfg.ShowSpinner,
+		ShowSpinner: runCfg.ShowSpinner && !runCfg.DebugMode, // No spinner in debug mode
 		EchoPrefill: runCfg.EchoPrefill,
 	})
 	if err != nil {
