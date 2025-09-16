@@ -1,0 +1,25 @@
+# Test prefill echo behavior
+# Default should be false, no prefill echo
+
+# Test 1: Default behavior (no echo)
+exec cgpt --backend dummy -s 'test' -p 'PREFIX:' 'test message'
+! stdout 'PREFIX:PREFIX:'
+stdout 'PREFIX: This is a dummy backend'
+
+# Test 2: Explicit false (no echo)
+exec cgpt --backend dummy -s 'test' -p 'START>' --prefill-echo=false 'test message'
+! stdout 'START>START>'
+stdout 'START> This is a dummy backend'
+
+# Test 3: Explicit true (echo enabled)
+exec cgpt --backend dummy -s 'test' -p 'ECHO:' --prefill-echo=true 'test message'
+stdout 'ECHO:ECHO:'
+
+# Test 4: Thinking tags with default (should not echo)
+exec cgpt --backend dummy -s 'test' -p '<think' 'test message'
+! stdout '<think<think'
+stdout '^<think This is a dummy backend'
+
+# Test 5: Thinking tags with explicit true (should echo and show duplication)
+exec cgpt --backend dummy -s 'test' -p '<think' --prefill-echo=true 'test message'
+stdout '<think<think'

@@ -81,16 +81,10 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		prefillText := s.nextCompletionPrefill
 		prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 
-		// Send prefill immediately if it exists and wasn't skipped
+		// Handle prefill if it exists and wasn't skipped
 		if prefillText != "" && !skipPrefill {
-			// Note: handleAssistantPrefill already handled EchoPrefill
-			select {
-			case ch <- prefillText + " ":
-			case <-ctx.Done():
-				prefillCleanup()
-				return
-			}
-			// Note: handleAssistantPrefill already added the message
+			// Don't send prefill through channel - handleAssistantPrefill already handles echo
+			// We just need to track that we added the assistant message
 			addedAssistantMessage = true
 			fullResponse.WriteString(prefillText)
 		}
@@ -535,7 +529,7 @@ func (s *CompletionService) handleAssistantPrefill(ctx context.Context, payload 
 		return func() {}, spinnerPos
 	}
 
-	// Check if thinking mode is enabled with Anthropic
+	// Check if thinking mode is explicitly enabled with Anthropic
 	hasThinking := (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none"))
 	if hasThinking && s.cfg.Backend == "anthropic" {
 		// Prefill is incompatible with thinking mode in Anthropic

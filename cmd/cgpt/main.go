@@ -209,7 +209,6 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 
 	fs.MarkHidden("stream-output")
 	fs.MarkHidden("readline-history-file")
-	fs.MarkHidden("prefill-echo")
 	fs.MarkHidden("show-spinner")
 
 	fs.Usage = func() {

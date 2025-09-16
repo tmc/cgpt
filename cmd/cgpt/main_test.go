@@ -148,6 +148,30 @@ func Test(t *testing.T) {
 			model:   "dummy-model",
 			args:    []string{},
 		},
+		{
+			name:    "prefill echo default",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"-s", "test", "-p", "PREFIX:", "test message"},
+		},
+		{
+			name:    "prefill echo false",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"-s", "test", "-p", "START>", "--prefill-echo=false", "test message"},
+		},
+		{
+			name:    "prefill echo true",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"-s", "test", "-p", "ECHO:", "--prefill-echo=true", "test message"},
+		},
+		{
+			name:    "prefill think tag",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"-s", "you are an advanced prompt engineering assistant", "-p", "<think", "initialize metaprograms"},
+		},
 	}
 
 	for _, tc := range testCases {
