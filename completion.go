@@ -461,29 +461,10 @@ func (s *CompletionService) getLastUserMessage() string {
 func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion with streaming")
 
-	// In debug mode, the SSEDebugClient shows the request JSON and raw SSE frames.
-	// We still call the normal streaming but consume the processed output silently
-	// since the raw HTTP response is handled by the debug client.
-	if runCfg.DebugMode {
-		s.payload.Stream = true
-		streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
-			ShowSpinner: false, // No spinner in debug mode
-			EchoPrefill: runCfg.EchoPrefill,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to perform completion streaming: %w", err)
-		}
-		// In debug mode, consume the processed chunks but don't output them
-		// The raw HTTP response (including SSE frames) is handled by SSEDebugClient
-		for range streamPayloads {
-			// Consume processed chunks silently - raw SSE already shown
-		}
-		return nil
-	}
-
+	// In debug mode, SSEDebugClient adds extra output to stderr but normal processing continues
 	s.payload.Stream = true
 	streamPayloads, err := s.PerformCompletionStreaming(ctx, s.payload, PerformCompletionConfig{
-		ShowSpinner: runCfg.ShowSpinner,
+		ShowSpinner: runCfg.ShowSpinner && !runCfg.DebugMode, // No spinner in debug mode
 		EchoPrefill: runCfg.EchoPrefill,
 	})
 	if err != nil {
@@ -517,21 +498,10 @@ func (s *CompletionService) runOneShotCompletionStreaming(ctx context.Context, r
 func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg RunOptions) error {
 	s.logger.Debug("running one-shot completion")
 
-	// In debug mode, the SSEDebugClient shows the request JSON and response.
-	// Skip normal processing to avoid duplicate output
-	if runCfg.DebugMode {
-		s.payload.Stream = false
-		_, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
-			ShowSpinner: false, // No spinner in debug mode
-			EchoPrefill: runCfg.EchoPrefill,
-		})
-		// Don't process the response - raw output already shown by SSEDebugClient
-		return err
-	}
-
+	// In debug mode, SSEDebugClient adds extra output to stderr but normal processing continues
 	s.payload.Stream = false
 	response, err := s.PerformCompletion(ctx, s.payload, PerformCompletionConfig{
-		ShowSpinner: runCfg.ShowSpinner,
+		ShowSpinner: runCfg.ShowSpinner && !runCfg.DebugMode, // No spinner in debug mode
 		EchoPrefill: runCfg.EchoPrefill,
 	})
 	if err != nil {
