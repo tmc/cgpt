@@ -169,6 +169,106 @@ type Config struct {
 	OpenRouterAPIKey string `yaml:"openrouterAPIKey"`
 	AnthropicAPIKey  string `yaml:"anthropicAPIKey"`
 	GoogleAPIKey     string `yaml:"googleAPIKey"`
+
+	// Prompt caching (works with multiple backends)
+	PromptCaching bool `yaml:"promptCaching"`
+
+	// Thinking/reasoning mode for models that support it
+	ThinkingMode        string `yaml:"thinkingMode"`
+	ThinkingBudget      int    `yaml:"thinkingBudget"`
+	ShowCosts           bool   `yaml:"showCosts"`
+	ShowReasoning       bool   `yaml:"showReasoning"`
+	InterleavedThinking bool   `yaml:"interleavedThinking"`
+}
+
+// ValidateThinkingConfig validates thinking mode configuration and returns warnings
+func (c *Config) ValidateThinkingConfig() []string {
+	var warnings []string
+
+	// Check if thinking features are used with incompatible backends
+	hasThinking := c.ThinkingBudget > 0 || (c.ThinkingMode != "" && c.ThinkingMode != "none") || c.InterleavedThinking
+
+	// Define which backends support reasoning/thinking
+	reasoningBackends := map[string]string{
+		"anthropic":  "Extended Thinking",
+		"openai":     "Reasoning Tokens (o1+ models)",
+		"googleai":   "Thinking Budget (Gemini 2.5+ models)",
+		"openrouter": "Reasoning Tokens (provider-dependent)",
+		"ollama":     "Thinking Mode (DeepSeek-R1, QwQ, etc.)",
+	}
+
+	if hasThinking {
+		if _, supported := reasoningBackends[c.Backend]; supported {
+			// Supported backend - add specific notes
+			if c.Backend == "openai" {
+				warnings = append(warnings, fmt.Sprintf("Note: Using OpenAI Reasoning Tokens. Requires o1+ models (o1, o1-mini, o3, etc.)"))
+			} else if c.Backend == "googleai" {
+				warnings = append(warnings, fmt.Sprintf("Note: Using Google Gemini Thinking Budget. Requires Gemini 2.5+ models"))
+			} else if c.Backend == "ollama" {
+				warnings = append(warnings, fmt.Sprintf("Note: Using Ollama Thinking Mode. Requires reasoning models (deepseek-r1, qwq, etc.)"))
+			}
+		} else {
+			warnings = append(warnings, fmt.Sprintf("Warning: Thinking features not supported by '%s' backend. Supported: %v", c.Backend, getBackendList(reasoningBackends)))
+		}
+	}
+
+	// Validate thinking mode strings
+	if c.ThinkingMode != "" && c.ThinkingMode != "none" {
+		validModes := map[string]bool{
+			"low":    true,
+			"medium": true,
+			"high":   true,
+			"auto":   true,
+		}
+		if !validModes[c.ThinkingMode] {
+			warnings = append(warnings, fmt.Sprintf("Warning: Invalid thinking mode '%s'. Valid options: none, low, medium, high, auto", c.ThinkingMode))
+		}
+	}
+
+	// Backend-specific validation for supported backends
+	if hasThinking {
+		if _, supported := reasoningBackends[c.Backend]; supported {
+			// Temperature validation (Anthropic-specific requirement)
+			if c.Backend == "anthropic" && c.Temperature != 1.0 && c.Temperature != 0.05 {
+				warnings = append(warnings, fmt.Sprintf("Warning: Temperature will be overridden to 1.0 (from %.2f) when thinking is enabled (Anthropic requirement)", c.Temperature))
+			}
+
+			// Budget validation (Anthropic has 1024 minimum, others may vary)
+			if c.ThinkingBudget > 0 {
+				if c.Backend == "anthropic" && c.ThinkingBudget < 1024 {
+					warnings = append(warnings, fmt.Sprintf("Warning: Thinking budget %d is below Anthropic minimum of 1024 tokens, will be adjusted to 1024", c.ThinkingBudget))
+				} else if c.Backend == "googleai" && c.ThinkingBudget < 0 && c.ThinkingBudget != -1 {
+					warnings = append(warnings, fmt.Sprintf("Warning: Google Gemini thinking budget should be positive or -1 for auto-adjust"))
+				}
+			}
+		}
+	}
+
+	// Check max_tokens vs thinking budget relationship (mainly for Anthropic)
+	if c.Backend == "anthropic" && hasThinking && c.MaxTokens > 0 {
+		effectiveBudget := c.ThinkingBudget
+		if effectiveBudget == 0 && c.ThinkingMode != "" && c.ThinkingMode != "none" {
+			effectiveBudget = 1024 // minimum default
+		}
+		// Normalize to API minimum
+		if effectiveBudget > 0 && effectiveBudget < 1024 {
+			effectiveBudget = 1024
+		}
+		if c.MaxTokens <= effectiveBudget {
+			warnings = append(warnings, fmt.Sprintf("Note: max_tokens (%d) will be auto-adjusted to be greater than thinking budget (%d)", c.MaxTokens, effectiveBudget))
+		}
+	}
+
+	return warnings
+}
+
+// getBackendList returns a formatted list of backend names
+func getBackendList(backends map[string]string) []string {
+	var names []string
+	for name := range backends {
+		names = append(names, name)
+	}
+	return names
 }
 
 // LoadConfig loads the configuration from various sources in the following order of precedence:
@@ -306,6 +406,7 @@ func setupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
 	v.BindEnv("openrouterAPIKey", "OPENROUTER_API_KEY")
 	v.BindEnv("anthropicAPIKey", "ANTHROPIC_API_KEY")
 	v.BindEnv("googleAPIKey", "GOOGLE_API_KEY")
+	v.BindEnv("promptCaching", "PROMPT_CACHING", "ANTHROPIC_ENABLE_PROMPT_CACHING")
 
 	// Set config file if specified in flags
 	if flagConfigFilePath := flagSet.Lookup("config"); flagConfigFilePath != nil && flagConfigFilePath.Changed {

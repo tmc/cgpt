@@ -112,6 +112,42 @@ func Test(t *testing.T) {
 			model:   "dummy-model",
 			args:    []string{"-I", "input.yaml", "-O", "output.yaml"},
 		},
+		{
+			name:    "prompt caching",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--prompt-caching"},
+		},
+		{
+			name:    "thinking mode",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--thinking-mode", "medium"},
+		},
+		{
+			name:    "thinking budget",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--thinking-budget", "2000"},
+		},
+		{
+			name:    "show costs",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--show-costs"},
+		},
+		{
+			name:    "combined features",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--prompt-caching", "--thinking-mode", "high", "--show-costs"},
+		},
+		{
+			name:    "prompt caching env",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -152,10 +188,10 @@ func Test(t *testing.T) {
 				// Check if ollama is available by attempting to initialize
 				testCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 				defer cancel()
-				
+
 				// Try to run the test with a short timeout
 				runTest(t, testCtx, opts, fs, newTestLogger(t))
-				
+
 				// If context timed out or we got an error, skip the test
 				if testCtx.Err() != nil || strings.Contains(errBuf.String(), "failed to connect") || strings.Contains(errBuf.String(), "connection refused") {
 					t.Skip("Skipping ollama test - ollama not available")
@@ -163,7 +199,7 @@ func Test(t *testing.T) {
 			} else {
 				runTest(t, context.Background(), opts, fs, newTestLogger(t))
 			}
-			
+
 			if *update {
 				updateGoldenFile(t, testInputFile, txtarComment, files, outBuf.Bytes(), errBuf.Bytes(), files["http_payload"])
 				t.SkipNow()
@@ -406,6 +442,9 @@ func TestDuplicateAIRole(t *testing.T) {
 }
 
 func TestMain(t *testing.T) {
+	// Set dummy backend to avoid trying to connect to ollama
+	t.Setenv("CGPT_BACKEND", "dummy")
+
 	tests := []struct {
 		name    string
 		args    []string
