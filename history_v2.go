@@ -73,17 +73,17 @@ func (h *historyManager) createNamedLink(sessionPath, name string) error {
 	// Clean the name (remove any path separators, etc)
 	name = strings.ReplaceAll(name, "/", "-")
 	name = strings.ReplaceAll(name, "..", "")
-	
+
 	// Create link with timestamp prefix
 	linkName := fmt.Sprintf("%s-%s.yaml", timestamp, name)
 	linkPath := filepath.Join(namedDir, linkName)
-	
+
 	// Create relative path for symlink
 	relPath := filepath.Join("..", "sessions", base)
-	
+
 	// Remove existing link if it exists
 	os.Remove(linkPath)
-	
+
 	return os.Symlink(relPath, linkPath)
 }
 
