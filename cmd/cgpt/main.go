@@ -153,8 +153,8 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	// if debug mode is on, attach the debug http client:
 	if opts.DebugMode {
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
-		// Use SSEDebugClient for pretty-printed JSON requests and raw SSE streaming output
-		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.SSEDebugClient))
+		// Use JSONDebugClient for pretty-printed JSON requests and raw SSE streaming output
+		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.JSONDebugClient))
 	}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {
