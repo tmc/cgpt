@@ -241,6 +241,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			}
 		}
 
+
 		// Note: With StreamingReasoningFunc support, thinking content now streams
 		// as it arrives (before the main response). The code below handles any
 		// thinking content that wasn't streamed (e.g., from models that don't

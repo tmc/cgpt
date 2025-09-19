@@ -376,6 +376,11 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 		return nil, fmt.Errorf("unable to unmarshal config: %w", err)
 	}
 
+	// Map the usage flag to ShowUsage field
+	if v.IsSet("usage") {
+		cfg.ShowUsage = v.GetBool("usage")
+	}
+
 	logConfig(cfg, stderr, flagSet)
 	return cfg, nil
 }
