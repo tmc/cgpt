@@ -497,19 +497,21 @@ func (s *CompletionService) displayUsage(generationInfo map[string]any) {
 	parts = append(parts, fmt.Sprintf("total:%d", totalTokens))
 
 	// Cache info if present
-	if cached := cachedInputTokens + cachedOutputTokens; cached > 0 {
-		if thinkingUsage != nil {
-			cached += thinkingUsage.ThinkingCachedTokens
-		}
-		percent := 100 * cached / totalTokens
-		parts = append(parts, fmt.Sprintf("cache:%d%%", percent))
+	totalCached := cachedInputTokens + cachedOutputTokens
+	// Extract ThinkingCachedTokens directly since ExtractThinkingTokens doesn't include it
+	if v, ok := generationInfo["ThinkingCachedTokens"].(int); ok {
+		totalCached += v
+	}
+	if totalCached > 0 {
+		percent := 100 * totalCached / totalTokens
+		parts = append(parts, fmt.Sprintf("cache:%d(%d%%)", totalCached, percent))
 	}
 
 	// Thinking info if present
 	if thinkingUsage != nil && thinkingUsage.ThinkingTokens > 0 {
 		if thinkingUsage.ThinkingBudgetAllocated > 0 {
-			used := 100 * thinkingUsage.ThinkingBudgetUsed / thinkingUsage.ThinkingBudgetAllocated
-			parts = append(parts, fmt.Sprintf("think:%d%%", used))
+			usedPct := 100 * thinkingUsage.ThinkingBudgetUsed / thinkingUsage.ThinkingBudgetAllocated
+			parts = append(parts, fmt.Sprintf("think:%d(%d%%)", thinkingUsage.ThinkingTokens, usedPct))
 		} else {
 			parts = append(parts, fmt.Sprintf("think:%d", thinkingUsage.ThinkingTokens))
 		}
@@ -525,6 +527,28 @@ func (s *CompletionService) displayUsage(generationInfo map[string]any) {
 		parts = append(parts, fmt.Sprintf("cost:$%.2f", totalCost))
 	} else {
 		parts = append(parts, fmt.Sprintf("cost:$%.3f", totalCost))
+	}
+
+	// Cache savings if any cached tokens
+	if totalCached > 0 {
+		// Calculate savings from cached tokens
+		// Cached input tokens save input cost, cached output tokens save output cost
+		cachedInSavings := float64(cachedInputTokens) * 0.003 / 1000
+		cachedOutSavings := float64(cachedOutputTokens) * 0.015 / 1000
+
+		// Include thinking cached tokens if present (treated as input cost)
+		if v, ok := generationInfo["ThinkingCachedTokens"].(int); ok && v > 0 {
+			cachedInSavings += float64(v) * 0.003 / 1000
+		}
+
+		totalSavings := cachedInSavings + cachedOutSavings
+		if totalSavings > 0 {
+			if totalSavings >= 0.01 {
+				parts = append(parts, fmt.Sprintf("saved:$%.2f", totalSavings))
+			} else {
+				parts = append(parts, fmt.Sprintf("saved:$%.4f", totalSavings))
+			}
+		}
 	}
 
 	// Output compact format in grey
