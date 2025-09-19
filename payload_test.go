@@ -75,6 +75,11 @@ func TestDisplayUsageEnhanced(t *testing.T) {
 			output = strings.ReplaceAll(output, "\033[0m", "")
 			output = strings.TrimSpace(output)
 
+			// Check for the usage prefix
+			if !strings.HasPrefix(output, "usage: ") {
+				t.Errorf("Expected output to start with 'usage: ', got: %s", output)
+			}
+
 			for _, part := range tt.expectedParts {
 				if !strings.Contains(output, part) {
 					t.Errorf("Expected output to contain %q, got: %s", part, output)

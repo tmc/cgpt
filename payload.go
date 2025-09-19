@@ -287,10 +287,21 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 					}
 				}
 
-				// Display costs once (they should be the same across choices)
-				if !hasDisplayedCosts && s.cfg.ShowUsage && choice.GenerationInfo != nil {
-					s.displayUsage(choice.GenerationInfo)
-					hasDisplayedCosts = true
+				// Store and display usage info
+				if choice.GenerationInfo != nil {
+					// Store the generation info for history tracking (prefer the one with thinking tokens)
+					if s.lastGenerationInfo == nil {
+						s.lastGenerationInfo = choice.GenerationInfo
+					} else if _, hasThinking := choice.GenerationInfo["ThinkingTokens"]; hasThinking {
+						// This choice has thinking tokens, use it instead
+						s.lastGenerationInfo = choice.GenerationInfo
+					}
+
+					// Display costs once (they should be the same across choices)
+					if !hasDisplayedCosts && s.cfg.ShowUsage {
+						s.displayUsage(choice.GenerationInfo)
+						hasDisplayedCosts = true
+					}
 				}
 			}
 		}
@@ -437,10 +448,21 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 			content = choice.Content
 		}
 
-		// Display costs once
-		if !hasDisplayedCosts && s.cfg.ShowUsage && choice.GenerationInfo != nil {
-			s.displayUsage(choice.GenerationInfo)
-			hasDisplayedCosts = true
+		// Store and display usage info
+		if choice.GenerationInfo != nil {
+			// Store the generation info for history tracking (prefer the one with thinking tokens)
+			if s.lastGenerationInfo == nil {
+				s.lastGenerationInfo = choice.GenerationInfo
+			} else if _, hasThinking := choice.GenerationInfo["ThinkingTokens"]; hasThinking {
+				// This choice has thinking tokens, use it instead
+				s.lastGenerationInfo = choice.GenerationInfo
+			}
+
+			// Display costs once
+			if !hasDisplayedCosts && s.cfg.ShowUsage {
+				s.displayUsage(choice.GenerationInfo)
+				hasDisplayedCosts = true
+			}
 		}
 	}
 
@@ -555,7 +577,7 @@ func (s *CompletionService) displayUsage(generationInfo map[string]any) {
 	// Output compact format in grey
 	const grey = "\033[90m"
 	const reset = "\033[0m"
-	fmt.Fprintf(s.Stderr, "\n%s%s%s\n", grey, strings.Join(parts, " "), reset)
+	fmt.Fprintf(s.Stderr, "\n%susage: %s%s\n", grey, strings.Join(parts, " "), reset)
 }
 
 // sameFileDescriptor checks if stderr and stdout point to the same file descriptor

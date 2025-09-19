@@ -7,16 +7,28 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/tmc/langchaingo/llms"
 	"sigs.k8s.io/yaml"
 )
 
+type usageInfo struct {
+	TotalInputTokens   int     `yaml:"total_input_tokens,omitempty"`
+	TotalOutputTokens  int     `yaml:"total_output_tokens,omitempty"`
+	TotalCachedTokens  int     `yaml:"total_cached_tokens,omitempty"`
+	TotalThinkingTokens int    `yaml:"total_thinking_tokens,omitempty"`
+	TotalCost          float64 `yaml:"total_cost,omitempty"`
+	TotalSaved         float64 `yaml:"total_saved,omitempty"`
+	LastUpdated        string  `yaml:"last_updated,omitempty"`
+}
+
 type historyMetadata struct {
-	Created     string `yaml:"created,omitempty"`
-	Description string `yaml:"description,omitempty"`
-	ForkedFrom  string `yaml:"forked_from,omitempty"`
-	ForkPoint   int    `yaml:"fork_point,omitempty"`
+	Created     string     `yaml:"created,omitempty"`
+	Description string     `yaml:"description,omitempty"`
+	ForkedFrom  string     `yaml:"forked_from,omitempty"`
+	ForkPoint   int        `yaml:"fork_point,omitempty"`
+	UsageInfo   *usageInfo `yaml:"usage_info,omitempty"`
 }
 
 type history struct {
@@ -47,6 +59,10 @@ func (s *CompletionService) loadHistory() error {
 	// Load metadata if present
 	if h.Metadata != nil {
 		s.historyMetadata = h.Metadata
+		// Initialize usage info if not present
+		if s.historyMetadata.UsageInfo == nil {
+			s.historyMetadata.UsageInfo = &usageInfo{}
+		}
 	}
 	return nil
 }
@@ -87,6 +103,11 @@ func (s *CompletionService) saveHistoryToFile(f *os.File) error {
 	// Generate description on first AI response if we have metadata
 	if s.historyMetadata != nil && s.historyMetadata.Description == "" && len(s.payload.Messages) >= 2 {
 		s.historyMetadata.Description = s.generateDescription()
+	}
+
+	// Update usage info if we have metadata and generation info
+	if s.historyMetadata != nil && s.lastGenerationInfo != nil {
+		s.updateUsageInfo()
 	}
 
 	h := history{
@@ -260,4 +281,71 @@ func (s *CompletionService) renameChatHistory(ctx context.Context) error {
 		s.historyOutFile = newPath
 	}
 	return nil
+}
+
+// updateUsageInfo accumulates usage statistics from the last generation
+func (s *CompletionService) updateUsageInfo() {
+	if s.historyMetadata == nil || s.lastGenerationInfo == nil {
+		return
+	}
+
+	// Ensure usage info is initialized
+	if s.historyMetadata.UsageInfo == nil {
+		s.historyMetadata.UsageInfo = &usageInfo{}
+	}
+
+	usage := s.historyMetadata.UsageInfo
+
+	// Extract token counts
+	if v, ok := s.lastGenerationInfo["InputTokens"].(int); ok {
+		usage.TotalInputTokens += v
+	}
+	if v, ok := s.lastGenerationInfo["OutputTokens"].(int); ok {
+		usage.TotalOutputTokens += v
+	}
+
+	// Extract cached tokens
+	var cachedInputTokens, cachedOutputTokens int
+	if v, ok := s.lastGenerationInfo["CachedInputTokens"].(int); ok {
+		cachedInputTokens = v
+		usage.TotalCachedTokens += v
+	}
+	if v, ok := s.lastGenerationInfo["CachedOutputTokens"].(int); ok {
+		cachedOutputTokens = v
+		usage.TotalCachedTokens += v
+	}
+
+	// Extract thinking tokens
+	thinkingUsage := llms.ExtractThinkingTokens(s.lastGenerationInfo)
+	if thinkingUsage.ThinkingTokens > 0 {
+		usage.TotalThinkingTokens += thinkingUsage.ThinkingTokens
+	}
+	// Also check for ThinkingCachedTokens directly since it might not be in ExtractThinkingTokens
+	if v, ok := s.lastGenerationInfo["ThinkingCachedTokens"].(int); ok {
+		usage.TotalCachedTokens += v
+	}
+
+	// Calculate cost for this generation
+	var inputTokens, outputTokens int
+	if v, ok := s.lastGenerationInfo["InputTokens"].(int); ok {
+		inputTokens = v
+	}
+	if v, ok := s.lastGenerationInfo["OutputTokens"].(int); ok {
+		outputTokens = v
+	}
+
+	// Simple cost estimation (rates from Claude Sonnet)
+	inputCost := float64(inputTokens) * 0.003 / 1000
+	outputCost := float64(outputTokens) * 0.015 / 1000
+	generationCost := inputCost + outputCost
+
+	// Calculate savings
+	cachedInSavings := float64(cachedInputTokens) * 0.003 / 1000
+	cachedOutSavings := float64(cachedOutputTokens) * 0.015 / 1000
+	generationSavings := cachedInSavings + cachedOutSavings
+
+	// Update totals
+	usage.TotalCost += generationCost
+	usage.TotalSaved += generationSavings
+	usage.LastUpdated = time.Now().Format(time.RFC3339)
 }

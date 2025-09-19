@@ -57,6 +57,9 @@ type CompletionService struct {
 
 	// useLegacyMaxTokens uses the legacy max_tokens field for OpenAI-compatible backends
 	useLegacyMaxTokens bool
+
+	// lastGenerationInfo stores the last generation info for usage tracking
+	lastGenerationInfo map[string]any
 }
 
 type CompletionServiceOption func(*CompletionService)
@@ -363,6 +366,7 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 	}
 
 	// Explicit file - read from it if exists, write to it
+	fileExists := false
 	if _, err := os.Stat(historySpec); err == nil {
 		// File exists, load it
 		f, err := os.Open(historySpec)
@@ -374,6 +378,15 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 
 		if err := s.loadHistory(); err != nil {
 			return fmt.Errorf("failed to load history: %w", err)
+		}
+		fileExists = true
+	}
+
+	// Initialize metadata if not loaded from file
+	if !fileExists || s.historyMetadata == nil {
+		s.historyMetadata = &historyMetadata{
+			Created:   time.Now().Format(time.RFC3339),
+			UsageInfo: &usageInfo{},
 		}
 	}
 
