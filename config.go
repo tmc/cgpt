@@ -176,7 +176,7 @@ type Config struct {
 	// Thinking/reasoning mode for models that support it
 	ThinkingMode        string `yaml:"thinkingMode"`
 	ThinkingBudget      int    `yaml:"thinkingBudget"`
-	ShowCosts           bool   `yaml:"showCosts"`
+	ShowUsage           bool   `yaml:"showUsage"`
 	ShowReasoning       bool   `yaml:"showReasoning"`
 	InterleavedThinking bool   `yaml:"interleavedThinking"`
 }

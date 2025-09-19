@@ -95,7 +95,7 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.BoolVar(&opts.Config.PromptCaching, "prompt-caching", false, "Enable prompt caching (reduces costs for repeated prompts)")
 	fs.StringVar(&opts.Config.ThinkingMode, "thinking-mode", "none", "Thinking mode for reasoning models (none, low, medium, high, auto)")
 	fs.IntVar(&opts.Config.ThinkingBudget, "thinking-budget", 0, "Explicit token budget for thinking/reasoning (overrides thinking-mode)")
-	fs.BoolVar(&opts.Config.ShowCosts, "show-costs", false, "Show token usage and cost estimates after completion")
+	fs.BoolVar(&opts.Config.ShowUsage, "usage", false, "Show token usage, cache hits, and cost estimates")
 	fs.BoolVar(&opts.Config.ShowReasoning, "show-reasoning", false, "Show reasoning/thinking content when available")
 	fs.BoolVar(&opts.Config.InterleavedThinking, "interleaved-thinking", false, "Enable interleaved thinking mode (Claude 4+ only)")
 

@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
@@ -204,7 +207,17 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 					spinnerStop()
 					spinnerStop = nil
 				}
+				// In debug mode, add small delay to let debug output print first
+				if s.cfg.Debug {
+					time.Sleep(10 * time.Millisecond)
+				}
 				firstChunk = false
+			}
+
+			// If debug mode and same fd, buffer output instead of streaming
+			if s.cfg.Debug && s.sameFileDescriptor() {
+				fullResponse.Write(chunk)
+				return nil
 			}
 
 			select {
@@ -219,7 +232,13 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		resp, err := s.model.GenerateContent(genCtx, payload.Messages, callOpts...)
 
 		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("failed to generate content: %v", err)
+			// Format multi-line errors (e.g., rate limit details) nicely
+			errStr := err.Error()
+			if strings.Contains(errStr, "\n") {
+				log.Printf("failed to generate content:\n%s", errStr)
+			} else {
+				log.Printf("failed to generate content: %v", err)
+			}
 		}
 
 		// Note: With StreamingReasoningFunc support, thinking content now streams
@@ -231,7 +250,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			var hasDisplayedCosts bool
 			for _, choice := range resp.Choices {
 				// Display reasoning content if available
-				if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowCosts) {
+				if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowUsage) {
 					// Check if this is summarized thinking (Claude 4) or full thinking
 					label := "Reasoning"
 					if choice.GenerationInfo != nil {
@@ -268,8 +287,8 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 				}
 
 				// Display costs once (they should be the same across choices)
-				if !hasDisplayedCosts && s.cfg.ShowCosts && choice.GenerationInfo != nil {
-					s.displayCosts(choice.GenerationInfo)
+				if !hasDisplayedCosts && s.cfg.ShowUsage && choice.GenerationInfo != nil {
+					s.displayUsage(choice.GenerationInfo)
 					hasDisplayedCosts = true
 				}
 			}
@@ -283,6 +302,12 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		// Add the assistant message if we haven't already
 		if !addedAssistantMessage {
 			payload.addAssistantMessage(fullResponse.String())
+		}
+
+		// If stderr and stdout are the same fd, show clean output after debug
+		if s.cfg.Debug && s.sameFileDescriptor() {
+			fmt.Fprintf(s.Stderr, "\n\033[36m=== Output ===\033[0m\n")
+			fmt.Fprintf(s.Stderr, "%s\n", fullResponse.String())
 		}
 
 		s.nextCompletionPrefill = ""
@@ -373,7 +398,7 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	// First pass: Display thinking/reasoning before the actual response
 	for _, choice := range response.Choices {
 		// Display reasoning content if available
-		if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowCosts) {
+		if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowUsage) {
 			// Check if this is summarized thinking (Claude 4) or full thinking
 			label := "Reasoning"
 			if choice.GenerationInfo != nil {
@@ -412,8 +437,8 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		}
 
 		// Display costs once
-		if !hasDisplayedCosts && s.cfg.ShowCosts && choice.GenerationInfo != nil {
-			s.displayCosts(choice.GenerationInfo)
+		if !hasDisplayedCosts && s.cfg.ShowUsage && choice.GenerationInfo != nil {
+			s.displayUsage(choice.GenerationInfo)
 			hasDisplayedCosts = true
 		}
 	}
@@ -422,14 +447,15 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		payload.addAssistantMessage(content)
 	}
 
+
 	return content, nil
 }
 
 // handleAssistantPrefill handles the assistant prefill message.
 // It returns a cleanup function that should be called after the completion is done.
 // The second return value is the location where the spinner could start.
-// displayCosts shows token usage and cost estimates
-func (s *CompletionService) displayCosts(generationInfo map[string]any) {
+// displayUsage shows compact token usage statistics
+func (s *CompletionService) displayUsage(generationInfo map[string]any) {
 	if generationInfo == nil {
 		return
 	}
@@ -462,63 +488,75 @@ func (s *CompletionService) displayCosts(generationInfo map[string]any) {
 	// Extract thinking/reasoning tokens if available
 	thinkingUsage := llms.ExtractThinkingTokens(generationInfo)
 
-	// Display token usage
-	fmt.Fprintf(s.Stderr, "\n╭─────────────────────────────────────╮\n")
-	fmt.Fprintf(s.Stderr, "│          TOKEN USAGE REPORT         │\n")
-	fmt.Fprintf(s.Stderr, "├─────────────────────────────────────┤\n")
+	// Compact colon-separated format
+	var parts []string
 
-	// Input tokens
-	fmt.Fprintf(s.Stderr, "│ Input Tokens:        %7d       │\n", inputTokens)
-	if cachedInputTokens > 0 {
-		fmt.Fprintf(s.Stderr, "│   ├─ Cached:        %7d       │\n", cachedInputTokens)
-		fmt.Fprintf(s.Stderr, "│   └─ New:           %7d       │\n", inputTokens-cachedInputTokens)
+	// Core usage
+	parts = append(parts, fmt.Sprintf("in:%d", inputTokens))
+	parts = append(parts, fmt.Sprintf("out:%d", outputTokens))
+	parts = append(parts, fmt.Sprintf("total:%d", totalTokens))
+
+	// Cache info if present
+	if cached := cachedInputTokens + cachedOutputTokens; cached > 0 {
+		if thinkingUsage != nil {
+			cached += thinkingUsage.ThinkingCachedTokens
+		}
+		percent := 100 * cached / totalTokens
+		parts = append(parts, fmt.Sprintf("cache:%d%%", percent))
 	}
 
-	// Output tokens
-	fmt.Fprintf(s.Stderr, "│ Output Tokens:       %7d       │\n", outputTokens)
-	if cachedOutputTokens > 0 {
-		fmt.Fprintf(s.Stderr, "│   └─ Cached:        %7d       │\n", cachedOutputTokens)
-	}
-
-	// Thinking tokens breakdown
+	// Thinking info if present
 	if thinkingUsage != nil && thinkingUsage.ThinkingTokens > 0 {
-		fmt.Fprintf(s.Stderr, "├─────────────────────────────────────┤\n")
-		fmt.Fprintf(s.Stderr, "│ Thinking/Reasoning:                 │\n")
-		if thinkingUsage.ThinkingInputTokens > 0 || thinkingUsage.ThinkingOutputTokens > 0 {
-			fmt.Fprintf(s.Stderr, "│   ├─ Input:         %7d       │\n", thinkingUsage.ThinkingInputTokens)
-			fmt.Fprintf(s.Stderr, "│   ├─ Output:        %7d       │\n", thinkingUsage.ThinkingOutputTokens)
-			if thinkingUsage.ThinkingCachedTokens > 0 {
-				fmt.Fprintf(s.Stderr, "│   ├─ Cached:        %7d       │\n", thinkingUsage.ThinkingCachedTokens)
-			}
-			fmt.Fprintf(s.Stderr, "│   └─ Total:         %7d       │\n", thinkingUsage.ThinkingTokens)
-		} else {
-			fmt.Fprintf(s.Stderr, "│   Total:             %7d       │\n", thinkingUsage.ThinkingTokens)
-		}
-
-		// Thinking budget if specified
 		if thinkingUsage.ThinkingBudgetAllocated > 0 {
-			percentUsed := float64(thinkingUsage.ThinkingBudgetUsed) / float64(thinkingUsage.ThinkingBudgetAllocated) * 100
-			fmt.Fprintf(s.Stderr, "│   Budget: %d/%d (%.1f%%)    │\n",
-				thinkingUsage.ThinkingBudgetUsed, thinkingUsage.ThinkingBudgetAllocated, percentUsed)
+			used := 100 * thinkingUsage.ThinkingBudgetUsed / thinkingUsage.ThinkingBudgetAllocated
+			parts = append(parts, fmt.Sprintf("think:%d%%", used))
+		} else {
+			parts = append(parts, fmt.Sprintf("think:%d", thinkingUsage.ThinkingTokens))
 		}
 	}
 
-	// Total
-	fmt.Fprintf(s.Stderr, "├─────────────────────────────────────┤\n")
-	fmt.Fprintf(s.Stderr, "│ TOTAL:               %7d       │\n", totalTokens)
-
-	// Cache savings summary
-	totalCached := cachedInputTokens + cachedOutputTokens
-	if thinkingUsage != nil {
-		totalCached += thinkingUsage.ThinkingCachedTokens
-	}
-	if totalCached > 0 {
-		cacheSavings := float64(totalCached) / float64(totalTokens) * 100
-		fmt.Fprintf(s.Stderr, "├─────────────────────────────────────┤\n")
-		fmt.Fprintf(s.Stderr, "│ Cache Savings:       %6.1f%%       │\n", cacheSavings)
+	// Cost estimation (always show when useful)
+	// Simple cost estimation (rough approximation)
+	// Input: $0.003/1K, Output: $0.015/1K for Claude Sonnet
+	inCost := float64(inputTokens) * 0.003 / 1000
+	outCost := float64(outputTokens) * 0.015 / 1000
+	totalCost := inCost + outCost
+	if totalCost >= 0.01 {
+		parts = append(parts, fmt.Sprintf("cost:$%.2f", totalCost))
+	} else {
+		parts = append(parts, fmt.Sprintf("cost:$%.3f", totalCost))
 	}
 
-	fmt.Fprintf(s.Stderr, "╰─────────────────────────────────────╯\n")
+	// Output compact format in grey
+	const grey = "\033[90m"
+	const reset = "\033[0m"
+	fmt.Fprintf(s.Stderr, "\n%s%s%s\n", grey, strings.Join(parts, " "), reset)
+}
+
+// sameFileDescriptor checks if stderr and stdout point to the same file descriptor
+func (s *CompletionService) sameFileDescriptor() bool {
+	// Get file info for stdout and stderr
+	stdoutFile, ok1 := s.Stdout.(*os.File)
+	stderrFile, ok2 := s.Stderr.(*os.File)
+	if !ok1 || !ok2 {
+		return false
+	}
+
+	// Get file descriptors
+	stdoutFd := int(stdoutFile.Fd())
+	stderrFd := int(stderrFile.Fd())
+
+	// Get stat info for both
+	var stdoutStat, stderrStat syscall.Stat_t
+	if syscall.Fstat(stdoutFd, &stdoutStat) != nil {
+		return false
+	}
+	if syscall.Fstat(stderrFd, &stderrStat) != nil {
+		return false
+	}
+
+	// Compare device and inode
+	return stdoutStat.Dev == stderrStat.Dev && stdoutStat.Ino == stderrStat.Ino
 }
 
 func (s *CompletionService) handleAssistantPrefill(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (func(), int) {

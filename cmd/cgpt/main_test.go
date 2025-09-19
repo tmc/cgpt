@@ -131,16 +131,16 @@ func Test(t *testing.T) {
 			args:    []string{"--thinking-budget", "2000"},
 		},
 		{
-			name:    "show costs",
+			name:    "show usage",
 			backend: "dummy",
 			model:   "dummy-model",
-			args:    []string{"--show-costs"},
+			args:    []string{"--usage"},
 		},
 		{
 			name:    "combined features",
 			backend: "dummy",
 			model:   "dummy-model",
-			args:    []string{"--prompt-caching", "--thinking-mode", "high", "--show-costs"},
+			args:    []string{"--prompt-caching", "--thinking-mode", "high", "--usage"},
 		},
 		{
 			name:    "prompt caching env",
