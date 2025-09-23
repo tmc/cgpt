@@ -171,7 +171,8 @@ type Config struct {
 	GoogleAPIKey     string `yaml:"googleAPIKey"`
 
 	// Prompt caching (works with multiple backends)
-	PromptCaching bool `yaml:"promptCaching"`
+	PromptCaching bool   `yaml:"promptCaching"`
+	CacheTTL      string `yaml:"cacheTTL"` // Time-to-live: "5m", "1h", etc. (provider-specific limits apply)
 
 	// Thinking/reasoning mode for models that support it
 	ThinkingMode        string `yaml:"thinkingMode"`

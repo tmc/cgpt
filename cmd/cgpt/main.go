@@ -93,6 +93,7 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 
 	// Prompt caching and reasoning features
 	fs.BoolVar(&opts.Config.PromptCaching, "prompt-caching", false, "Enable prompt caching (reduces costs for repeated prompts)")
+	fs.StringVar(&opts.Config.CacheTTL, "cache-ttl", "", "Cache time-to-live: '5m', '1h', etc. (Anthropic: 5m or 1h, Google: any duration)")
 	fs.StringVar(&opts.Config.ThinkingMode, "thinking-mode", "none", "Thinking mode for reasoning models (none, low, medium, high, auto)")
 	fs.IntVar(&opts.Config.ThinkingBudget, "thinking-budget", 0, "Explicit token budget for thinking/reasoning (overrides thinking-mode)")
 	fs.BoolVar(&opts.Config.ShowCosts, "show-costs", false, "Show token usage and cost estimates after completion")

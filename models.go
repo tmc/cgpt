@@ -103,6 +103,7 @@ var modelConstructors = map[string]modelConstructor{
 		if mo.httpClient != nil {
 			options = append(options, googleai.WithHTTPClient(mo.httpClient))
 		}
+		// Note: googleai.New() automatically calls EnsureAuthPresent() which checks GOOGLE_API_KEY env var
 		return googleai.New(context.Background(), options...)
 	},
 	"dummy": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
