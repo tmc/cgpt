@@ -28,6 +28,8 @@ type historyMetadata struct {
 	Description string     `yaml:"description,omitempty"`
 	ForkedFrom  string     `yaml:"forked_from,omitempty"`
 	ForkPoint   int        `yaml:"fork_point,omitempty"`
+	Tags        []string   `yaml:"tags,omitempty"`
+	Topics      []string   `yaml:"topics,omitempty"`
 	UsageInfo   *usageInfo `yaml:"usage_info,omitempty"`
 }
 
@@ -310,7 +312,78 @@ func (s *CompletionService) generateDescription() string {
 		desc = strings.ReplaceAll(desc, "  ", " ")
 	}
 
+	// Also generate tags and topics while we're processing the message
+	s.generateTagsAndTopics(firstUserMsg)
+
 	return strings.TrimSpace(desc)
+}
+
+// generateTagsAndTopics extracts relevant tags and topics from the conversation
+func (s *CompletionService) generateTagsAndTopics(text string) {
+	if s.historyMetadata == nil {
+		return
+	}
+
+	// Common programming/tech keywords to look for
+	techKeywords := map[string][]string{
+		"golang":     {"go", "golang", "goroutine", "channel", "interface", "struct"},
+		"python":     {"python", "pip", "django", "flask", "pandas", "numpy"},
+		"javascript": {"javascript", "js", "node", "npm", "react", "vue", "angular"},
+		"database":   {"sql", "database", "mysql", "postgres", "mongodb", "redis"},
+		"devops":     {"docker", "kubernetes", "k8s", "ci/cd", "jenkins", "terraform"},
+		"cloud":      {"aws", "azure", "gcp", "cloud", "lambda", "ec2"},
+		"ai":         {"ai", "machine learning", "ml", "neural", "deep learning", "llm"},
+		"security":   {"security", "encryption", "auth", "oauth", "jwt", "vulnerability"},
+		"api":        {"api", "rest", "graphql", "grpc", "webhook", "endpoint"},
+		"git":        {"git", "github", "gitlab", "commit", "branch", "merge"},
+	}
+
+	lowerText := strings.ToLower(text)
+	var topics []string
+	topicsSet := make(map[string]bool)
+
+	// Extract topics based on keywords
+	for topic, keywords := range techKeywords {
+		for _, keyword := range keywords {
+			if strings.Contains(lowerText, keyword) {
+				if !topicsSet[topic] {
+					topics = append(topics, topic)
+					topicsSet[topic] = true
+				}
+				break
+			}
+		}
+	}
+
+	// Extract tags (specific keywords mentioned)
+	var tags []string
+	tagsSet := make(map[string]bool)
+
+	// Look for specific tool/framework mentions
+	words := strings.Fields(lowerText)
+	for _, word := range words {
+		word = strings.Trim(word, ",.;:!?'\"()[]{}")
+		// Check if it's a known tool/framework
+		for _, keywords := range techKeywords {
+			for _, keyword := range keywords {
+				if word == keyword && !tagsSet[word] {
+					tags = append(tags, word)
+					tagsSet[word] = true
+				}
+			}
+		}
+	}
+
+	// Limit to reasonable number
+	if len(topics) > 5 {
+		topics = topics[:5]
+	}
+	if len(tags) > 10 {
+		tags = tags[:10]
+	}
+
+	s.historyMetadata.Topics = topics
+	s.historyMetadata.Tags = tags
 }
 
 // extractTitleFromText generates a kebab-case title from text
