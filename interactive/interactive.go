@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -224,10 +225,106 @@ func (s *InteractiveSession) loadHistory() error {
 	return nil
 }
 
-func (s *InteractiveSession) editInEditor(line string) (string, error) {
+// getSecureEditor returns a validated and safe editor command.
+// It checks the EDITOR environment variable against an allowlist of known safe editors
+// and validates that the editor exists and is executable.
+func (s *InteractiveSession) getSecureEditor() string {
+	// Allowlist of safe editors with their common names and paths
+	safeEditors := map[string][]string{
+		"vim":   {"vim", "/usr/bin/vim", "/usr/local/bin/vim"},
+		"nano":  {"nano", "/usr/bin/nano", "/usr/local/bin/nano"},
+		"emacs": {"emacs", "/usr/bin/emacs", "/usr/local/bin/emacs"},
+		"code":  {"code", "/usr/local/bin/code"},
+		"subl":  {"subl", "/usr/local/bin/subl"},
+		"micro": {"micro", "/usr/bin/micro", "/usr/local/bin/micro"},
+		"joe":   {"joe", "/usr/bin/joe"},
+	}
+
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
-		editor = "vim" // Default to vim if $EDITOR is not set
+		editor = "vim" // Default to vim
+	}
+
+	// SECURITY: Validate path BEFORE basename extraction to prevent ../vim attacks
+	if !s.isValidEditorPath(editor) {
+		return ""
+	}
+
+	// Check if the editor (or its basename) is in our allowlist
+	editorBasename := filepath.Base(editor)
+
+	// First try to find the editor in our allowlist
+	if paths, exists := safeEditors[editorBasename]; exists {
+		// Try the provided editor path first (already validated above)
+		if s.isExecutable(editor) {
+			return editor
+		}
+
+		// Fall back to checking common paths for this editor
+		for _, path := range paths {
+			if s.isExecutable(path) {
+				return path
+			}
+		}
+	}
+
+	// If nothing found, return empty string to indicate failure
+	return ""
+}
+
+// isValidEditorPath checks if a given path looks like a safe editor path
+func (s *InteractiveSession) isValidEditorPath(path string) bool {
+	// Reject empty paths
+	if path == "" {
+		return false
+	}
+
+	// Reject paths with shell metacharacters
+	if strings.ContainsAny(path, ";|&$`(){}[]<>") {
+		return false
+	}
+
+	// Reject any relative paths (including .. and . prefixed paths)
+	if strings.Contains(path, "..") || strings.HasPrefix(path, "./") {
+		return false
+	}
+
+	// Reject invalid absolute paths (just "/" or similar)
+	if filepath.IsAbs(path) && filepath.Clean(path) == "/" {
+		return false
+	}
+
+	// Path should be absolute or a simple command name (no slashes at all)
+	return filepath.IsAbs(path) || !strings.Contains(path, "/")
+}
+
+// isExecutable checks if a file exists and is executable
+func (s *InteractiveSession) isExecutable(path string) bool {
+	if path == "" {
+		return false
+	}
+
+	// First try using exec.LookPath for commands in PATH
+	if !strings.Contains(path, "/") {
+		_, err := exec.LookPath(path)
+		return err == nil
+	}
+
+	// For absolute paths, check file directly
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+
+	// Check if it's a regular file and executable
+	mode := info.Mode()
+	return mode.IsRegular() && (mode.Perm()&0111) != 0
+}
+
+func (s *InteractiveSession) editInEditor(line string) (string, error) {
+	editor := s.getSecureEditor()
+	if editor == "" {
+		return "", fmt.Errorf("no safe editor found; set EDITOR to one of: vim, nano, emacs, code, subl")
 	}
 
 	// Create a temporary file
