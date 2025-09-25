@@ -1,0 +1,13 @@
+backend: dummy
+model: dummy
+temperature: 0.7
+maxTokens: 4000
+systemPrompt: "You are a helpful AI assistant for testing purposes."
+promptCaching: false
+showUsage: true
+showReasoning: false
+thinkingMode: none
+maxRetries: 2
+retryDelay: 1s
+disableRetry: false
+completionTimeout: 30s

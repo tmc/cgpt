@@ -179,6 +179,11 @@ type Config struct {
 	ShowUsage           bool   `yaml:"showUsage"`
 	ShowReasoning       bool   `yaml:"showReasoning"`
 	InterleavedThinking bool   `yaml:"interleavedThinking"`
+
+	// Retry configuration for API calls
+	MaxRetries   int           `yaml:"maxRetries"`
+	RetryDelay   time.Duration `yaml:"retryDelay"`
+	DisableRetry bool          `yaml:"disableRetry"`
 }
 
 // ValidateThinkingConfig validates thinking mode configuration and returns warnings
@@ -397,6 +402,9 @@ func setupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
 	v.SetDefault("stream", true)
 	v.SetDefault("temperature", 0.05)
 	v.SetDefault("maxTokens", 4096)
+	v.SetDefault("maxRetries", 3)
+	v.SetDefault("retryDelay", time.Second)
+	v.SetDefault("disableRetry", false)
 
 	// Setup paths and env
 	v.AddConfigPath("/etc/cgpt/")

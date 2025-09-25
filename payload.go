@@ -222,9 +222,14 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 
 		// Wrap the GenerateContent call with retry logic
 		retryConfig := s.getRetryConfig()
-		resp, err := retryConfig.DoWithType(genCtx, func(ctx context.Context) (*llms.ContentResponse, error) {
+		result, err := retryConfig.Do(genCtx, func(ctx context.Context) (interface{}, error) {
 			return s.model.GenerateContent(ctx, payload.Messages, callOpts...)
 		})
+
+		var resp *llms.ContentResponse
+		if result != nil {
+			resp = result.(*llms.ContentResponse)
+		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
 			// Format multi-line errors (e.g., rate limit details) nicely
@@ -368,9 +373,14 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	}
 	// Wrap the GenerateContent call with retry logic
 	retryConfig := s.getRetryConfig()
-	response, err := retryConfig.DoWithType(ctx, func(ctx context.Context) (*llms.ContentResponse, error) {
+	result, err := retryConfig.Do(ctx, func(ctx context.Context) (interface{}, error) {
 		return s.model.GenerateContent(ctx, payload.Messages, callOpts...)
 	})
+
+	var response *llms.ContentResponse
+	if result != nil {
+		response = result.(*llms.ContentResponse)
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}

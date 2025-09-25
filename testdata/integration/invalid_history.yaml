@@ -1,0 +1,13 @@
+backend: dummy
+model: dummy
+messages:
+  - role: human
+    parts:
+      - text: "This history file has invalid YAML syntax"
+  - role: assistant
+    parts:
+      - text: "This should work fine"
+  - role: human
+    # Missing closing bracket to make invalid YAML
+    parts: [
+      text: "This will cause a YAML parse error"

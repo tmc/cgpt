@@ -1,0 +1,25 @@
+metadata:
+  created: "2025-01-06T12:00:00Z"
+  description: "Test conversation about programming"
+  usage_info:
+    total_input_tokens: 150
+    total_output_tokens: 300
+    total_cached_tokens: 50
+    total_cost: 0.0045
+    total_saved: 0.0015
+    last_updated: "2025-01-06T12:05:00Z"
+backend: dummy
+model: dummy
+messages:
+  - role: human
+    parts:
+      - text: "Hello, I'm testing the cgpt history system. Can you help me understand how completion works?"
+  - role: assistant
+    parts:
+      - text: "Hello! I'd be happy to help you understand how completion works. Completion is the process where an AI model generates text based on your input. The model analyzes your prompt and generates a relevant response using its training data and parameters like temperature and max tokens."
+  - role: human
+    parts:
+      - text: "That's helpful. Can you explain what temperature means in this context?"
+  - role: assistant
+    parts:
+      - text: "Temperature is a parameter that controls the randomness of the AI's responses. A lower temperature (closer to 0) makes the output more focused and deterministic, while a higher temperature (closer to 1) makes it more creative and random. For most tasks, a temperature between 0.1 and 0.7 works well."
