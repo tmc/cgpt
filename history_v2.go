@@ -70,9 +70,8 @@ func (h *historyManager) createNamedLink(sessionPath, name string) error {
 		timestamp = timestamp[:idx] // Handle "20250827180600-1.yaml"
 	}
 
-	// Clean the name (remove any path separators, etc)
-	name = strings.ReplaceAll(name, "/", "-")
-	name = strings.ReplaceAll(name, "..", "")
+	// Secure path sanitization to prevent directory traversal
+	name = h.sanitizeFileName(name)
 
 	// Create link with timestamp prefix
 	linkName := fmt.Sprintf("%s-%s.yaml", timestamp, name)
@@ -85,6 +84,68 @@ func (h *historyManager) createNamedLink(sessionPath, name string) error {
 	os.Remove(linkPath)
 
 	return os.Symlink(relPath, linkPath)
+}
+
+// sanitizeFileName removes dangerous characters and path traversal attempts from a filename.
+// This prevents directory traversal attacks when creating named history links.
+func (h *historyManager) sanitizeFileName(name string) string {
+	if name == "" {
+		return "unnamed"
+	}
+
+	// Remove null bytes and other control characters
+	name = strings.ReplaceAll(name, "\x00", "")
+	name = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 { // Control characters and DEL
+			return -1 // Remove character
+		}
+		return r
+	}, name)
+
+	// Replace dangerous filesystem characters with safe alternatives
+	replacements := map[string]string{
+		"/":  "-",
+		"\\": "-",
+		":":  "-",
+		"*":  "_",
+		"?":  "_",
+		"\"": "'",
+		"<":  "(",
+		">":  ")",
+		"|":  "-",
+	}
+
+	for old, new := range replacements {
+		name = strings.ReplaceAll(name, old, new)
+	}
+
+	// Remove any sequence containing .. to prevent directory traversal
+	// This handles cases like "../", "..\\", "....//", etc.
+	for strings.Contains(name, "..") {
+		name = strings.ReplaceAll(name, "..", ".")
+	}
+
+	// Clean up consecutive dots, dashes, and underscores
+	name = strings.ReplaceAll(name, "---", "-")
+	name = strings.ReplaceAll(name, "___", "_")
+	name = strings.ReplaceAll(name, "...", ".")
+
+	// Trim leading/trailing dots, dashes, and spaces
+	name = strings.Trim(name, ".-_ \t")
+
+	// Ensure the name isn't empty after cleaning
+	if name == "" {
+		name = "cleaned"
+	}
+
+	// Limit length to prevent filesystem issues
+	if len(name) > 100 {
+		name = name[:100]
+		// Trim again in case we cut in the middle of a multi-byte character
+		name = strings.Trim(name, ".-_ \t")
+	}
+
+	return name
 }
 
 // resolveHistoryPath determines where to save history based on the flag value
