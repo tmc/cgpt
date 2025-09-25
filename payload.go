@@ -113,36 +113,8 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			}
 		}()
 
-		// Determine temperature based on thinking mode
-		temperature := s.cfg.Temperature
-		if (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) && s.cfg.Backend == "anthropic" {
-			// Anthropic requires temperature=1 when thinking is enabled
-			temperature = 1.0
-		}
-
-		// Validate max_tokens > budget_tokens constraint for Anthropic
-		maxTokens := s.cfg.MaxTokens
-		if s.cfg.Backend == "anthropic" && (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) {
-			// Determine effective thinking budget
-			effectiveBudget := s.cfg.ThinkingBudget
-			if effectiveBudget == 0 && s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" {
-				// API will use default based on mode, but minimum is 1024
-				effectiveBudget = 1024
-			}
-			// Normalize to API minimum if user set a value below 1024
-			if effectiveBudget > 0 && effectiveBudget < 1024 {
-				effectiveBudget = 1024
-			}
-
-			// Ensure max_tokens > budget_tokens
-			if maxTokens <= effectiveBudget {
-				// Auto-adjust max_tokens to be greater than budget
-				maxTokens = effectiveBudget + 1000
-				// Log the adjustment when it happens
-				fmt.Fprintf(s.Stderr, "Note: Auto-adjusted max_tokens from %d to %d (must be > thinking budget of %d)\n",
-					s.cfg.MaxTokens, maxTokens, effectiveBudget)
-			}
-		}
+		// Prepare completion options (temperature and max tokens)
+		temperature, maxTokens := s.prepareCompletionOptions()
 
 		callOpts := []llms.CallOption{
 			llms.WithMaxTokens(maxTokens),
@@ -346,36 +318,8 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		defer stopSpinner()
 	}
 
-	// Determine temperature based on thinking mode
-	temperature := s.cfg.Temperature
-	if (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) && s.cfg.Backend == "anthropic" {
-		// Anthropic requires temperature=1 when thinking is enabled
-		temperature = 1.0
-	}
-
-	// Validate max_tokens > budget_tokens constraint for Anthropic
-	maxTokens := s.cfg.MaxTokens
-	if s.cfg.Backend == "anthropic" && (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) {
-		// Determine effective thinking budget
-		effectiveBudget := s.cfg.ThinkingBudget
-		if effectiveBudget == 0 && s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" {
-			// API will use default based on mode, but minimum is 1024
-			effectiveBudget = 1024
-		}
-		// Normalize to API minimum if user set a value below 1024
-		if effectiveBudget > 0 && effectiveBudget < 1024 {
-			effectiveBudget = 1024
-		}
-
-		// Ensure max_tokens > budget_tokens
-		if maxTokens <= effectiveBudget {
-			// Auto-adjust max_tokens to be greater than budget
-			maxTokens = effectiveBudget + 1000
-			// Log the adjustment when it happens
-			fmt.Fprintf(s.Stderr, "Note: Auto-adjusted max_tokens from %d to %d (must be > thinking budget of %d)\n",
-				s.cfg.MaxTokens, maxTokens, effectiveBudget)
-		}
-	}
+	// Prepare completion options (temperature and max tokens)
+	temperature, maxTokens := s.prepareCompletionOptions()
 
 	callOpts := []llms.CallOption{
 		llms.WithMaxTokens(maxTokens),
@@ -477,6 +421,42 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 // handleAssistantPrefill handles the assistant prefill message.
 // It returns a cleanup function that should be called after the completion is done.
 // The second return value is the location where the spinner could start.
+// prepareCompletionOptions calculates temperature and max_tokens based on configuration
+// and thinking mode requirements, handling Anthropic-specific constraints.
+func (s *CompletionService) prepareCompletionOptions() (temperature float64, maxTokens int) {
+	// Determine temperature based on thinking mode
+	temperature = s.cfg.Temperature
+	if (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) && s.cfg.Backend == "anthropic" {
+		// Anthropic requires temperature=1 when thinking is enabled
+		temperature = 1.0
+	}
+
+	// Validate max_tokens > budget_tokens constraint for Anthropic
+	maxTokens = s.cfg.MaxTokens
+	if s.cfg.Backend == "anthropic" && (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) {
+		// Determine effective thinking budget
+		effectiveBudget := s.cfg.ThinkingBudget
+		if effectiveBudget == 0 && s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" {
+			// API will use default based on mode, but minimum is 1024
+			effectiveBudget = 1024
+		}
+		// Normalize to API minimum if user set a value below 1024
+		if effectiveBudget > 0 && effectiveBudget < 1024 {
+			effectiveBudget = 1024
+		}
+		// Ensure max_tokens > budget_tokens
+		if maxTokens <= effectiveBudget {
+			// Auto-adjust max_tokens to be greater than budget
+			maxTokens = effectiveBudget + 1000
+			// Log the adjustment when it happens
+			fmt.Fprintf(s.Stderr, "Note: Auto-adjusted max_tokens from %d to %d (must be > thinking budget of %d)\n",
+				s.cfg.MaxTokens, maxTokens, effectiveBudget)
+		}
+	}
+
+	return temperature, maxTokens
+}
+
 // displayUsage shows compact token usage statistics
 func (s *CompletionService) displayUsage(generationInfo map[string]any) {
 	if generationInfo == nil {
