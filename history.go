@@ -123,46 +123,112 @@ func (s *CompletionService) saveHistoryToFile(f *os.File) error {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}
 
-	if f != os.Stdout {
-		// Truncate and seek to beginning for updates
-		f.Truncate(0)
-		f.Seek(0, 0)
+	// For stdout, write directly
+	if f == os.Stdout {
+		if _, err := f.Write(ybytes); err != nil {
+			return fmt.Errorf("failed to write history: %w", err)
+		}
+		return nil
 	}
 
-	// Write the YAML content
-	if _, err := f.Write(ybytes); err != nil {
-		return fmt.Errorf("failed to write history: %w", err)
+	// For regular files, use atomic write pattern
+	fileName := f.Name()
+	tempFile, err := os.CreateTemp(filepath.Dir(fileName), ".cgpt-history-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tempFileName := tempFile.Name()
+
+	// Clean up temp file on error
+	defer func() {
+		if tempFile != nil {
+			tempFile.Close()
+			os.Remove(tempFileName)
+		}
+	}()
+
+	// Write to temp file
+	if _, err := tempFile.Write(ybytes); err != nil {
+		return fmt.Errorf("failed to write temp history: %w", err)
 	}
 
-	if f != os.Stdout {
-		return f.Sync()
+	// Sync to disk
+	if err := tempFile.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp history: %w", err)
 	}
+
+	// Close temp file before renaming
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp history: %w", err)
+	}
+	tempFile = nil // Mark as closed for defer cleanup
+
+	// Atomically rename temp file to target
+	if err := os.Rename(tempFileName, fileName); err != nil {
+		return fmt.Errorf("failed to rename history file: %w", err)
+	}
+
 	return nil
 }
 
 // saveHistory saves the history to the history file (as yaml)
 func createHistoryFile(historyOutFile string, backend string, payload *ChatCompletionPayload, messages []llms.MessageContent) error {
-	f, err := os.Create(historyOutFile)
-	if err != nil {
-		return fmt.Errorf("failed to create history file %q: %w", historyOutFile, err)
-
-	}
 	if payload == nil {
 		return nil
 	}
+
 	h := history{
 		Backend:  backend,
 		Model:    payload.Model,
 		Messages: messages,
 	}
-	// encode with k8s yaml encoder: which doesn't define NewEncoder:
+
+	// Marshal to YAML
 	ybytes, err := yaml.Marshal(h)
 	if err != nil {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}
-	if _, err := f.Write(ybytes); err != nil {
-		return fmt.Errorf("failed to write history file %q: %w", historyOutFile, err)
+
+	// Create temp file in same directory for atomic write
+	dir := filepath.Dir(historyOutFile)
+	if dir == "" {
+		dir = "."
 	}
+	tempFile, err := os.CreateTemp(dir, ".cgpt-history-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tempFileName := tempFile.Name()
+
+	// Ensure cleanup on error
+	defer func() {
+		if tempFile != nil {
+			tempFile.Close()
+			os.Remove(tempFileName)
+		}
+	}()
+
+	// Write to temp file
+	if _, err := tempFile.Write(ybytes); err != nil {
+		return fmt.Errorf("failed to write temp history file: %w", err)
+	}
+
+	// Sync to disk
+	if err := tempFile.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp history file: %w", err)
+	}
+
+	// Close before rename
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temp history file: %w", err)
+	}
+	tempFile = nil // Mark as closed for defer cleanup
+
+	// Atomically rename to target file
+	if err := os.Rename(tempFileName, historyOutFile); err != nil {
+		return fmt.Errorf("failed to rename history file %q: %w", historyOutFile, err)
+	}
+
 	return nil
 }
 
