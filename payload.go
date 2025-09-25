@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/tmc/cgpt/retry"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/openai"
@@ -68,6 +69,23 @@ func (p *ChatCompletionPayload) addAssistantMessage(content string) {
 	p.addMessage(llms.ChatMessageTypeAI, content)
 }
 
+// getRetryConfig creates a retry configuration from the service config.
+func (s *CompletionService) getRetryConfig() retry.Config {
+	if s.cfg.DisableRetry {
+		return retry.Config{MaxRetries: 0}
+	}
+
+	config := retry.DefaultConfig()
+	if s.cfg.MaxRetries > 0 {
+		config.MaxRetries = s.cfg.MaxRetries
+	}
+	if s.cfg.RetryDelay > 0 {
+		config.InitialDelay = s.cfg.RetryDelay
+	}
+	config.Logger = s.logger
+	return config
+}
+
 func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
 	ch := make(chan string)
 	go func() {
@@ -84,7 +102,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 				spinnerPos = len(s.nextCompletionPrefill) + 1
 			}
 			select {
-			case ch <- s.nextCompletionPrefill + " ":
+			case ch <- s.nextCompletionPrefill:
 			case <-ctx.Done():
 				prefillCleanup()
 				return
@@ -202,7 +220,11 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			}
 		}))
 
-		resp, err := s.model.GenerateContent(genCtx, payload.Messages, callOpts...)
+		// Wrap the GenerateContent call with retry logic
+		retryConfig := s.getRetryConfig()
+		resp, err := retryConfig.DoWithType(genCtx, func(ctx context.Context) (*llms.ContentResponse, error) {
+			return s.model.GenerateContent(ctx, payload.Messages, callOpts...)
+		})
 
 		if err != nil && !errors.Is(err, context.Canceled) {
 			// Format multi-line errors (e.g., rate limit details) nicely
@@ -344,7 +366,11 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		// Use Anthropic-specific option to set the beta header
 		callOpts = append(callOpts, anthropic.WithInterleavedThinking())
 	}
-	response, err := s.model.GenerateContent(ctx, payload.Messages, callOpts...)
+	// Wrap the GenerateContent call with retry logic
+	retryConfig := s.getRetryConfig()
+	response, err := retryConfig.DoWithType(ctx, func(ctx context.Context) (*llms.ContentResponse, error) {
+		return s.model.GenerateContent(ctx, payload.Messages, callOpts...)
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}
