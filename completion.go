@@ -357,6 +357,7 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 		s.historyOutFile = path
 		s.historyFile = file
 		s.autoHistory = true // Mark this as an auto-generated session
+		s.autoNameHistory = true // Enable automatic naming for auto sessions
 
 		// Initialize metadata for new session
 		s.historyMetadata = &historyMetadata{
@@ -723,33 +724,51 @@ func (s *CompletionService) finalizeHistory(ctx context.Context, runCfg RunOptio
 	// Close history output file if open
 	if s.historyFile != nil && s.historyFile != os.Stdout {
 		s.historyFile.Close()
-
-		// Note: Named session functionality removed for simplicity
 	}
-}
 
-func (s *CompletionService) generateHistoryName(ctx context.Context) string {
-	// Generate a name based on the conversation
-	// For now, use a simple approach - can be enhanced with AI later
-	if len(s.payload.Messages) > 0 {
-		firstMsg := s.payload.Messages[0]
-		for _, part := range firstMsg.Parts {
-			if text, ok := part.(llms.TextContent); ok {
-				// Take first 50 chars, clean up
-				name := strings.TrimSpace(text.Text)
-				if len(name) > 50 {
-					name = name[:50]
+	// If using the new history system with auto naming, create a named symlink
+	if s.autoNameHistory && s.historyOutFile != "" && s.historyOutFile != "-" {
+		// Generate a name from the conversation
+		name := s.extractTitleFromConversation()
+		if name != "" && name != "conversation" {
+			// Create a named symlink
+			if s.historyManager != nil {
+				if err := s.historyManager.createNamedLink(s.historyOutFile, name); err != nil {
+					fmt.Fprintf(s.Stderr, "\033[38;5;240mcgpt: Failed to create named link: %v\033[0m\n", err)
+				} else {
+					fmt.Fprintf(s.Stderr, "\033[38;5;240mcgpt: Created named link: %s\033[0m\n", name)
 				}
-				// Replace problematic characters
-				name = strings.ReplaceAll(name, "/", "-")
-				name = strings.ReplaceAll(name, "\n", " ")
-				name = strings.ReplaceAll(name, "\t", " ")
-				// Collapse multiple spaces
-				name = strings.Join(strings.Fields(name), "-")
-				name = strings.ToLower(name)
-				return name
 			}
 		}
 	}
-	return "conversation"
+}
+
+// extractTitleFromConversation generates a title from the current conversation
+func (s *CompletionService) extractTitleFromConversation() string {
+	if len(s.payload.Messages) < 2 {
+		return "conversation"
+	}
+
+	// Get first user message
+	var firstUserMsg string
+	for _, msg := range s.payload.Messages {
+		if msg.Role == "human" || msg.Role == "user" {
+			for _, part := range msg.Parts {
+				if text, ok := part.(llms.TextContent); ok {
+					firstUserMsg = text.Text
+					break
+				}
+			}
+			if firstUserMsg != "" {
+				break
+			}
+		}
+	}
+
+	if firstUserMsg == "" {
+		return "conversation"
+	}
+
+	// Use the extractTitleFromText helper from history.go
+	return s.extractTitleFromText(firstUserMsg)
 }

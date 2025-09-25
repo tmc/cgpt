@@ -232,35 +232,36 @@ func createHistoryFile(historyOutFile string, backend string, payload *ChatCompl
 	return nil
 }
 
-// generateHistoryTitle sends the conversation history to the LLM to generate a descriptive title
+// generateHistoryTitle generates a descriptive title from the conversation without using the LLM
 func (s *CompletionService) generateHistoryTitle(ctx context.Context) (string, error) {
 	// Don't try to generate a title if we have no messages
 	if len(s.payload.Messages) < 2 {
 		return "empty-chat", nil
 	}
 
-	prompt := "Generate a kebab case title for the following conversation. An example is debug-rust-code or explain-quantum-mechanics."
-	msgLimit := min(len(s.payload.Messages), 10)
-	for _, m := range s.payload.Messages[:msgLimit] {
-		for _, p := range m.Parts {
-			prompt += fmt.Sprint(p)
+	// Extract keywords from the first user message
+	var firstUserMsg string
+	for _, msg := range s.payload.Messages {
+		if msg.Role == "human" || msg.Role == "user" {
+			for _, part := range msg.Parts {
+				if text, ok := part.(llms.TextContent); ok {
+					firstUserMsg = text.Text
+					break
+				}
+			}
+			if firstUserMsg != "" {
+				break
+			}
 		}
 	}
 
-	completion, err := llms.GenerateFromSinglePrompt(ctx, s.model, prompt)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate title: %w", err)
+	if firstUserMsg == "" {
+		return "conversation", nil
 	}
 
-	fmt.Println("completion", completion)
-
-	// If title is too long, truncate it
-	const maxTitleLength = 50
-	if len(completion) > maxTitleLength {
-		completion = completion[:maxTitleLength]
-	}
-
-	return completion, nil
+	// Generate kebab-case title from first message
+	title := s.extractTitleFromText(firstUserMsg)
+	return title, nil
 }
 
 // generateDescription creates a short description from the conversation
@@ -310,6 +311,92 @@ func (s *CompletionService) generateDescription() string {
 	}
 
 	return strings.TrimSpace(desc)
+}
+
+// extractTitleFromText generates a kebab-case title from text
+func (s *CompletionService) extractTitleFromText(text string) string {
+	// Clean and normalize the text
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "conversation"
+	}
+
+	// Take first line or sentence (whichever is shorter)
+	if idx := strings.IndexAny(text, "\n.?!"); idx > 0 && idx < 100 {
+		text = text[:idx]
+	} else if len(text) > 100 {
+		text = text[:100]
+	}
+
+	// Extract meaningful words (skip common stop words)
+	stopWords := map[string]bool{
+		"the": true, "a": true, "an": true, "and": true, "or": true, "but": true,
+		"in": true, "on": true, "at": true, "to": true, "for": true, "of": true,
+		"with": true, "by": true, "from": true, "as": true, "is": true, "are": true,
+		"was": true, "were": true, "been": true, "be": true, "have": true, "has": true,
+		"had": true, "do": true, "does": true, "did": true, "will": true, "would": true,
+		"could": true, "should": true, "may": true, "might": true, "must": true,
+		"can": true, "this": true, "that": true, "these": true, "those": true,
+		"i": true, "you": true, "we": true, "they": true, "it": true, "my": true,
+		"your": true, "our": true, "their": true, "its": true, "me": true,
+	}
+
+	// Split into words and filter
+	words := strings.Fields(strings.ToLower(text))
+	var titleWords []string
+	for _, word := range words {
+		// Clean word of punctuation
+		word = strings.Trim(word, ",.;:!?'\"()[]{}")
+		if word != "" && !stopWords[word] && len(titleWords) < 5 {
+			titleWords = append(titleWords, word)
+		}
+	}
+
+	// If we have no meaningful words, try harder
+	if len(titleWords) == 0 {
+		for _, word := range words[:min(3, len(words))] {
+			word = strings.Trim(word, ",.;:!?'\"()[]{}")
+			if word != "" {
+				titleWords = append(titleWords, word)
+			}
+		}
+	}
+
+	if len(titleWords) == 0 {
+		return "conversation"
+	}
+
+	// Join with hyphens to make kebab-case
+	title := strings.Join(titleWords, "-")
+
+	// Ensure the title is a valid filename
+	title = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			return r
+		}
+		return '-'
+	}, title)
+
+	// Clean up multiple dashes
+	for strings.Contains(title, "--") {
+		title = strings.ReplaceAll(title, "--", "-")
+	}
+
+	// Trim dashes and limit length
+	title = strings.Trim(title, "-")
+	if len(title) > 50 {
+		title = title[:50]
+		// Clean up if we cut in the middle of a word
+		if idx := strings.LastIndex(title, "-"); idx > 30 {
+			title = title[:idx]
+		}
+	}
+
+	if title == "" {
+		return "conversation"
+	}
+
+	return title
 }
 
 // renameChatHistory generates a title and renames the history file
