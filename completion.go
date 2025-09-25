@@ -374,7 +374,6 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 			return fmt.Errorf("failed to open history file for reading: %w", err)
 		}
 		s.historyIn = f
-		defer f.Close()
 
 		if err := s.loadHistory(); err != nil {
 			return fmt.Errorf("failed to load history: %w", err)
@@ -410,7 +409,6 @@ func (s *CompletionService) setupExplicitHistory(historyIn, historyOut string) e
 			return fmt.Errorf("failed to open input history file: %w", err)
 		}
 		s.historyIn = f
-		defer f.Close()
 
 		if err := s.loadHistory(); err != nil {
 			return fmt.Errorf("failed to load history: %w", err)
@@ -717,7 +715,12 @@ func (s *CompletionService) SetNextCompletionPrefill(content string) {
 }
 
 func (s *CompletionService) finalizeHistory(ctx context.Context, runCfg RunOptions) {
-	// Close history file if open
+	// Close history input file if open and it's a file (not stdin or other reader)
+	if closer, ok := s.historyIn.(io.Closer); ok && s.historyIn != os.Stdin {
+		closer.Close()
+	}
+
+	// Close history output file if open
 	if s.historyFile != nil && s.historyFile != os.Stdout {
 		s.historyFile.Close()
 
