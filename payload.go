@@ -98,6 +98,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		var spinnerStop func()
 		if cfg.ShowSpinner {
 			spinnerStop = spin(spinnerPos)
+			defer spinnerStop()
 		}
 
 		// Create a cancellable context for the generation
