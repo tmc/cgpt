@@ -96,16 +96,16 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 
 		prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 
-		// Send prefill immediately if it exists
+		// Send prefill through stream if it exists and echo is enabled
 		if s.nextCompletionPrefill != "" {
 			if cfg.EchoPrefill {
-				spinnerPos = len(s.nextCompletionPrefill) + 1
-			}
-			select {
-			case ch <- s.nextCompletionPrefill:
-			case <-ctx.Done():
-				prefillCleanup()
-				return
+				select {
+				case ch <- s.nextCompletionPrefill:
+				case <-ctx.Done():
+					prefillCleanup()
+					return
+				}
+				spinnerPos = len(s.nextCompletionPrefill)
 			}
 			payload.addAssistantMessage(s.nextCompletionPrefill)
 			addedAssistantMessage = true
@@ -332,11 +332,13 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	var stopSpinner func()
 	var spinnerPos int
 	addedAssistantMessage := false
+	var prefillContent string
 
 	prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 	defer prefillCleanup()
 
 	if s.nextCompletionPrefill != "" {
+		prefillContent = s.nextCompletionPrefill
 		payload.addAssistantMessage(s.nextCompletionPrefill)
 		addedAssistantMessage = true
 	}
@@ -451,6 +453,10 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		payload.addAssistantMessage(content)
 	}
 
+	// Include prefill in returned content if echo is enabled
+	if cfg.EchoPrefill && prefillContent != "" {
+		return prefillContent + content, nil
+	}
 
 	return content, nil
 }
@@ -632,9 +638,9 @@ func (s *CompletionService) handleAssistantPrefill(ctx context.Context, payload 
 	// Store the current message count to ensure proper cleanup
 	initialMessageCount := len(payload.Messages)
 
+	// Calculate spinner position if echo is enabled
 	if cfg.EchoPrefill {
-		s.Stdout.Write([]byte(s.nextCompletionPrefill))
-		spinnerPos = len(s.nextCompletionPrefill) + 1
+		spinnerPos = len(s.nextCompletionPrefill)
 	}
 
 	payload.addAssistantMessage(s.nextCompletionPrefill)

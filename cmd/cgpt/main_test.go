@@ -148,6 +148,18 @@ func Test(t *testing.T) {
 			model:   "dummy-model",
 			args:    []string{},
 		},
+		{
+			name:    "prefill with echo enabled",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--prefill", "Hello, ", "--prefill-echo=true"},
+		},
+		{
+			name:    "prefill with echo disabled",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--prefill", "Hello, ", "--prefill-echo=false"},
+		},
 	}
 
 	for _, tc := range testCases {

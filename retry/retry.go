@@ -171,8 +171,9 @@ func classifyError(err error) (ErrorType, time.Duration) {
 	}
 
 	// Check for rate limiting (429) - should be retried with special handling
-	if strings.Contains(errStr, "429") || strings.Contains(errStr, "rate limit") ||
-		strings.Contains(errStr, "too many requests") {
+	errStrLower := strings.ToLower(errStr)
+	if strings.Contains(errStr, "429") || strings.Contains(errStrLower, "rate limit") ||
+		strings.Contains(errStrLower, "too many requests") {
 		retryAfter := extractRetryAfter(errStr)
 		return ErrorTypeRateLimit, retryAfter
 	}

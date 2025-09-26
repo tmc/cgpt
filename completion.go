@@ -41,6 +41,7 @@ type CompletionService struct {
 	disableHistory      bool
 	autoNameHistory     bool
 	autoHistory         bool // Whether this is an auto-generated session
+	gitHistoryManager   *GitHistoryManager // Git-based history management
 
 	performCompletionConfig PerformCompletionConfig
 
@@ -60,6 +61,9 @@ type CompletionService struct {
 
 	// lastGenerationInfo stores the last generation info for usage tracking
 	lastGenerationInfo map[string]any
+
+	// hookManager manages lifecycle hooks
+	hookManager *HookManager
 }
 
 type CompletionServiceOption func(*CompletionService)
@@ -115,6 +119,14 @@ func NewCompletionService(cfg *Config, model llms.Model, opts ...CompletionServi
 		Stderr:            os.Stderr,
 		sessionTimestamp:  time.Now().Format("20060102150405"),
 	}
+
+	// Initialize hook manager if hooks are configured
+	if cfg.Hooks != nil {
+		s.hookManager = NewHookManager(cfg.Hooks, s.Stderr)
+	} else {
+		// Use default hook configuration
+		s.hookManager = NewHookManager(nil, s.Stderr)
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -152,6 +164,17 @@ type PerformCompletionConfig struct {
 }
 
 func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
+	// Execute session-start hooks
+	hookCtx := CreateHookContext(EventSessionStart, s.cfg)
+	if _, err := s.hookManager.ExecuteHooks(ctx, EventSessionStart, hookCtx); err != nil {
+		fmt.Fprintf(s.Stderr, "cgpt: warning: session-start hook failed: %v\n", err)
+	}
+
+	// Execute config-loaded hooks
+	if _, err := s.hookManager.ExecuteHooks(ctx, EventConfigLoaded, hookCtx); err != nil {
+		fmt.Fprintf(s.Stderr, "cgpt: warning: config-loaded hook failed: %v\n", err)
+	}
+
 	if err := s.configure(runCfg); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
@@ -161,10 +184,40 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
 	if err := s.handleInput(ctx, runCfg); err != nil {
 		return fmt.Errorf("input handling error: %w", err)
 	}
+
+	// Execute pre-completion hooks
+	preHookCtx := CreateHookContext(EventPreCompletion, s.cfg)
+	preHookCtx.Messages = s.payload.Messages
+	if _, err := s.hookManager.ExecuteHooks(ctx, EventPreCompletion, preHookCtx); err != nil {
+		fmt.Fprintf(s.Stderr, "cgpt: warning: pre-completion hook failed: %v\n", err)
+	}
+
 	err := s.executeCompletion(ctx, runCfg)
+
+	// Execute post-completion or error hooks
+	if err != nil {
+		errorHookCtx := CreateHookContext(EventCompletionError, s.cfg)
+		errorHookCtx.Messages = s.payload.Messages
+		errorHookCtx.Error = err.Error()
+		if _, hookErr := s.hookManager.ExecuteHooks(ctx, EventCompletionError, errorHookCtx); hookErr != nil {
+			fmt.Fprintf(s.Stderr, "cgpt: warning: completion-error hook failed: %v\n", hookErr)
+		}
+	} else {
+		postHookCtx := CreateHookContext(EventPostCompletion, s.cfg)
+		postHookCtx.Messages = s.payload.Messages
+		if _, hookErr := s.hookManager.ExecuteHooks(ctx, EventPostCompletion, postHookCtx); hookErr != nil {
+			fmt.Fprintf(s.Stderr, "cgpt: warning: post-completion hook failed: %v\n", hookErr)
+		}
+	}
 
 	// Handle post-completion tasks (naming, cleanup)
 	s.finalizeHistory(ctx, runCfg)
+
+	// Execute session-end hooks
+	endHookCtx := CreateHookContext(EventSessionEnd, s.cfg)
+	if _, hookErr := s.hookManager.ExecuteHooks(ctx, EventSessionEnd, endHookCtx); hookErr != nil {
+		fmt.Fprintf(s.Stderr, "cgpt: warning: session-end hook failed: %v\n", hookErr)
+	}
 
 	return err
 }
@@ -178,6 +231,12 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 	s.historyManager, err = newHistoryManager()
 	if err != nil {
 		return fmt.Errorf("failed to initialize history manager: %w", err)
+	}
+
+	// Initialize git history manager
+	s.gitHistoryManager, err = NewGitHistoryManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize git history manager: %w", err)
 	}
 
 	// Setup history based on flags
@@ -712,7 +771,7 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 // Note that not all inference engines support prefill messages.
 // Whitespace is trimmed from the end of the message.
 func (s *CompletionService) SetNextCompletionPrefill(content string) {
-	s.nextCompletionPrefill = strings.TrimRight(content, " \t\n")
+	s.nextCompletionPrefill = strings.TrimSpace(content)
 }
 
 func (s *CompletionService) finalizeHistory(ctx context.Context, runCfg RunOptions) {

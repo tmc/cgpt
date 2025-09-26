@@ -36,13 +36,22 @@ type RunOptions struct {
 	ReadlineHistoryFile string `json:"readlineHistoryFile,omitempty" yaml:"readlineHistoryFile,omitempty"`
 	NCompletions        int    `json:"nCompletions,omitempty" yaml:"nCompletions,omitempty"`
 
+	// Fork options
+	ForkFrom        string `json:"forkFrom,omitempty" yaml:"forkFrom,omitempty"`             // Fork from this conversation file
+	ForkPoint       int    `json:"forkPoint,omitempty" yaml:"forkPoint,omitempty"`          // Message index to fork from (-1 for current)
+	ForkDescription string `json:"forkDescription,omitempty" yaml:"forkDescription,omitempty"` // Description of the fork
+	ForkBranch      string `json:"forkBranch,omitempty" yaml:"forkBranch,omitempty"`        // Git branch name for fork
+	ListForks       bool   `json:"listForks,omitempty" yaml:"listForks,omitempty"`          // List all forks
+	ShowTree        bool   `json:"showTree,omitempty" yaml:"showTree,omitempty"`            // Show conversation tree
+
 	// I/O
 	Stdout io.Writer `json:"-" yaml:"-"`
 	Stderr io.Writer `json:"-" yaml:"-"`
 	Stdin  io.Reader `json:"-" yaml:"-"`
 
 	// Timing
-	MaximumTimeout time.Duration `json:"maximumTimeout,omitempty" yaml:"maximumTimeout,omitempty"`
+	MaximumTimeout    time.Duration `json:"maximumTimeout,omitempty" yaml:"maximumTimeout,omitempty"`
+	CompletionTimeout time.Duration `json:"completionTimeout,omitempty" yaml:"completionTimeout,omitempty"`
 
 	ConfigPath string `json:"configPath,omitempty" yaml:"configPath,omitempty"`
 
