@@ -334,7 +334,7 @@ func updateGoldenFile(t *testing.T, path, comment string, files map[string][]byt
 	if httpPayload != nil {
 		ar.Files = append(ar.Files, txtar.File{Name: "http_payload", Data: httpPayload})
 	}
-	if err := os.WriteFile(path, txtar.Format(ar), 0644); err != nil {
+	if err := cgpt.AtomicWriteFile(path, txtar.Format(ar), 0644); err != nil {
 		t.Fatalf("Failed to update golden file: %v", err)
 	}
 }

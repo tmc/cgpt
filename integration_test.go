@@ -119,7 +119,7 @@ func TestIntegration_HistoryPersistence(t *testing.T) {
 		t.Fatalf("Failed to marshal test history: %v", err)
 	}
 
-	if err := os.WriteFile(historyFile, historyData, 0644); err != nil {
+	if err := AtomicWriteFile(historyFile, historyData, 0644); err != nil {
 		t.Fatalf("Failed to write history file: %v", err)
 	}
 
@@ -224,7 +224,7 @@ model: claude-3-sonnet-20240229
 			// Set up config file
 			configPath := filepath.Join(tmpDir, "config.yaml")
 			if tt.configFile != "" {
-				if err := os.WriteFile(configPath, []byte(tt.configFile), 0644); err != nil {
+				if err := AtomicWriteFile(configPath, []byte(tt.configFile), 0644); err != nil {
 					t.Fatalf("Failed to write config file: %v", err)
 				}
 			}
@@ -748,7 +748,7 @@ func BenchmarkIntegration_HistoryOperations(b *testing.B) {
 	b.Run("HistoryLoad", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			historyFile := filepath.Join(tmpDir, fmt.Sprintf("bench_history_%d.yaml", i))
-			if err := os.WriteFile(historyFile, historyData, 0644); err != nil {
+			if err := AtomicWriteFile(historyFile, historyData, 0644); err != nil {
 				b.Errorf("Failed to write history file: %v", err)
 			}
 
@@ -831,7 +831,7 @@ completionTimeout: 120s
 `
 
 	configFile := filepath.Join(tmpDir, "benchmark_config.yaml")
-	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
+	if err := AtomicWriteFile(configFile, []byte(configContent), 0644); err != nil {
 		b.Fatalf("Failed to write config file: %v", err)
 	}
 
