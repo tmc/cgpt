@@ -75,6 +75,14 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.BoolVarP(&opts.Continue, "continue", "C", false, "Continue your most recent conversation session")
 	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of AI responses to generate (for batch processing)")
 
+	// === CONVERSATION FORKING ===
+	fs.StringVar(&opts.ForkFrom, "fork-from", "", "Fork from this conversation file")
+	fs.IntVar(&opts.ForkPoint, "fork-point", -1, "Message index to fork from (-1 for current point)")
+	fs.StringVar(&opts.ForkDescription, "fork-desc", "", "Description for the fork")
+	fs.StringVar(&opts.ForkBranch, "fork-branch", "", "Git branch name for the fork")
+	fs.BoolVar(&opts.ListForks, "list-forks", false, "List all conversation forks")
+	fs.BoolVar(&opts.ShowTree, "show-tree", false, "Show conversation tree structure")
+
 	// === AI MODEL & BEHAVIOR ===
 	fs.StringVarP(&opts.Config.Backend, "backend", "b", "anthropic", "AI provider: anthropic, openai, gemini, ollama")
 	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-sonnet-4-20250514", "AI model to use (e.g., claude-haiku-3-20240307, gpt-4)")
@@ -165,6 +173,11 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 		return fmt.Errorf("failed to initialize model: %w", err)
 	}
 
+	// Handle fork-specific commands first
+	if opts.ListForks || opts.ShowTree || opts.ForkFrom != "" {
+		return handleForkCommands(ctx, opts)
+	}
+
 	// If stdin is a tty, and no input files, strings, or args are provided,
 	// then we should run in continuous mode:
 	if term.IsTerminal(int(os.Stdin.Fd())) && len(opts.InputFiles) == 0 && len(opts.InputStrings) == 0 && len(opts.PositionalArgs) == 0 {
@@ -252,4 +265,64 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	opts.PositionalArgs = fs.Args()
 
 	return opts, fs, nil
+}
+
+// handleForkCommands handles fork-specific operations
+func handleForkCommands(ctx context.Context, opts cgpt.RunOptions) error {
+	forkManager, err := cgpt.NewForkManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize fork manager: %w", err)
+	}
+
+	// Handle list forks
+	if opts.ListForks {
+		forks, err := forkManager.ListForks()
+		if err != nil {
+			return fmt.Errorf("failed to list forks: %w", err)
+		}
+
+		fmt.Fprintf(opts.Stdout, "Conversation Forks:\n")
+		if len(forks) == 0 {
+			fmt.Fprintf(opts.Stdout, "  No forks found\n")
+		} else {
+			for _, fork := range forks {
+				fmt.Fprintf(opts.Stdout, "  %s: %s\n", fork.Branch, fork.Description)
+			}
+		}
+		return nil
+	}
+
+	// Handle show tree
+	if opts.ShowTree {
+		tree, err := forkManager.GetConversationTree()
+		if err != nil {
+			return fmt.Errorf("failed to get conversation tree: %w", err)
+		}
+
+		fmt.Fprintf(opts.Stdout, "Conversation Tree:\n")
+		fmt.Fprintf(opts.Stdout, "%s", tree.PrintTree())
+		return nil
+	}
+
+	// Handle fork creation
+	if opts.ForkFrom != "" {
+		forkCmd := cgpt.ForkCommand{
+			InputFile:   opts.ForkFrom,
+			OutputFile:  opts.HistoryOut,
+			ForkPoint:   opts.ForkPoint,
+			Description: opts.ForkDescription,
+			BranchName:  opts.ForkBranch,
+		}
+
+		if err := forkManager.ExecuteForkCommand(ctx, forkCmd); err != nil {
+			return fmt.Errorf("failed to execute fork command: %w", err)
+		}
+
+		fmt.Fprintf(opts.Stderr, "Successfully forked conversation from %s\n", filepath.Base(opts.ForkFrom))
+		if forkCmd.OutputFile != "" {
+			fmt.Fprintf(opts.Stderr, "New conversation saved to: %s\n", forkCmd.OutputFile)
+		}
+	}
+
+	return nil
 }

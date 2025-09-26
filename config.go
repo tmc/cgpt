@@ -195,6 +195,9 @@ type Config struct {
 	MaxRetries   int           `yaml:"maxRetries"`
 	RetryDelay   time.Duration `yaml:"retryDelay"`
 	DisableRetry bool          `yaml:"disableRetry"`
+
+	// Hook system configuration
+	Hooks *HookConfig `yaml:"hooks"`
 }
 
 // ValidateThinkingConfig validates thinking mode configuration and returns warnings

@@ -126,7 +126,27 @@ func (s *CompletionService) saveHistoryToFile(f *os.File) error {
 	}
 
 	// Use atomic write for file handles
-	return AtomicWriteFileHandle(f, ybytes)
+	if err := AtomicWriteFileHandle(f, ybytes); err != nil {
+		return err
+	}
+
+	// Commit to git if file handle points to a real file
+	if f != os.Stdout && s.gitHistoryManager != nil {
+		commitMsg := fmt.Sprintf("Update conversation: %d messages", len(s.payload.Messages))
+		if s.historyMetadata != nil && s.historyMetadata.Description != "" {
+			commitMsg = fmt.Sprintf("Update: %s", s.historyMetadata.Description)
+		}
+
+		// Only commit if the file is within the git history directory
+		if strings.HasPrefix(f.Name(), s.gitHistoryManager.RepoPath) {
+			if err := s.gitHistoryManager.CommitConversation(f.Name(), commitMsg); err != nil {
+				// Don't fail the operation if git commit fails, just log it
+				fmt.Fprintf(s.Stderr, "\033[38;5;240mcgpt: warning: failed to commit to git: %v\033[0m\n", err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // saveHistory saves the history to the history file (as yaml)
