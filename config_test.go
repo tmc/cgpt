@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/pflag"
 )
@@ -17,7 +18,7 @@ func TestBackendDefaultModel(t *testing.T) {
 	t.Setenv("OPENROUTER_API_KEY", "")
 	t.Setenv("CGPT_BACKEND", "dummy")
 
-	def := Config{Stream: true, MaxTokens: 4096, Temperature: 0.05}
+	def := Config{Stream: true, MaxTokens: 4096, Temperature: 0.05, MaxRetries: 3, RetryDelay: time.Second}
 	tests := []struct {
 		name, configYAML string
 		env              map[string]string
@@ -28,36 +29,36 @@ func TestBackendDefaultModel(t *testing.T) {
 		{
 			name:     "flag backend uses its default model",
 			flags:    []string{"--backend=dummy"},
-			want:     Config{Backend: "dummy", Model: "dummy", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature},
+			want:     Config{Backend: "dummy", Model: "dummy", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature, MaxRetries: def.MaxRetries, RetryDelay: def.RetryDelay},
 			wantLogs: "cgpt: using default model for dummy backend: dummy",
 		},
 		{
 			name:  "flag backend but explicit model flag preserved",
 			flags: []string{"--backend=dummy", "--model=dummy-custom"},
-			want:  Config{Backend: "dummy", Model: "dummy-custom", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature},
+			want:  Config{Backend: "dummy", Model: "dummy-custom", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature, MaxRetries: def.MaxRetries, RetryDelay: def.RetryDelay},
 		},
 		{
 			name:  "flag backend but env model preserved",
 			flags: []string{"--backend=dummy"},
 			env:   map[string]string{"CGPT_MODEL": "dummy-custom"},
-			want:  Config{Backend: "dummy", Model: "dummy-custom", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature},
+			want:  Config{Backend: "dummy", Model: "dummy-custom", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature, MaxRetries: def.MaxRetries, RetryDelay: def.RetryDelay},
 		},
 		{
 			name:       "flag backend but config model preserved",
 			configYAML: "model: dummy-custom",
 			flags:      []string{"--backend=dummy"},
-			want:       Config{Backend: "dummy", Model: "dummy-custom", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature},
+			want:       Config{Backend: "dummy", Model: "dummy-custom", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature, MaxRetries: def.MaxRetries, RetryDelay: def.RetryDelay},
 		},
 		{
 			name:     "env backend uses its default model",
 			env:      map[string]string{"CGPT_BACKEND": "dummy"},
-			want:     Config{Backend: "dummy", Model: "dummy", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature},
+			want:     Config{Backend: "dummy", Model: "dummy", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature, MaxRetries: def.MaxRetries, RetryDelay: def.RetryDelay},
 			wantLogs: "cgpt: using default model for dummy backend: dummy",
 		},
 		{
 			name:       "config backend uses its default model",
 			configYAML: "backend: dummy",
-			want:       Config{Backend: "dummy", Model: "dummy", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature},
+			want:       Config{Backend: "dummy", Model: "dummy", Stream: def.Stream, MaxTokens: def.MaxTokens, Temperature: def.Temperature, MaxRetries: def.MaxRetries, RetryDelay: def.RetryDelay},
 			wantLogs:   "cgpt: using default model for dummy backend: dummy",
 		},
 	}
