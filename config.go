@@ -15,6 +15,17 @@ import (
 
 var defaultBackend = "anthropic" // Configurable via 'CGPT_BACKEND" (or via configuration files).
 
+// backendPriority defines the order of preference for auto-selecting backends
+// when multiple API keys are available. Higher priority values are preferred.
+var backendPriority = map[string]int{
+	"anthropic":  4, // Highest priority
+	"openai":     3,
+	"googleai":   2,
+	"openrouter": 1,
+	"ollama":     0, // Lowest priority (doesn't require API key)
+	"dummy":      -1, // Only for testing
+}
+
 var defaultModels = map[string]string{
 	"anthropic":  "claude-sonnet-4-20250514",
 	"openai":     "gpt-5",
@@ -346,16 +357,39 @@ func LoadConfig(path string, stderr io.Writer, flagSet *pflag.FlagSet) (*Config,
 		}
 	}
 
+	// Check if backend was explicitly set by user with a meaningful value
+	backendFromFlag := flagSet.Changed("backend") && flagSet.Lookup("backend").Value.String() != ""
+	backendFromEnv := isEnvSet("CGPT_BACKEND") && os.Getenv("CGPT_BACKEND") != ""
+	backendFromConfig := v.InConfig("backend") && v.GetString("backend") != ""
+	backendExplicit := backendFromFlag || backendFromEnv || backendFromConfig
+
 	// Get backend (respecting precedence)
 	backend := v.GetString("backend")
 
 	// If model is set but backend is not explicitly set, try to detect backend from model name
-	if hasModel && modelName != "" && !flagSet.Changed("backend") && !isEnvSet("CGPT_BACKEND") && !v.InConfig("backend") {
+	if hasModel && modelName != "" && !backendExplicit {
 		if detectedBackend, ok := detectBackendFromModel(modelName); ok {
 			backend = detectedBackend
 			v.Set("backend", backend)
 			if verbose, _ := flagSet.GetBool("verbose"); verbose {
 				fmt.Fprintf(stderr, "cgpt: auto-detected backend %q from model %q\n", backend, modelName)
+			}
+			backendExplicit = true // Mark as resolved to avoid further auto-selection
+		}
+	}
+
+	// If backend is still not explicitly set (empty or default), try auto-selection based on API keys
+	verbose, _ := flagSet.GetBool("verbose")
+	if !backendExplicit && backend == "" {
+		if autoSelected, wasAutoSelected := autoSelectBackend(verbose, stderr); wasAutoSelected {
+			backend = autoSelected
+			v.Set("backend", backend)
+		} else {
+			// Fall back to default if auto-selection didn't find anything
+			backend = defaultBackend
+			v.Set("backend", backend)
+			if verbose {
+				fmt.Fprintf(stderr, "cgpt: no API keys found, using default backend: %s\n", defaultBackend)
 			}
 		}
 	}
@@ -396,9 +430,81 @@ func isEnvSet(key string) bool {
 	return exists
 }
 
+// detectAvailableBackends scans environment variables to find which backends
+// have API keys configured and returns them sorted by priority (highest first)
+// Only considers backends that require API keys for automatic selection
+func detectAvailableBackends() []string {
+	available := []string{}
+
+	// Check for each backend's API key
+	// Note: ollama is excluded from auto-selection since it doesn't require an API key
+	// and the auto-selection logic is specifically for API-key-based backends
+	backendKeys := map[string]string{
+		"anthropic":  "ANTHROPIC_API_KEY",
+		"openai":     "OPENAI_API_KEY",
+		"googleai":   "GOOGLE_API_KEY",
+		"openrouter": "OPENROUTER_API_KEY",
+	}
+
+	for backend, envKey := range backendKeys {
+		// Check if the environment variable is set and not empty
+		if value := os.Getenv(envKey); value != "" {
+			available = append(available, backend)
+		}
+	}
+
+	// Sort by priority (highest first)
+	sortBackendsByPriority(available)
+	return available
+}
+
+// sortBackendsByPriority sorts a slice of backend names by their priority
+// in descending order (highest priority first)
+func sortBackendsByPriority(backends []string) {
+	for i := 0; i < len(backends); i++ {
+		for j := i + 1; j < len(backends); j++ {
+			// Get priorities (default to -999 for unknown backends)
+			iPrio, iExists := backendPriority[backends[i]]
+			if !iExists {
+				iPrio = -999
+			}
+			jPrio, jExists := backendPriority[backends[j]]
+			if !jExists {
+				jPrio = -999
+			}
+
+			// Swap if j has higher priority than i
+			if jPrio > iPrio {
+				backends[i], backends[j] = backends[j], backends[i]
+			}
+		}
+	}
+}
+
+// autoSelectBackend attempts to automatically select a backend based on
+// available API keys, returns the selected backend and whether auto-selection occurred
+func autoSelectBackend(verbose bool, stderr io.Writer) (string, bool) {
+	available := detectAvailableBackends()
+
+	if verbose {
+		fmt.Fprintf(stderr, "cgpt: detected available backends: %v\n", available)
+	}
+
+	if len(available) == 0 {
+		return "", false // No auto-selection occurred
+	}
+
+	// Return the highest priority available backend
+	selected := available[0]
+	if verbose {
+		fmt.Fprintf(stderr, "cgpt: auto-selected backend: %s (from available: %v)\n", selected, available)
+	}
+
+	return selected, true
+}
+
 func setupViper(v *viper.Viper, flagSet *pflag.FlagSet) {
-	// Set defaults
-	v.SetDefault("backend", defaultBackend)
+	// Set defaults - NOTE: no default backend to allow auto-selection
 	v.SetDefault("stream", true)
 	v.SetDefault("temperature", 0.05)
 	v.SetDefault("maxTokens", 4096)
