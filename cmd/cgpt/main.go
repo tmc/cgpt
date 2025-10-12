@@ -46,8 +46,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -99,6 +101,7 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.BoolVar(&opts.Config.InterleavedThinking, "interleaved-thinking", false, "Enable advanced reasoning mode (Claude 4+ only)")
 
 	// === TECHNICAL OPTIONS ===
+	fs.BoolVar(&opts.Config.InsecureSkipVerify, "insecure-skip-verify", false, "Skip TLS certificate verification")
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show loading spinner while waiting")
 	fs.BoolVar(&opts.StreamOutput, "stream", true, "Stream responses as they generate")
 	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Display prefill text in output")
@@ -167,6 +170,16 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
 		// Use JSONDebugClient for pretty-printed JSON requests and raw SSE streaming output
 		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.JSONDebugClient))
+	} else {
+		// Create a custom http.Client with InsecureSkipVerify if the flag is set
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: opts.Config.InsecureSkipVerify},
+		}
+
+		httpClient := &http.Client{
+			Transport: transport,
+		}
+		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httpClient))
 	}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {

@@ -198,6 +198,9 @@ type Config struct {
 
 	// Hook system configuration
 	Hooks *HookConfig `yaml:"hooks"`
+
+	// TLS configuration
+	InsecureSkipVerify bool `yaml:"insecureSkipVerify"`
 }
 
 // ValidateThinkingConfig validates thinking mode configuration and returns warnings
