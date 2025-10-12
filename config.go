@@ -201,6 +201,9 @@ type Config struct {
 
 	// TLS configuration
 	InsecureSkipVerify bool `yaml:"insecureSkipVerify"`
+
+	// API endpoint configuration
+	BaseURL string `yaml:"baseURL"`
 }
 
 // ValidateThinkingConfig validates thinking mode configuration and returns warnings

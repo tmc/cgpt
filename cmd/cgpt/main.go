@@ -47,6 +47,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -101,6 +102,7 @@ func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
 	fs.BoolVar(&opts.Config.InterleavedThinking, "interleaved-thinking", false, "Enable advanced reasoning mode (Claude 4+ only)")
 
 	// === TECHNICAL OPTIONS ===
+	fs.StringVar(&opts.Config.BaseURL, "base-url", "", "Custom base URL for the API endpoint")
 	fs.BoolVar(&opts.Config.InsecureSkipVerify, "insecure-skip-verify", false, "Skip TLS certificate verification")
 	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show loading spinner while waiting")
 	fs.BoolVar(&opts.StreamOutput, "stream", true, "Stream responses as they generate")
@@ -164,24 +166,27 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	}
 
 	// Initialize the model (the llms.Model interface)
-	modelOpts := []cgpt.InferenceProviderOption{}
-	// if debug mode is on, attach the debug http client:
+	// Start with a clone of the default transport to inherit proxy settings.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: opts.Config.InsecureSkipVerify}
+	httpClient := &http.Client{Transport: transport}
+
 	if opts.DebugMode {
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
-		// Use JSONDebugClient for pretty-printed JSON requests and raw SSE streaming output
-		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.JSONDebugClient))
-	} else {
-		// Create a custom http.Client with InsecureSkipVerify if the flag is set
-		transport := &http.Transport{
-			Proxy:           http.ProxyFromEnvironment,
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: opts.Config.InsecureSkipVerify},
+		// Get the transport from the global JSONDebugClient
+		if debugTransport, ok := httputil.JSONDebugClient.Transport.(*httputil.LoggingTransport); ok {
+			// Set the base transport of the debug logger to our custom transport
+			debugTransport.Transport = transport
+			// Use the modified debug transport in our client
+			httpClient.Transport = debugTransport
+		} else {
+			// Fallback if the type assertion fails for some reason
+			fmt.Fprintln(opts.Stderr, "Warning: could not get JSON debug transport, using basic logger")
+			httpClient.Transport = &httputil.LoggingTransport{Transport: transport}
 		}
-
-		httpClient := &http.Client{
-			Transport: transport,
-		}
-		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httpClient))
 	}
+
+	modelOpts := []cgpt.InferenceProviderOption{cgpt.WithHTTPClient(httpClient)}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize model: %w", err)

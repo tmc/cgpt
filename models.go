@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/tmc/langchaingo/llms"
@@ -54,6 +53,9 @@ var modelConstructors = map[string]modelConstructor{
 		if mo.httpClient != nil {
 			options = append(options, openai.WithHTTPClient(mo.httpClient))
 		}
+		if cfg.BaseURL != "" {
+			options = append(options, openai.WithBaseURL(cfg.BaseURL))
+		}
 
 		return openai.New(options...)
 	},
@@ -81,8 +83,8 @@ var modelConstructors = map[string]modelConstructor{
 		if cfg.AnthropicAPIKey != "" {
 			options = append(options, anthropic.WithToken(cfg.AnthropicAPIKey))
 		}
-		if baseURL := os.Getenv("ANTHROPIC_API_BASE"); baseURL != "" {
-			options = append(options, anthropic.WithBaseURL(baseURL))
+		if cfg.BaseURL != "" {
+			options = append(options, anthropic.WithBaseURL(cfg.BaseURL))
 		}
 		if strings.Contains(cfg.Model, "sonnet") {
 			options = append(options, anthropic.WithAnthropicBetaHeader(anthropic.MaxTokensAnthropicSonnet35))
@@ -96,6 +98,9 @@ var modelConstructors = map[string]modelConstructor{
 		options := []ollama.Option{ollama.WithModel(cfg.Model)}
 		if mo.httpClient != nil {
 			options = append(options, ollama.WithHTTPClient(mo.httpClient))
+		}
+		if cfg.BaseURL != "" {
+			options = append(options, ollama.WithServerURL(cfg.BaseURL))
 		}
 		return ollama.New(options...)
 	},
