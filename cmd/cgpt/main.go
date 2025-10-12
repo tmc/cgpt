@@ -45,19 +45,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/tmc/cgpt"
-	"github.com/tmc/langchaingo/httputil"
 	"golang.org/x/term"
 )
 
@@ -173,17 +173,7 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 
 	if opts.DebugMode {
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
-		// Get the transport from the global JSONDebugClient
-		if debugTransport, ok := httputil.JSONDebugClient.Transport.(*httputil.LoggingTransport); ok {
-			// Set the base transport of the debug logger to our custom transport
-			debugTransport.Transport = transport
-			// Use the modified debug transport in our client
-			httpClient.Transport = debugTransport
-		} else {
-			// Fallback if the type assertion fails for some reason
-			fmt.Fprintln(opts.Stderr, "Warning: could not get JSON debug transport, using basic logger")
-			httpClient.Transport = &httputil.LoggingTransport{Transport: transport}
-		}
+		httpClient.Transport = &loggingRoundTripper{transport}
 	}
 
 	modelOpts := []cgpt.InferenceProviderOption{cgpt.WithHTTPClient(httpClient)}
@@ -344,4 +334,33 @@ func handleForkCommands(ctx context.Context, opts cgpt.RunOptions) error {
 	}
 
 	return nil
+}
+
+type loggingRoundTripper struct {
+	transport http.RoundTripper
+}
+
+func (l *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	dump, err := httputil.DumpRequestOut(req, true)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", string(dump))
+
+	resp, err := l.transport.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+
+	dump, err = httputil.DumpResponse(resp, true)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "%s\n", string(dump))
+
+	// After dumping the response, the body is consumed. We need to replace it with a new reader
+	// so that the client can read it.
+	resp.Body = io.NopCloser(bytes.NewBuffer(dump))
+
+	return resp, nil
 }
