@@ -173,6 +173,7 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	} else {
 		// Create a custom http.Client with InsecureSkipVerify if the flag is set
 		transport := &http.Transport{
+			Proxy:           http.ProxyFromEnvironment,
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: opts.Config.InsecureSkipVerify},
 		}
 
