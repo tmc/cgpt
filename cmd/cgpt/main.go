@@ -45,19 +45,18 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/tmc/cgpt"
+	"github.com/tmc/langchaingo/httputil"
 	"golang.org/x/term"
 )
 
@@ -173,7 +172,24 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 
 	if opts.DebugMode {
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
-		httpClient.Transport = &loggingRoundTripper{transport}
+		// Get the top-level wrapper transport from the global JSONDebugClient.
+		if wrapperTransport, ok := httputil.JSONDebugClient.Transport.(*httputil.Transport); ok {
+			// The actual logging transport is nested inside.
+			type transportSetter interface {
+				SetTransport(http.RoundTripper)
+			}
+			// Use an interface to duck-type our way to setting the inner transport.
+			if setter, ok := wrapperTransport.Transport.(transportSetter); ok {
+				setter.SetTransport(transport)
+				httpClient.Transport = wrapperTransport
+			} else {
+				fmt.Fprintln(opts.Stderr, "Warning: could not set base transport on debug client, using basic logger")
+				httpClient.Transport = &httputil.LoggingTransport{Transport: transport}
+			}
+		} else {
+			fmt.Fprintln(opts.Stderr, "Warning: could not get JSON debug transport, using basic logger")
+			httpClient.Transport = &httputil.LoggingTransport{Transport: transport}
+		}
 	}
 
 	modelOpts := []cgpt.InferenceProviderOption{cgpt.WithHTTPClient(httpClient)}
@@ -334,33 +350,4 @@ func handleForkCommands(ctx context.Context, opts cgpt.RunOptions) error {
 	}
 
 	return nil
-}
-
-type loggingRoundTripper struct {
-	transport http.RoundTripper
-}
-
-func (l *loggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	dump, err := httputil.DumpRequestOut(req, true)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Fprintf(os.Stderr, "%s\n", string(dump))
-
-	resp, err := l.transport.RoundTrip(req)
-	if err != nil {
-		return nil, err
-	}
-
-	dump, err = httputil.DumpResponse(resp, true)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Fprintf(os.Stderr, "%s\n", string(dump))
-
-	// After dumping the response, the body is consumed. We need to replace it with a new reader
-	// so that the client can read it.
-	resp.Body = io.NopCloser(bytes.NewBuffer(dump))
-
-	return resp, nil
 }
