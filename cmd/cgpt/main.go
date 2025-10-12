@@ -170,6 +170,14 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: opts.Config.InsecureSkipVerify}
 	httpClient := &http.Client{Transport: transport}
 
+	// For Google AI, wrap the transport with ApiKeyTransport.
+	if opts.Config.Backend == "googleai" {
+		httpClient.Transport = &httputil.ApiKeyTransport{
+			Transport: httpClient.Transport,
+			APIKey:    opts.Config.GoogleAPIKey,
+		}
+	}
+
 	if opts.DebugMode {
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
 		// Get the top-level wrapper transport from the global JSONDebugClient.
@@ -180,15 +188,15 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 			}
 			// Use an interface to duck-type our way to setting the inner transport.
 			if setter, ok := wrapperTransport.Transport.(transportSetter); ok {
-				setter.SetTransport(transport)
+				setter.SetTransport(httpClient.Transport)
 				httpClient.Transport = wrapperTransport
 			} else {
 				fmt.Fprintln(opts.Stderr, "Warning: could not set base transport on debug client, using basic logger")
-				httpClient.Transport = &httputil.LoggingTransport{Transport: transport}
+				httpClient.Transport = &httputil.LoggingTransport{Transport: httpClient.Transport}
 			}
 		} else {
 			fmt.Fprintln(opts.Stderr, "Warning: could not get JSON debug transport, using basic logger")
-			httpClient.Transport = &httputil.LoggingTransport{Transport: transport}
+			httpClient.Transport = &httputil.LoggingTransport{Transport: httpClient.Transport}
 		}
 	}
 

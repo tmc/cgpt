@@ -69,13 +69,13 @@ func TestIntegration_EndToEndCompletion(t *testing.T) {
 			}
 
 			opts := RunOptions{
-				Config:         cfg,
-				InputStrings:   []string{tt.input},
-				StreamOutput:   false,
-				ShowSpinner:    false,
-				Stdout:         &stdout,
-				Stderr:         &stderr,
-				Stdin:          strings.NewReader(""),
+				Config:       cfg,
+				InputStrings: []string{tt.input},
+				StreamOutput: false,
+				ShowSpinner:  false,
+				Stdout:       &stdout,
+				Stderr:       &stderr,
+				Stdin:        strings.NewReader(""),
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -173,10 +173,10 @@ func TestIntegration_ConfigurationLoading(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	tests := []struct {
-		name           string
-		configFile     string
-		envVars        map[string]string
-		flags          []string
+		name            string
+		configFile      string
+		envVars         map[string]string
+		flags           []string
 		expectedBackend string
 		expectedModel   string
 	}{
@@ -192,7 +192,7 @@ maxTokens: 4000
 			expectedModel:   "claude-3-sonnet-20240229",
 		},
 		{
-			name:    "env vars override config",
+			name: "env vars override config",
 			envVars: map[string]string{
 				"CGPT_BACKEND": "openai",
 				"CGPT_MODEL":   "gpt-4-turbo-preview", // Use the full model name to avoid alias expansion
@@ -205,8 +205,8 @@ model: claude-3-sonnet-20240229
 			expectedModel:   "gpt-4-turbo-preview",
 		},
 		{
-			name:    "flags override all",
-			flags:   []string{"--backend", "dummy", "--model", "test-model"},
+			name:  "flags override all",
+			flags: []string{"--backend", "dummy", "--model", "test-model"},
 			envVars: map[string]string{
 				"CGPT_BACKEND": "openai",
 			},
@@ -297,8 +297,8 @@ func TestIntegration_ErrorHandling(t *testing.T) {
 			name: "nonexistent input file",
 			setupFunc: func(t *testing.T) RunOptions {
 				return RunOptions{
-					Config:      &Config{Backend: "dummy", Model: "dummy"},
-					InputFiles:  []string{"/nonexistent/file.txt"},
+					Config:       &Config{Backend: "dummy", Model: "dummy"},
+					InputFiles:   []string{"/nonexistent/file.txt"},
 					StreamOutput: false,
 					ShowSpinner:  false,
 				}

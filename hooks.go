@@ -30,25 +30,25 @@ type HookManager struct {
 
 // HookConfig contains configuration for the hook system
 type HookConfig struct {
-	Enabled          bool              `yaml:"enabled" json:"enabled"`
-	GlobalHooksDir   string            `yaml:"globalHooksDir" json:"globalHooksDir"`
-	ProjectHooksDir  string            `yaml:"projectHooksDir" json:"projectHooksDir"`
-	Timeout          time.Duration     `yaml:"timeout" json:"timeout"`
-	MaxConcurrency   int              `yaml:"maxConcurrency" json:"maxConcurrency"`
-	SecurityPolicy   SecurityPolicy    `yaml:"securityPolicy" json:"securityPolicy"`
-	AllowedCommands  []string         `yaml:"allowedCommands" json:"allowedCommands"`
-	BlockedCommands  []string         `yaml:"blockedCommands" json:"blockedCommands"`
-	Environment      map[string]string `yaml:"environment" json:"environment"`
-	EnableSandbox    bool             `yaml:"enableSandbox" json:"enableSandbox"`
+	Enabled         bool              `yaml:"enabled" json:"enabled"`
+	GlobalHooksDir  string            `yaml:"globalHooksDir" json:"globalHooksDir"`
+	ProjectHooksDir string            `yaml:"projectHooksDir" json:"projectHooksDir"`
+	Timeout         time.Duration     `yaml:"timeout" json:"timeout"`
+	MaxConcurrency  int               `yaml:"maxConcurrency" json:"maxConcurrency"`
+	SecurityPolicy  SecurityPolicy    `yaml:"securityPolicy" json:"securityPolicy"`
+	AllowedCommands []string          `yaml:"allowedCommands" json:"allowedCommands"`
+	BlockedCommands []string          `yaml:"blockedCommands" json:"blockedCommands"`
+	Environment     map[string]string `yaml:"environment" json:"environment"`
+	EnableSandbox   bool              `yaml:"enableSandbox" json:"enableSandbox"`
 }
 
 // SecurityPolicy defines security settings for hook execution
 type SecurityPolicy struct {
-	AllowNetworkAccess bool     `yaml:"allowNetworkAccess" json:"allowNetworkAccess"`
-	AllowFileSystem    bool     `yaml:"allowFileSystem" json:"allowFileSystem"`
-	RestrictedPaths    []string `yaml:"restrictedPaths" json:"restrictedPaths"`
+	AllowNetworkAccess bool          `yaml:"allowNetworkAccess" json:"allowNetworkAccess"`
+	AllowFileSystem    bool          `yaml:"allowFileSystem" json:"allowFileSystem"`
+	RestrictedPaths    []string      `yaml:"restrictedPaths" json:"restrictedPaths"`
 	MaxExecutionTime   time.Duration `yaml:"maxExecutionTime" json:"maxExecutionTime"`
-	MaxMemoryUsage     int64    `yaml:"maxMemoryUsage" json:"maxMemoryUsage"` // in bytes
+	MaxMemoryUsage     int64         `yaml:"maxMemoryUsage" json:"maxMemoryUsage"` // in bytes
 }
 
 // HookEvent represents different lifecycle events
@@ -56,19 +56,19 @@ type HookEvent string
 
 const (
 	// Completion lifecycle events
-	EventPreCompletion    HookEvent = "pre-completion"
-	EventPostCompletion   HookEvent = "post-completion"
-	EventCompletionError  HookEvent = "completion-error"
+	EventPreCompletion   HookEvent = "pre-completion"
+	EventPostCompletion  HookEvent = "post-completion"
+	EventCompletionError HookEvent = "completion-error"
 
 	// History lifecycle events
-	EventPreSave          HookEvent = "pre-save"
-	EventPostSave         HookEvent = "post-save"
-	EventPreLoad          HookEvent = "pre-load"
-	EventPostLoad         HookEvent = "post-load"
+	EventPreSave  HookEvent = "pre-save"
+	EventPostSave HookEvent = "post-save"
+	EventPreLoad  HookEvent = "pre-load"
+	EventPostLoad HookEvent = "post-load"
 
 	// Session lifecycle events
-	EventSessionStart     HookEvent = "session-start"
-	EventSessionEnd       HookEvent = "session-end"
+	EventSessionStart HookEvent = "session-start"
+	EventSessionEnd   HookEvent = "session-end"
 
 	// Interactive mode events
 	EventInteractiveStart HookEvent = "interactive-start"
@@ -76,10 +76,10 @@ const (
 	EventUserInput        HookEvent = "user-input"
 
 	// Configuration events
-	EventConfigLoaded     HookEvent = "config-loaded"
+	EventConfigLoaded HookEvent = "config-loaded"
 
 	// Custom events for extensibility
-	EventCustom           HookEvent = "custom"
+	EventCustom HookEvent = "custom"
 )
 
 // Hook represents a single hook
@@ -107,32 +107,32 @@ const (
 
 // Condition defines when a hook should execute
 type Condition struct {
-	Field    string `yaml:"field" json:"field"`     // e.g., "backend", "model", "continuous"
+	Field    string `yaml:"field" json:"field"`       // e.g., "backend", "model", "continuous"
 	Operator string `yaml:"operator" json:"operator"` // e.g., "equals", "contains", "matches"
 	Value    string `yaml:"value" json:"value"`
 }
 
 // HookContext contains the execution context passed to hooks
 type HookContext struct {
-	Event       HookEvent                `json:"event"`
-	Timestamp   time.Time                `json:"timestamp"`
-	Config      *Config                  `json:"config"`
-	Messages    []llms.MessageContent    `json:"messages,omitempty"`
-	Response    string                   `json:"response,omitempty"`
-	Error       string                   `json:"error,omitempty"`
-	Metadata    map[string]interface{}   `json:"metadata,omitempty"`
-	Environment map[string]string        `json:"environment,omitempty"`
-	WorkingDir  string                   `json:"workingDir"`
-	SessionID   string                   `json:"sessionId"`
+	Event       HookEvent              `json:"event"`
+	Timestamp   time.Time              `json:"timestamp"`
+	Config      *Config                `json:"config"`
+	Messages    []llms.MessageContent  `json:"messages,omitempty"`
+	Response    string                 `json:"response,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	Environment map[string]string      `json:"environment,omitempty"`
+	WorkingDir  string                 `json:"workingDir"`
+	SessionID   string                 `json:"sessionId"`
 }
 
 // HookResult represents the result of hook execution
 type HookResult struct {
-	Success      bool          `json:"success"`
-	Output       string        `json:"output"`
-	Error        string        `json:"error"`
-	ExitCode     int           `json:"exitCode"`
-	Duration     time.Duration `json:"duration"`
+	Success      bool                   `json:"success"`
+	Output       string                 `json:"output"`
+	Error        string                 `json:"error"`
+	ExitCode     int                    `json:"exitCode"`
+	Duration     time.Duration          `json:"duration"`
 	ModifiedData map[string]interface{} `json:"modifiedData,omitempty"`
 }
 
@@ -187,11 +187,11 @@ func defaultHookConfig() *HookConfig {
 		MaxConcurrency:  5,
 		EnableSandbox:   true,
 		SecurityPolicy: SecurityPolicy{
-			AllowNetworkAccess:  false,
-			AllowFileSystem:     true,
-			MaxExecutionTime:    30 * time.Second,
-			MaxMemoryUsage:      100 * 1024 * 1024, // 100MB
-			RestrictedPaths:     []string{"/etc", "/sys", "/proc"},
+			AllowNetworkAccess: false,
+			AllowFileSystem:    true,
+			MaxExecutionTime:   30 * time.Second,
+			MaxMemoryUsage:     100 * 1024 * 1024, // 100MB
+			RestrictedPaths:    []string{"/etc", "/sys", "/proc"},
 		},
 		Environment: map[string]string{
 			"CGPT_HOOK": "1",
@@ -306,11 +306,11 @@ func (hm *HookManager) loadExecutableHooks(dir string, hooksMap map[HookEvent][]
 			// Check if file is executable
 			if info.Mode()&0111 != 0 {
 				hook := Hook{
-					Name:    entry.Name(),
-					Event:   event,
-					Command: path,
+					Name:      entry.Name(),
+					Event:     event,
+					Command:   path,
 					OnFailure: FailureActionWarn,
-					Timeout: hm.config.Timeout,
+					Timeout:   hm.config.Timeout,
 				}
 				hooksMap[event] = append(hooksMap[event], hook)
 			}
@@ -623,10 +623,10 @@ func sortHooksByPriority(hooks []Hook) {
 // CreateHookContext creates a hook context from the current state
 func CreateHookContext(event HookEvent, config *Config) *HookContext {
 	ctx := &HookContext{
-		Event:     event,
-		Timestamp: time.Now(),
-		Config:    config,
-		Metadata:  make(map[string]interface{}),
+		Event:       event,
+		Timestamp:   time.Now(),
+		Config:      config,
+		Metadata:    make(map[string]interface{}),
 		Environment: make(map[string]string),
 	}
 

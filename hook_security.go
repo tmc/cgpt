@@ -21,11 +21,11 @@ type SecurityValidator struct {
 func NewSecurityValidator(policy *SecurityPolicy) *SecurityValidator {
 	if policy == nil {
 		policy = &SecurityPolicy{
-			AllowNetworkAccess:  false,
-			AllowFileSystem:     true,
-			MaxExecutionTime:    30 * time.Second,
-			MaxMemoryUsage:      100 * 1024 * 1024, // 100MB
-			RestrictedPaths:     []string{"/etc", "/sys", "/proc", "/dev"},
+			AllowNetworkAccess: false,
+			AllowFileSystem:    true,
+			MaxExecutionTime:   30 * time.Second,
+			MaxMemoryUsage:     100 * 1024 * 1024, // 100MB
+			RestrictedPaths:    []string{"/etc", "/sys", "/proc", "/dev"},
 		}
 	}
 	return &SecurityValidator{policy: policy}
@@ -461,15 +461,15 @@ func (hal *HookAuditLogger) LogHookExecution(hook Hook, result *HookResult, ctx 
 
 	// Create audit log entry
 	logEntry := map[string]interface{}{
-		"timestamp":  time.Now().Format(time.RFC3339),
-		"hook_name":  hook.Name,
-		"event":      string(hook.Event),
-		"command":    hook.Command,
-		"success":    result.Success,
-		"duration":   result.Duration.String(),
-		"exit_code":  result.ExitCode,
-		"error":      result.Error,
-		"user":       os.Getenv("USER"),
+		"timestamp":   time.Now().Format(time.RFC3339),
+		"hook_name":   hook.Name,
+		"event":       string(hook.Event),
+		"command":     hook.Command,
+		"success":     result.Success,
+		"duration":    result.Duration.String(),
+		"exit_code":   result.ExitCode,
+		"error":       result.Error,
+		"user":        os.Getenv("USER"),
 		"working_dir": ctx.WorkingDir,
 	}
 
@@ -497,9 +497,9 @@ type HookRateLimiter struct {
 // NewHookRateLimiter creates a new rate limiter
 func NewHookRateLimiter(maxPerMinute, maxPerHour int) *HookRateLimiter {
 	hrl := &HookRateLimiter{
-		executions:   make(map[string][]time.Time),
-		maxPerMinute: maxPerMinute,
-		maxPerHour:   maxPerHour,
+		executions:    make(map[string][]time.Time),
+		maxPerMinute:  maxPerMinute,
+		maxPerHour:    maxPerHour,
 		cleanupTicker: time.NewTicker(5 * time.Minute),
 	}
 

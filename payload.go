@@ -168,30 +168,30 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			callOpts = append(callOpts, anthropic.WithInterleavedThinking())
 		}
 		// Add streaming reasoning function if we're showing reasoning (multi-provider support)
-	if s.cfg.ShowReasoning && (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" || s.cfg.ThinkingBudget > 0) {
-		callOpts = append(callOpts, llms.WithStreamingReasoningFunc(func(ctx context.Context, reasoningChunk, chunk []byte) error {
-			if len(reasoningChunk) > 0 {
-				// Display thinking content as it arrives
-				select {
-				case ch <- string(reasoningChunk):
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
+		if s.cfg.ShowReasoning && (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" || s.cfg.ThinkingBudget > 0) {
+			callOpts = append(callOpts, llms.WithStreamingReasoningFunc(func(ctx context.Context, reasoningChunk, chunk []byte) error {
+				if len(reasoningChunk) > 0 {
+					// Display thinking content as it arrives
+					select {
+					case ch <- string(reasoningChunk):
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
 				}
-			}
-			// If there's regular content alongside, stream it too
-			if len(chunk) > 0 {
-				select {
-				case ch <- string(chunk):
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
+				// If there's regular content alongside, stream it too
+				if len(chunk) > 0 {
+					select {
+					case ch <- string(chunk):
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
 				}
-			}
-			return nil
-		}))
-	}
-	callOpts = append(callOpts, llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+				return nil
+			}))
+		}
+		callOpts = append(callOpts, llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			if firstChunk {
 				prefillCleanup()
 				if spinnerStop != nil {
@@ -240,7 +240,6 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 				log.Printf("failed to generate content: %v", err)
 			}
 		}
-
 
 		// Note: With StreamingReasoningFunc support, thinking content now streams
 		// as it arrives (before the main response). The code below handles any

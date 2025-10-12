@@ -26,11 +26,11 @@ type GitMetadata struct {
 
 // ForkOptions specifies how to create a conversation fork
 type ForkOptions struct {
-	SourceFile    string // Source conversation file
-	TargetFile    string // Target conversation file
-	ForkPoint     int    // Message index to fork from (-1 for current)
-	Description   string // Description of the fork
-	BranchName    string // Git branch name (auto-generated if empty)
+	SourceFile  string // Source conversation file
+	TargetFile  string // Target conversation file
+	ForkPoint   int    // Message index to fork from (-1 for current)
+	Description string // Description of the fork
+	BranchName  string // Git branch name (auto-generated if empty)
 }
 
 // NewGitHistoryManager creates a new git history manager
@@ -316,8 +316,8 @@ func (g *GitHistoryManager) parseLogLine(line string) *ConversationNode {
 	}
 
 	return &ConversationNode{
-		Hash:    parts[0],
-		Message: strings.Join(parts[1:], " "),
+		Hash:     parts[0],
+		Message:  strings.Join(parts[1:], " "),
 		Children: make([]*ConversationNode, 0),
 	}
 }

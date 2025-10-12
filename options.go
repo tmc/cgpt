@@ -37,12 +37,12 @@ type RunOptions struct {
 	NCompletions        int    `json:"nCompletions,omitempty" yaml:"nCompletions,omitempty"`
 
 	// Fork options
-	ForkFrom        string `json:"forkFrom,omitempty" yaml:"forkFrom,omitempty"`             // Fork from this conversation file
-	ForkPoint       int    `json:"forkPoint,omitempty" yaml:"forkPoint,omitempty"`          // Message index to fork from (-1 for current)
+	ForkFrom        string `json:"forkFrom,omitempty" yaml:"forkFrom,omitempty"`               // Fork from this conversation file
+	ForkPoint       int    `json:"forkPoint,omitempty" yaml:"forkPoint,omitempty"`             // Message index to fork from (-1 for current)
 	ForkDescription string `json:"forkDescription,omitempty" yaml:"forkDescription,omitempty"` // Description of the fork
-	ForkBranch      string `json:"forkBranch,omitempty" yaml:"forkBranch,omitempty"`        // Git branch name for fork
-	ListForks       bool   `json:"listForks,omitempty" yaml:"listForks,omitempty"`          // List all forks
-	ShowTree        bool   `json:"showTree,omitempty" yaml:"showTree,omitempty"`            // Show conversation tree
+	ForkBranch      string `json:"forkBranch,omitempty" yaml:"forkBranch,omitempty"`           // Git branch name for fork
+	ListForks       bool   `json:"listForks,omitempty" yaml:"listForks,omitempty"`             // List all forks
+	ShowTree        bool   `json:"showTree,omitempty" yaml:"showTree,omitempty"`               // Show conversation tree
 
 	// I/O
 	Stdout io.Writer `json:"-" yaml:"-"`

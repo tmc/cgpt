@@ -137,7 +137,7 @@ func (c Config) calculateDelay(attempt int, retryAfter time.Duration) time.Durat
 
 	// Apply jitter to prevent thundering herd
 	if c.Jitter {
-		jitterAmount := time.Duration(rand.Int63n(int64(delay/2))) // Up to 50% jitter
+		jitterAmount := time.Duration(rand.Int63n(int64(delay / 2))) // Up to 50% jitter
 		delay = delay/2 + jitterAmount
 	}
 

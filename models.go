@@ -105,14 +105,33 @@ var modelConstructors = map[string]modelConstructor{
 		return ollama.New(options...)
 	},
 	"googleai": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
-		options := []googleai.Option{googleai.WithDefaultModel(cfg.Model)}
+		opts := []googleai.Option{googleai.WithDefaultModel(cfg.Model)}
 		if cfg.GoogleAPIKey != "" {
-			options = append(options, googleai.WithAPIKey(cfg.GoogleAPIKey))
+			opts = append(opts, googleai.WithAPIKey(cfg.GoogleAPIKey))
 		}
 		if mo.httpClient != nil {
-			options = append(options, googleai.WithHTTPClient(mo.httpClient))
+			opts = append(opts, googleai.WithHTTPClient(mo.httpClient))
 		}
-		return googleai.New(context.Background(), options...)
+
+		// Create a temporary options struct to call EnsureAuthPresent
+		tempOpts := googleai.DefaultOptions()
+		for _, opt := range opts {
+			opt(&tempOpts)
+		}
+		tempOpts.EnsureAuthPresent()
+
+		// Re-create the options slice with the potentially added API key
+		finalOpts := []googleai.Option{googleai.WithDefaultModel(cfg.Model)}
+		if mo.httpClient != nil {
+			finalOpts = append(finalOpts, googleai.WithHTTPClient(mo.httpClient))
+		}
+		for _, clientOpt := range tempOpts.ClientOptions {
+			finalOpts = append(finalOpts, func(o *googleai.Options) {
+				o.ClientOptions = append(o.ClientOptions, clientOpt)
+			})
+		}
+
+		return googleai.New(context.Background(), finalOpts...)
 	},
 	"dummy": func(cfg *Config, mo *inferenceProviderOptions) (llms.Model, error) {
 		return NewDummyBackend()

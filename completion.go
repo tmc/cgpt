@@ -40,7 +40,7 @@ type CompletionService struct {
 	readlineHistoryFile string
 	disableHistory      bool
 	autoNameHistory     bool
-	autoHistory         bool // Whether this is an auto-generated session
+	autoHistory         bool               // Whether this is an auto-generated session
 	gitHistoryManager   *GitHistoryManager // Git-based history management
 
 	performCompletionConfig PerformCompletionConfig
@@ -415,7 +415,7 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 		}
 		s.historyOutFile = path
 		s.historyFile = file
-		s.autoHistory = true // Mark this as an auto-generated session
+		s.autoHistory = true     // Mark this as an auto-generated session
 		s.autoNameHistory = true // Enable automatic naming for auto sessions
 
 		// Initialize metadata for new session

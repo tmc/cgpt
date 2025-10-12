@@ -22,7 +22,7 @@ var backendPriority = map[string]int{
 	"openai":     3,
 	"googleai":   2,
 	"openrouter": 1,
-	"ollama":     0, // Lowest priority (doesn't require API key)
+	"ollama":     0,  // Lowest priority (doesn't require API key)
 	"dummy":      -1, // Only for testing
 }
 

@@ -10,11 +10,11 @@ import (
 
 func TestSecurityValidator_ValidateCommand(t *testing.T) {
 	policy := &SecurityPolicy{
-		AllowNetworkAccess:  false,
-		AllowFileSystem:     true,
-		MaxExecutionTime:    30 * time.Second,
-		MaxMemoryUsage:      100 * 1024 * 1024,
-		RestrictedPaths:     []string{"/etc", "/sys", "/proc"},
+		AllowNetworkAccess: false,
+		AllowFileSystem:    true,
+		MaxExecutionTime:   30 * time.Second,
+		MaxMemoryUsage:     100 * 1024 * 1024,
+		RestrictedPaths:    []string{"/etc", "/sys", "/proc"},
 	}
 
 	validator := NewSecurityValidator(policy)
@@ -164,11 +164,11 @@ func TestSandboxedExecutor_ExecuteHookSandboxed(t *testing.T) {
 	}
 
 	policy := &SecurityPolicy{
-		AllowNetworkAccess:  false,
-		AllowFileSystem:     true,
-		MaxExecutionTime:    5 * time.Second,
-		MaxMemoryUsage:      50 * 1024 * 1024, // 50MB
-		RestrictedPaths:     []string{"/etc", "/sys", "/proc"},
+		AllowNetworkAccess: false,
+		AllowFileSystem:    true,
+		MaxExecutionTime:   5 * time.Second,
+		MaxMemoryUsage:     50 * 1024 * 1024, // 50MB
+		RestrictedPaths:    []string{"/etc", "/sys", "/proc"},
 	}
 
 	executor := NewSandboxedExecutor(policy)

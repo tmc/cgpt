@@ -287,10 +287,10 @@ exit 0
 
 	// Create hook configuration
 	config := &HookConfig{
-		Enabled:         true,
-		GlobalHooksDir:  hooksDir,
-		Timeout:         5 * time.Second,
-		EnableSandbox:   false, // Disable sandbox for test
+		Enabled:        true,
+		GlobalHooksDir: hooksDir,
+		Timeout:        5 * time.Second,
+		EnableSandbox:  false, // Disable sandbox for test
 	}
 
 	hm := NewHookManager(config, nil)
@@ -387,9 +387,9 @@ exit 1
 	}
 
 	tests := []struct {
-		name          string
-		onFailure     FailureAction
-		expectError   bool
+		name        string
+		onFailure   FailureAction
+		expectError bool
 	}{
 		{
 			name:        "ignore failure",

@@ -11,18 +11,18 @@ import (
 
 // ProgressIndicator provides visual feedback for long-running operations
 type ProgressIndicator struct {
-	writer        io.Writer
-	message       string
-	currentStep   string
-	totalSteps    int
+	writer         io.Writer
+	message        string
+	currentStep    string
+	totalSteps     int
 	currentStepNum int32
-	isRunning     int32
-	startTime     time.Time
-	mu            sync.Mutex
-	spinnerFrames []string
-	spinnerIndex  int
-	updateChan    chan progressUpdate
-	stopChan      chan struct{}
+	isRunning      int32
+	startTime      time.Time
+	mu             sync.Mutex
+	spinnerFrames  []string
+	spinnerIndex   int
+	updateChan     chan progressUpdate
+	stopChan       chan struct{}
 }
 
 type progressUpdate struct {
@@ -146,15 +146,15 @@ func (p *ProgressIndicator) draw() {
 
 // SimpleProgressBar provides a simple progress bar for known-size operations
 type SimpleProgressBar struct {
-	writer      io.Writer
-	title       string
-	total       int64
-	current     int64
-	width       int
-	startTime   time.Time
-	lastDraw    time.Time
-	completed   bool
-	mu          sync.Mutex
+	writer    io.Writer
+	title     string
+	total     int64
+	current   int64
+	width     int
+	startTime time.Time
+	lastDraw  time.Time
+	completed bool
+	mu        sync.Mutex
 }
 
 // NewSimpleProgressBar creates a simple progress bar
@@ -260,8 +260,8 @@ type ActivityIndicator struct {
 // NewActivityIndicator creates a new activity indicator
 func NewActivityIndicator(w io.Writer, message string) *ActivityIndicator {
 	return &ActivityIndicator{
-		writer:  w,
-		message: message,
+		writer:   w,
+		message:  message,
 		stopChan: make(chan struct{}),
 		frames: []string{
 			"[    ]", "[=   ]", "[==  ]", "[=== ]", "[====]",

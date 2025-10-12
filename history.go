@@ -14,13 +14,13 @@ import (
 )
 
 type usageInfo struct {
-	TotalInputTokens   int     `yaml:"total_input_tokens,omitempty"`
-	TotalOutputTokens  int     `yaml:"total_output_tokens,omitempty"`
-	TotalCachedTokens  int     `yaml:"total_cached_tokens,omitempty"`
-	TotalThinkingTokens int    `yaml:"total_thinking_tokens,omitempty"`
-	TotalCost          float64 `yaml:"total_cost,omitempty"`
-	TotalSaved         float64 `yaml:"total_saved,omitempty"`
-	LastUpdated        string  `yaml:"last_updated,omitempty"`
+	TotalInputTokens    int     `yaml:"total_input_tokens,omitempty"`
+	TotalOutputTokens   int     `yaml:"total_output_tokens,omitempty"`
+	TotalCachedTokens   int     `yaml:"total_cached_tokens,omitempty"`
+	TotalThinkingTokens int     `yaml:"total_thinking_tokens,omitempty"`
+	TotalCost           float64 `yaml:"total_cost,omitempty"`
+	TotalSaved          float64 `yaml:"total_saved,omitempty"`
+	LastUpdated         string  `yaml:"last_updated,omitempty"`
 }
 
 type historyMetadata struct {

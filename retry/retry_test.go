@@ -173,16 +173,16 @@ func TestExponentialBackoffDelay(t *testing.T) {
 
 	// Test delay calculation for different attempt numbers
 	testCases := []struct {
-		attempt      int
-		expectedMin  time.Duration
-		expectedMax  time.Duration
+		attempt     int
+		expectedMin time.Duration
+		expectedMax time.Duration
 	}{
-		{0, 100 * time.Millisecond, 100 * time.Millisecond}, // 100ms * 2^0 = 100ms
-		{1, 200 * time.Millisecond, 200 * time.Millisecond}, // 100ms * 2^1 = 200ms
-		{2, 400 * time.Millisecond, 400 * time.Millisecond}, // 100ms * 2^2 = 400ms
-		{3, 800 * time.Millisecond, 800 * time.Millisecond}, // 100ms * 2^3 = 800ms
+		{0, 100 * time.Millisecond, 100 * time.Millisecond},   // 100ms * 2^0 = 100ms
+		{1, 200 * time.Millisecond, 200 * time.Millisecond},   // 100ms * 2^1 = 200ms
+		{2, 400 * time.Millisecond, 400 * time.Millisecond},   // 100ms * 2^2 = 400ms
+		{3, 800 * time.Millisecond, 800 * time.Millisecond},   // 100ms * 2^3 = 800ms
 		{4, 1600 * time.Millisecond, 1600 * time.Millisecond}, // 100ms * 2^4 = 1600ms
-		{5, 2 * time.Second, 2 * time.Second}, // Capped at MaxDelay
+		{5, 2 * time.Second, 2 * time.Second},                 // Capped at MaxDelay
 	}
 
 	for _, tc := range testCases {
@@ -291,9 +291,9 @@ func TestRetryAfterDelayCalculation(t *testing.T) {
 
 func TestRetryAfterExtraction(t *testing.T) {
 	testCases := []struct {
-		errorMsg      string
-		expected     time.Duration
-		description  string
+		errorMsg    string
+		expected    time.Duration
+		description string
 	}{
 		{"429 rate limit exceeded, retry-after: 5", 5 * time.Second, "retry-after header"},
 		{"Rate limited. Retry after 10 seconds", 10 * time.Second, "retry after text"},
@@ -340,9 +340,9 @@ func TestMaxDelayLimit(t *testing.T) {
 
 func TestRetryableErrorTypes(t *testing.T) {
 	testCases := []struct {
-		errorString     string
-		expectedType    ErrorType
-		description     string
+		errorString  string
+		expectedType ErrorType
+		description  string
 	}{
 		// Network errors - should be retried
 		{"connection refused", ErrorTypeRetryable, "connection refused"},
