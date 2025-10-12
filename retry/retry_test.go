@@ -121,7 +121,7 @@ func TestErrorClassification(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		err := fmt.Errorf(tc.error)
+		err := fmt.Errorf("%s", tc.error)
 		errorType, _ := classifyError(err)
 		if errorType != tc.expectedType {
 			t.Errorf("Error '%s': expected %v, got %v", tc.error, tc.expectedType, errorType)
@@ -382,7 +382,7 @@ func TestRetryableErrorTypes(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := fmt.Errorf(tc.errorString)
+			err := fmt.Errorf("%s", tc.errorString)
 			actualType, _ := classifyError(err)
 			if actualType != tc.expectedType {
 				t.Errorf("Error '%s': expected %v, got %v",
@@ -427,7 +427,7 @@ func TestIsRetryableError(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		err := fmt.Errorf(tc.errorString)
+		err := fmt.Errorf("%s", tc.errorString)
 		actual := IsRetryableError(err)
 		if actual != tc.expected {
 			t.Errorf("Error '%s': expected retryable=%v, got %v",

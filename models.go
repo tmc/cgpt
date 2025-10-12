@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/tmc/langchaingo/llms"
@@ -79,6 +80,9 @@ var modelConstructors = map[string]modelConstructor{
 		options := []anthropic.Option{anthropic.WithModel(cfg.Model)}
 		if cfg.AnthropicAPIKey != "" {
 			options = append(options, anthropic.WithToken(cfg.AnthropicAPIKey))
+		}
+		if baseURL := os.Getenv("ANTHROPIC_API_BASE"); baseURL != "" {
+			options = append(options, anthropic.WithBaseURL(baseURL))
 		}
 		if strings.Contains(cfg.Model, "sonnet") {
 			options = append(options, anthropic.WithAnthropicBetaHeader(anthropic.MaxTokensAnthropicSonnet35))
