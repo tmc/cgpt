@@ -256,6 +256,7 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 
 	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples (comma separated list of sections, or 'all')")
 	examples := fs.Bool("examples", false, "Show quick usage examples and exit")
+	version := fs.Bool("version", false, "Display version information")
 	help := fs.BoolP("help", "h", false, "Display help information")
 
 	fs.MarkHidden("stream-output")
@@ -278,6 +279,11 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	err := fs.Parse(args[1:])
 	if err != nil {
 		return opts, fs, err
+	}
+
+	if *version {
+		printVersion()
+		return opts, fs, pflag.ErrHelp
 	}
 
 	if *help {

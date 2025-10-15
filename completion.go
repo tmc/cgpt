@@ -318,6 +318,30 @@ func (s *CompletionService) handleInput(ctx context.Context, runCfg RunOptions) 
 }
 
 func (s *CompletionService) executeCompletion(ctx context.Context, runCfg RunOptions) error {
+	// Validate that we have at least one user message before making API call
+	// (unless we're in continuous mode where input will be gathered interactively)
+	if !runCfg.Continuous {
+		hasUserMessage := false
+		for _, msg := range s.payload.Messages {
+			if msg.Role == llms.ChatMessageTypeHuman {
+				// Check if message has non-empty content
+				for _, part := range msg.Parts {
+					if text, ok := part.(llms.TextContent); ok && strings.TrimSpace(text.Text) != "" {
+						hasUserMessage = true
+						break
+					}
+				}
+				if hasUserMessage {
+					break
+				}
+			}
+		}
+
+		if !hasUserMessage {
+			return fmt.Errorf("no input provided\n\nUsage:\n  cgpt [input...]              # Direct input\n  cgpt -f file.txt             # Read from file\n  echo \"question\" | cgpt       # Pipe input\n  cgpt -c                      # Interactive mode\n  cgpt --help                  # Show full help")
+		}
+	}
+
 	if runCfg.Continuous {
 		if runCfg.StreamOutput {
 			return s.runContinuousCompletionStreaming(ctx, runCfg)

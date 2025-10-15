@@ -81,19 +81,29 @@ var modelPatterns = map[string]string{
 }
 
 // Common model aliases/shortcuts
+// Maps friendly short names to full model identifiers for better UX
 var modelAliases = map[string]string{
-	// Anthropic shortcuts
-	"opus-4.1": "claude-opus-4-1-20250805",
-	"opus-4":   "claude-opus-4-1-20250805",
-	"opus":     "claude-opus-4-1-20250805",
-	"sonnet-4": "claude-4-sonnet-20250522",
-	"sonnet":   "claude-3-5-sonnet-20241022",
-	"haiku":    "claude-3-haiku-20240307",
+	// Claude/Anthropic shortcuts - using latest models by default
+	"sonnet":     "claude-sonnet-4-20250514",
+	"sonnet-4":   "claude-sonnet-4-20250514",
+	"sonnet-3.5": "claude-sonnet-3-5-20241022",
+	"sonnet-3":   "claude-3-sonnet-20240229",
+	"haiku":      "claude-haiku-3-5-20241022",
+	"haiku-3.5":  "claude-haiku-3-5-20241022",
+	"haiku-3":    "claude-haiku-3-20240307",
+	"opus":       "claude-opus-4-20250514",
+	"opus-4":     "claude-opus-4-20250514",
+	"opus-4.1":   "claude-opus-4-1-20250805",
+	"opus-3":     "claude-3-opus-20240229",
 
 	// OpenAI shortcuts
 	"gpt-5":       "gpt-5",
+	"gpt4":        "gpt-4-turbo-preview",
 	"gpt-4":       "gpt-4-turbo-preview",
 	"gpt-4-turbo": "gpt-4-turbo-preview",
+	"gpt4o":       "gpt-4o",
+	"gpt-4o":      "gpt-4o",
+	"gpt3.5":      "gpt-3.5-turbo",
 	"gpt-3.5":     "gpt-3.5-turbo",
 	"o1":          "o1-preview",
 	"o1-mini":     "o1-mini",
@@ -101,9 +111,11 @@ var modelAliases = map[string]string{
 	"o3-mini":     "o3-mini",
 
 	// Google shortcuts
-	"gemini":     "gemini-pro",
-	"gemini-pro": "gemini-pro",
-	"gemini-1.5": "gemini-1.5-pro",
+	"gemini":       "gemini-2.0-flash-001",
+	"gemini-2":     "gemini-2.0-flash-001",
+	"gemini-flash": "gemini-2.0-flash-001",
+	"gemini-pro":   "gemini-1.5-pro",
+	"gemini-1.5":   "gemini-1.5-flash",
 
 	// Ollama shortcuts
 	"llama":     "llama3.2",

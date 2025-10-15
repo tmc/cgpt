@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -11,6 +12,13 @@ import (
 
 //go:embed docs/usage_examples.md
 var usageExamplesFile string
+
+// Version information (can be overridden at build time with -ldflags)
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
 
 func printBasicUsage() {
 	fmt.Println()
@@ -55,6 +63,20 @@ func extractSection(sectionName string) string {
 
 	return strings.TrimSpace(strings.Join(sectionContent, "\n"))
 }
+
+// printVersion displays version information
+func printVersion() {
+	fmt.Printf("cgpt version %s\n", version)
+	if commit != "unknown" {
+		fmt.Printf("  commit: %s\n", commit)
+	}
+	if buildDate != "unknown" {
+		fmt.Printf("  built:  %s\n", buildDate)
+	}
+	fmt.Printf("  go:     %s\n", runtime.Version())
+	fmt.Printf("  os/arch: %s/%s\n", runtime.GOOS, runtime.GOARCH)
+}
+
 func listSections() {
 	fmt.Println("Available sections:")
 	lines := strings.Split(usageExamplesFile, "\n")

@@ -13,6 +13,7 @@ import (
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
+
 // InferenceProviderOption is a function that modifies the model options
 type InferenceProviderOption func(*inferenceProviderOptions)
 
