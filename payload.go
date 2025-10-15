@@ -245,52 +245,56 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		}
 
 		// Note: With StreamingReasoningFunc support, thinking content now streams
-		// as it arrives (before the main response). The code below handles any
-		// thinking content that wasn't streamed (e.g., from models that don't
-		// support streaming thinking).
+		// as it arrives (before the main response). When streaming reasoning is enabled,
+		// we skip the fallback display below since thinking was already shown in real-time.
+		usingStreamingReasoning := s.cfg.ShowReasoning && (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" || s.cfg.ThinkingBudget > 0)
 		if resp != nil && len(resp.Choices) > 0 {
 			// Check all choices for thinking content and costs
 			var hasDisplayedCosts bool
 			for _, choice := range resp.Choices {
-				// Display reasoning content if available
-				if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowUsage) {
-					// Check if this is summarized thinking (Claude 4) or full thinking
-					label := "Reasoning"
-					if choice.GenerationInfo != nil {
-						if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
-							label = "Reasoning (summarized)"
+				// Only display thinking content if we're NOT using streaming reasoning
+				// (when streaming reasoning is enabled, it was already displayed in real-time)
+				if !usingStreamingReasoning {
+					// Display reasoning content if available
+					if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowUsage) {
+						// Check if this is summarized thinking (Claude 4) or full thinking
+						label := "Reasoning"
+						if choice.GenerationInfo != nil {
+							if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
+								label = "Reasoning (summarized)"
+							}
+						}
+						const grey = "\033[90m"
+						const reset = "\033[0m"
+						select {
+						case ch <- fmt.Sprintf("\n\n%s--- %s ---\n%s\n---%s\n", grey, label, choice.ReasoningContent, reset):
+						case <-ctx.Done():
 						}
 					}
-					const grey = "\033[90m"
-					const reset = "\033[0m"
-					select {
-					case ch <- fmt.Sprintf("\n\n%s--- %s (streaming limitation: shown after response) ---\n%s\n---%s\n", grey, label, choice.ReasoningContent, reset):
-					case <-ctx.Done():
-					}
-				}
 
-				// Check for thinking content in GenerationInfo (Anthropic style)
-				if s.cfg.ShowReasoning && choice.GenerationInfo != nil {
-					if thinkingContent, ok := choice.GenerationInfo["ThinkingContent"].(string); ok && thinkingContent != "" {
-						label := "Thinking"
-						// Check for signature indicating this is summarized content
-						if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
-							label = "Thinking (summarized)"
+					// Check for thinking content in GenerationInfo (Anthropic style)
+					if s.cfg.ShowReasoning && choice.GenerationInfo != nil {
+						if thinkingContent, ok := choice.GenerationInfo["ThinkingContent"].(string); ok && thinkingContent != "" {
+							label := "Thinking"
+							// Check for signature indicating this is summarized content
+							if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
+								label = "Thinking (summarized)"
+							}
+							const grey = "\033[90m"
+							const reset = "\033[0m"
+							select {
+							case ch <- fmt.Sprintf("\n\n%s--- %s ---\n%s\n---%s\n", grey, label, thinkingContent, reset):
+							case <-ctx.Done():
+							}
 						}
-						const grey = "\033[90m"
-						const reset = "\033[0m"
-						select {
-						case ch <- fmt.Sprintf("\n\n%s--- %s (streaming limitation: shown after response) ---\n%s\n---%s\n", grey, label, thinkingContent, reset):
-						case <-ctx.Done():
-						}
-					}
-					// Handle redacted thinking if present
-					if redactedThinking, ok := choice.GenerationInfo["redacted_thinking"].(string); ok && redactedThinking != "" {
-						const grey = "\033[90m"
-						const reset = "\033[0m"
-						select {
-						case ch <- fmt.Sprintf("\n\n%s--- Thinking (redacted for safety) ---\n%s\n---%s\n", grey, redactedThinking, reset):
-						case <-ctx.Done():
+						// Handle redacted thinking if present
+						if redactedThinking, ok := choice.GenerationInfo["redacted_thinking"].(string); ok && redactedThinking != "" {
+							const grey = "\033[90m"
+							const reset = "\033[0m"
+							select {
+							case ch <- fmt.Sprintf("\n\n%s--- Thinking (redacted for safety) ---\n%s\n---%s\n", grey, redactedThinking, reset):
+							case <-ctx.Done():
+							}
 						}
 					}
 				}
