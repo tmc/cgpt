@@ -171,9 +171,12 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		if s.cfg.ShowReasoning && (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" || s.cfg.ThinkingBudget > 0) {
 			callOpts = append(callOpts, llms.WithStreamingReasoningFunc(func(ctx context.Context, reasoningChunk, chunk []byte) error {
 				if len(reasoningChunk) > 0 {
-					// Display thinking content as it arrives
+					// Display thinking content as it arrives in grey (like ollama)
+					const grey = "\033[90m"
+					const reset = "\033[0m"
+					greyReasoning := grey + string(reasoningChunk) + reset
 					select {
-					case ch <- string(reasoningChunk):
+					case ch <- greyReasoning:
 						return nil
 					case <-ctx.Done():
 						return ctx.Err()
@@ -258,8 +261,10 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 							label = "Reasoning (summarized)"
 						}
 					}
+					const grey = "\033[90m"
+					const reset = "\033[0m"
 					select {
-					case ch <- fmt.Sprintf("\n\n--- %s (streaming limitation: shown after response) ---\n%s\n---\n", label, choice.ReasoningContent):
+					case ch <- fmt.Sprintf("\n\n%s--- %s (streaming limitation: shown after response) ---\n%s\n---%s\n", grey, label, choice.ReasoningContent, reset):
 					case <-ctx.Done():
 					}
 				}
@@ -272,15 +277,19 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 						if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
 							label = "Thinking (summarized)"
 						}
+						const grey = "\033[90m"
+						const reset = "\033[0m"
 						select {
-						case ch <- fmt.Sprintf("\n\n--- %s (streaming limitation: shown after response) ---\n%s\n---\n", label, thinkingContent):
+						case ch <- fmt.Sprintf("\n\n%s--- %s (streaming limitation: shown after response) ---\n%s\n---%s\n", grey, label, thinkingContent, reset):
 						case <-ctx.Done():
 						}
 					}
 					// Handle redacted thinking if present
 					if redactedThinking, ok := choice.GenerationInfo["redacted_thinking"].(string); ok && redactedThinking != "" {
+						const grey = "\033[90m"
+						const reset = "\033[0m"
 						select {
-						case ch <- fmt.Sprintf("\n\n--- Thinking (redacted for safety) ---\n%s\n---\n", redactedThinking):
+						case ch <- fmt.Sprintf("\n\n%s--- Thinking (redacted for safety) ---\n%s\n---%s\n", grey, redactedThinking, reset):
 						case <-ctx.Done():
 						}
 					}
@@ -390,6 +399,8 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	}
 
 	// First pass: Display thinking/reasoning before the actual response
+	const grey = "\033[90m"
+	const reset = "\033[0m"
 	for _, choice := range response.Choices {
 		// Display reasoning content if available
 		if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowUsage) {
@@ -400,7 +411,7 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 					label = "Reasoning (summarized)"
 				}
 			}
-			fmt.Fprintf(s.Stderr, "\n--- %s ---\n%s\n---\n", label, choice.ReasoningContent)
+			fmt.Fprintf(s.Stderr, "\n%s--- %s ---\n%s\n---%s\n", grey, label, choice.ReasoningContent, reset)
 		}
 
 		// Check for thinking content in GenerationInfo (Anthropic style)
@@ -411,11 +422,11 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 				if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
 					label = "Thinking (summarized)"
 				}
-				fmt.Fprintf(s.Stderr, "\n--- %s ---\n%s\n---\n", label, thinkingContent)
+				fmt.Fprintf(s.Stderr, "\n%s--- %s ---\n%s\n---%s\n", grey, label, thinkingContent, reset)
 			}
 			// Handle redacted thinking if present
 			if redactedThinking, ok := choice.GenerationInfo["redacted_thinking"].(string); ok && redactedThinking != "" {
-				fmt.Fprintf(s.Stderr, "\n--- Thinking (redacted for safety) ---\n%s\n---\n", redactedThinking)
+				fmt.Fprintf(s.Stderr, "\n%s--- Thinking (redacted for safety) ---\n%s\n---%s\n", grey, redactedThinking, reset)
 			}
 		}
 	}
