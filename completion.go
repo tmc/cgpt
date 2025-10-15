@@ -18,6 +18,7 @@ import (
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/term"
 )
 
 type CompletionService struct {
@@ -338,6 +339,11 @@ func (s *CompletionService) executeCompletion(ctx context.Context, runCfg RunOpt
 		}
 
 		if !hasUserMessage {
+			// Check if stdin is a terminal to provide better suggestions
+			isTerminal := term.IsTerminal(int(os.Stdin.Fd()))
+			if isTerminal {
+				return fmt.Errorf("no input provided\n\nDid you mean to run in interactive mode?\n  cgpt -c                      # Start interactive chat\n\nOther options:\n  cgpt \"your question here\"    # Direct input\n  cgpt -f file.txt             # Read from file\n  echo \"question\" | cgpt       # Pipe input\n  cgpt --help                  # Show full help\n  cgpt --examples              # Quick examples")
+			}
 			return fmt.Errorf("no input provided\n\nUsage:\n  cgpt [input...]              # Direct input\n  cgpt -f file.txt             # Read from file\n  echo \"question\" | cgpt       # Pipe input\n  cgpt -c                      # Interactive mode\n  cgpt --help                  # Show full help")
 		}
 	}
@@ -633,7 +639,12 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 
 // Enhanced function to run continuous streaming completion mode.
 func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
-	fmt.Fprintf(s.Stderr, "\033[38;5;240mcgpt: Running in continuous mode. Press ctrl+c to exit.\033[0m\n")
+	// Print welcome message with model info
+	fmt.Fprintf(s.Stderr, "\033[1mcgpt\033[0m - Interactive Mode\n")
+	fmt.Fprintf(s.Stderr, "  Model: %s (%s)\n", s.cfg.Model, s.cfg.Backend)
+	fmt.Fprintf(s.Stderr, "  Commands: /help for commands, Ctrl+C to exit\n")
+	fmt.Fprintf(s.Stderr, "  Submit: Press Enter twice (blank line) to send message\n")
+	fmt.Fprintf(s.Stderr, "\n")
 
 	// Setup context with cancellation
 	ctxWithCancel, cancel := context.WithCancel(ctx)
@@ -704,7 +715,12 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 
 // Non-streaming version of continuous completion.
 func (s *CompletionService) runContinuousCompletion(ctx context.Context, runCfg RunOptions) error {
-	fmt.Fprintln(s.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
+	// Print welcome message with model info
+	fmt.Fprintf(s.Stderr, "\033[1mcgpt\033[0m - Interactive Mode\n")
+	fmt.Fprintf(s.Stderr, "  Model: %s (%s)\n", s.cfg.Model, s.cfg.Backend)
+	fmt.Fprintf(s.Stderr, "  Commands: /help for commands, Ctrl+C to exit\n")
+	fmt.Fprintf(s.Stderr, "  Submit: Press Enter twice (blank line) to send message\n")
+	fmt.Fprintf(s.Stderr, "\n")
 	processFn := func(input string) error {
 		input = strings.TrimSpace(input)
 		if input == "" {

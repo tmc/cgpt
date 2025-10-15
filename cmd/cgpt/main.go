@@ -256,6 +256,7 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 
 	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples (comma separated list of sections, or 'all')")
 	examples := fs.Bool("examples", false, "Show quick usage examples and exit")
+	listModels := fs.Bool("list-models", false, "List available model aliases and exit")
 	version := fs.Bool("version", false, "Display version information")
 	help := fs.BoolP("help", "h", false, "Display help information")
 
@@ -293,6 +294,11 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 
 	if *examples {
 		printQuickExamples()
+		return opts, fs, pflag.ErrHelp
+	}
+
+	if *listModels {
+		printListModels()
 		return opts, fs, pflag.ErrHelp
 	}
 

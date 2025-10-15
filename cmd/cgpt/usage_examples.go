@@ -116,8 +116,9 @@ func printEnhancedHelp(programName string, fs *pflag.FlagSet) {
 	fmt.Printf("ENVIRONMENT VARIABLES:\n")
 	printEnvironmentVariables()
 
-	fmt.Printf("\nMORE EXAMPLES:\n")
+	fmt.Printf("\nMORE INFORMATION:\n")
 	fmt.Printf("  Use 'cgpt --examples' for more usage examples\n")
+	fmt.Printf("  Use 'cgpt --list-models' to see available model aliases\n")
 	fmt.Printf("  Use 'cgpt --show-advanced-usage all' for comprehensive examples\n")
 }
 
@@ -149,7 +150,7 @@ func printFlagsByCategory(fs *pflag.FlagSet) {
 		},
 		{
 			title: "CONFIGURATION",
-			flags: []string{"config", "help", "examples"},
+			flags: []string{"config", "help", "examples", "list-models", "version"},
 		},
 	}
 
@@ -247,6 +248,101 @@ func printQuickExamples() {
 	fmt.Printf("• Try different models with -m flag for various capabilities and costs\n\n")
 
 	fmt.Printf("For comprehensive examples: cgpt --show-advanced-usage all\n")
+}
+
+// printListModels displays available model aliases and their full names
+func printListModels() {
+	fmt.Printf("cgpt - Available Model Aliases\n\n")
+
+	// Import model aliases from config package
+	// We'll access this via the config package
+	fmt.Printf("ANTHROPIC CLAUDE MODELS:\n")
+	claudeModels := []struct {
+		alias string
+		full  string
+	}{
+		{"sonnet", "claude-sonnet-4-20250514"},
+		{"sonnet-4", "claude-sonnet-4-20250514"},
+		{"sonnet-3.5", "claude-sonnet-3-5-20241022"},
+		{"sonnet-3", "claude-3-sonnet-20240229"},
+		{"haiku", "claude-3-5-haiku-20241022"},
+		{"haiku-3.5", "claude-3-5-haiku-20241022"},
+		{"haiku-3", "claude-haiku-3-20240307"},
+		{"opus", "claude-opus-4-20250514"},
+		{"opus-4", "claude-opus-4-20250514"},
+		{"opus-4.1", "claude-opus-4-1-20250805"},
+		{"opus-3", "claude-3-opus-20240229"},
+	}
+	for _, m := range claudeModels {
+		fmt.Printf("  %-15s → %s\n", m.alias, m.full)
+	}
+
+	fmt.Printf("\nOPENAI GPT MODELS:\n")
+	openaiModels := []struct {
+		alias string
+		full  string
+	}{
+		{"gpt-5", "gpt-5"},
+		{"gpt4", "gpt-4-turbo-preview"},
+		{"gpt-4", "gpt-4-turbo-preview"},
+		{"gpt-4-turbo", "gpt-4-turbo-preview"},
+		{"gpt4o", "gpt-4o"},
+		{"gpt-4o", "gpt-4o"},
+		{"gpt3.5", "gpt-3.5-turbo"},
+		{"gpt-3.5", "gpt-3.5-turbo"},
+		{"o1", "o1-preview"},
+		{"o1-mini", "o1-mini"},
+		{"o3", "o3"},
+		{"o3-mini", "o3-mini"},
+	}
+	for _, m := range openaiModels {
+		fmt.Printf("  %-15s → %s\n", m.alias, m.full)
+	}
+
+	fmt.Printf("\nGOOGLE GEMINI MODELS:\n")
+	geminiModels := []struct {
+		alias string
+		full  string
+	}{
+		{"gemini", "gemini-2.0-flash-001"},
+		{"gemini-2", "gemini-2.0-flash-001"},
+		{"gemini-flash", "gemini-2.0-flash-001"},
+		{"gemini-pro", "gemini-1.5-pro"},
+		{"gemini-1.5", "gemini-1.5-flash"},
+	}
+	for _, m := range geminiModels {
+		fmt.Printf("  %-15s → %s\n", m.alias, m.full)
+	}
+
+	fmt.Printf("\nOLLAMA MODELS:\n")
+	ollamaModels := []struct {
+		alias string
+		full  string
+	}{
+		{"llama", "llama3.2"},
+		{"llama3", "llama3.2"},
+		{"mistral", "mistral"},
+		{"mixtral", "mixtral"},
+		{"codellama", "codellama"},
+		{"deepseek", "deepseek-coder"},
+	}
+	for _, m := range ollamaModels {
+		fmt.Printf("  %-15s → %s\n", m.alias, m.full)
+	}
+
+	fmt.Printf("\nUSAGE:\n")
+	fmt.Printf("  # Use alias\n")
+	fmt.Printf("  cgpt -m sonnet -i \"Hello\"\n\n")
+	fmt.Printf("  # Use full model name\n")
+	fmt.Printf("  cgpt -m claude-sonnet-4-20250514 -i \"Hello\"\n\n")
+	fmt.Printf("  # Backend auto-detected from model name\n")
+	fmt.Printf("  cgpt -m gpt-4 -i \"Hello\"  # Uses OpenAI backend\n\n")
+
+	fmt.Printf("NOTES:\n")
+	fmt.Printf("• Aliases provide convenient shortcuts to full model names\n")
+	fmt.Printf("• Backend is auto-detected based on model name patterns\n")
+	fmt.Printf("• Override backend with -b/--backend flag if needed\n")
+	fmt.Printf("• Set default model with CGPT_MODEL environment variable\n")
 }
 
 // printEnvironmentVariables shows relevant environment variables
