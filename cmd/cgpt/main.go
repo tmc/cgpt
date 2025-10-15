@@ -46,8 +46,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -60,47 +62,61 @@ import (
 
 // defineFlags defines the command line flags for the cgpt command
 func defineFlags(fs *pflag.FlagSet, opts *cgpt.RunOptions) {
-	// Runtime flags
-	fs.StringArrayVarP(&opts.InputStrings, "input", "i", nil, "Direct string input (can be used multiple times)")
-	fs.StringArrayVarP(&opts.InputFiles, "file", "f", []string{"-"}, "Input file path. Use '-' for stdin (can be used multiple times)")
-	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Run in continuous mode (interactive)")
-	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Verbose output")
-	fs.BoolVar(&opts.DebugMode, "debug", false, "Debug output")
-	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show spinner while waiting for completion")
-	fs.StringVarP(&opts.Prefill, "prefill", "p", "", "Prefill the assistant's response")
-	fs.BoolVar(&opts.StreamOutput, "stream", true, "Use streaming output")
+	// === INPUT/OUTPUT FLAGS ===
+	fs.StringArrayVarP(&opts.InputStrings, "input", "i", nil, "Direct text input (can be used multiple times)")
+	fs.StringArrayVarP(&opts.InputFiles, "file", "f", []string{"-"}, "Input file path, use '-' for stdin (multiple files allowed)")
+	fs.StringVarP(&opts.Prefill, "prefill", "p", "", "Start the assistant's response with this text")
+	fs.BoolVarP(&opts.Continuous, "continuous", "c", false, "Interactive mode - chat with the AI in a loop")
+	fs.BoolVarP(&opts.Verbose, "verbose", "v", false, "Show detailed output and processing information")
+	fs.BoolVar(&opts.DebugMode, "debug", false, "Enable debug mode with request/response details")
 
-	fs.BoolVar(&opts.OpenAIUseLegacyMaxTokens, "openai-use-max-tokens", false, "If true, uses 'max_tokens' vs 'max_completion_tokens' for openai backends")
+	// === HISTORY & SESSION MANAGEMENT ===
+	fs.StringVarP(&opts.HistoryIn, "history-in", "I", "", "Load conversation history from this file")
+	fs.StringVarP(&opts.HistoryOut, "history-out", "O", "", "Save conversation history to this file (use '-' for stdout)")
+	fs.StringVarP(&opts.History, "history", "H", "", "Use same file for input/output history (use 'auto' for timestamped files)")
+	fs.BoolVarP(&opts.Continue, "continue", "C", false, "Continue your most recent conversation session")
+	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of AI responses to generate (for batch processing)")
 
-	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Print the prefill message")
-	fs.DurationVar(&opts.CompletionTimeout, "completion-timeout", 2*time.Minute, "Maximum time to wait for a response")
+	// === CONVERSATION FORKING ===
+	fs.StringVar(&opts.ForkFrom, "fork-from", "", "Fork from this conversation file")
+	fs.IntVar(&opts.ForkPoint, "fork-point", -1, "Message index to fork from (-1 for current point)")
+	fs.StringVar(&opts.ForkDescription, "fork-desc", "", "Description for the fork")
+	fs.StringVar(&opts.ForkBranch, "fork-branch", "", "Git branch name for the fork")
+	fs.BoolVar(&opts.ListForks, "list-forks", false, "List all conversation forks")
+	fs.BoolVar(&opts.ShowTree, "show-tree", false, "Show conversation tree structure")
 
-	// History flags
-	fs.StringVarP(&opts.HistoryIn, "history-in", "I", "", "File to read completion history from")
-	fs.StringVarP(&opts.HistoryOut, "history-out", "O", "", "File to store completion history in (or - for stdout)")
-	fs.StringVarP(&opts.History, "history", "H", "", "Read and write same history file (or 'auto' for auto-generated)")
-	fs.BoolVarP(&opts.Continue, "continue", "C", false, "Continue most recent session")
+	// === AI MODEL & BEHAVIOR ===
+	fs.StringVarP(&opts.Config.Backend, "backend", "b", "anthropic", "AI provider: anthropic, openai, gemini, ollama")
+	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-sonnet-4-20250514", "AI model to use (e.g., claude-haiku-3-20240307, gpt-4)")
+	fs.StringVarP(&opts.Config.SystemPrompt, "system-prompt", "s", "", "System instructions to guide the AI's behavior")
+	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum response length in tokens (0 = model default)")
+	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0.05, "Creativity level: 0.0 (focused) to 1.0 (creative)")
 
-	fs.StringVar(&opts.ReadlineHistoryFile, "readline-history-file", "~/.cgpt_history", "File to store readline history in")
-	fs.IntVarP(&opts.NCompletions, "completions", "n", 0, "Number of completions (when running non-interactively with history)")
+	// === ADVANCED FEATURES ===
+	fs.BoolVar(&opts.Config.PromptCaching, "prompt-caching", false, "Cache prompts to reduce costs on repeated requests")
+	fs.StringVar(&opts.Config.ThinkingMode, "thinking-mode", "none", "Reasoning depth: none, low, medium, high, auto (Claude 4+ only)")
+	fs.IntVar(&opts.Config.ThinkingBudget, "thinking-budget", 0, "Token budget for reasoning (overrides thinking-mode)")
+	fs.BoolVar(&opts.Config.ShowUsage, "usage", false, "Display token usage, cache statistics, and cost estimates")
+	fs.BoolVar(&opts.Config.ShowReasoning, "show-reasoning", false, "Show the AI's reasoning process when available")
+	fs.BoolVar(&opts.Config.InterleavedThinking, "interleaved-thinking", false, "Enable advanced reasoning mode (Claude 4+ only)")
 
-	// Config flags
-	fs.StringVarP(&opts.Config.Backend, "backend", "b", "anthropic", "The backend to use")
-	fs.StringVarP(&opts.Config.Model, "model", "m", "claude-sonnet-4-20250514", "The model to use")
-	fs.StringVarP(&opts.Config.SystemPrompt, "system-prompt", "s", "", "System prompt to use")
-	fs.IntVarP(&opts.Config.MaxTokens, "max-tokens", "t", 0, "Maximum tokens to generate")
-	fs.Float64VarP(&opts.Config.Temperature, "temperature", "T", 0.05, "Temperature for sampling")
+	// === TECHNICAL OPTIONS ===
+	fs.StringVar(&opts.Config.BaseURL, "base-url", "", "Custom base URL for the API endpoint")
+	fs.BoolVar(&opts.Config.InsecureSkipVerify, "insecure-skip-verify", false, "Skip TLS certificate verification")
+	fs.BoolVar(&opts.ShowSpinner, "show-spinner", true, "Show loading spinner while waiting")
+	fs.BoolVar(&opts.StreamOutput, "stream", true, "Stream responses as they generate")
+	fs.BoolVar(&opts.EchoPrefill, "prefill-echo", true, "Display prefill text in output")
+	fs.DurationVar(&opts.CompletionTimeout, "completion-timeout", 2*time.Minute, "Maximum wait time for AI response")
+	fs.BoolVar(&opts.OpenAIUseLegacyMaxTokens, "openai-use-max-tokens", false, "Use legacy max_tokens parameter for OpenAI")
+	fs.StringVar(&opts.ReadlineHistoryFile, "readline-history-file", "~/.cgpt_history", "Command history file for interactive mode")
 
-	// Prompt caching and reasoning features
-	fs.BoolVar(&opts.Config.PromptCaching, "prompt-caching", false, "Enable prompt caching (reduces costs for repeated prompts)")
-	fs.StringVar(&opts.Config.ThinkingMode, "thinking-mode", "none", "Thinking mode for reasoning models (none, low, medium, high, auto)")
-	fs.IntVar(&opts.Config.ThinkingBudget, "thinking-budget", 0, "Explicit token budget for thinking/reasoning (overrides thinking-mode)")
-	fs.BoolVar(&opts.Config.ShowCosts, "show-costs", false, "Show token usage and cost estimates after completion")
-	fs.BoolVar(&opts.Config.ShowReasoning, "show-reasoning", false, "Show reasoning/thinking content when available")
-	fs.BoolVar(&opts.Config.InterleavedThinking, "interleaved-thinking", false, "Enable interleaved thinking mode (Claude 4+ only)")
+	// === RETRY OPTIONS ===
+	fs.IntVar(&opts.Config.MaxRetries, "max-retries", 3, "Maximum number of retry attempts for failed requests (0 disables retries)")
+	fs.DurationVar(&opts.Config.RetryDelay, "retry-delay", time.Second, "Initial delay before first retry (exponential backoff applied)")
+	fs.BoolVar(&opts.Config.DisableRetry, "disable-retry", false, "Disable all retry attempts for failed requests")
 
-	// Config file path
-	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Path to the configuration file")
+	// === CONFIGURATION ===
+	fs.StringVar(&opts.ConfigPath, "config", "config.yaml", "Configuration file path")
 }
 
 func main() {
@@ -149,16 +165,50 @@ func run(ctx context.Context, opts cgpt.RunOptions, flagSet *pflag.FlagSet) erro
 	}
 
 	// Initialize the model (the llms.Model interface)
-	modelOpts := []cgpt.InferenceProviderOption{}
-	// if debug mode is on, attach the debug http client:
+	// Start with a clone of the default transport to inherit proxy settings.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: opts.Config.InsecureSkipVerify}
+	httpClient := &http.Client{Transport: transport}
+
+	// For Google AI, wrap the transport with ApiKeyTransport.
+	if opts.Config.Backend == "googleai" {
+		httpClient.Transport = &httputil.ApiKeyTransport{
+			Transport: httpClient.Transport,
+			APIKey:    opts.Config.GoogleAPIKey,
+		}
+	}
+
 	if opts.DebugMode {
 		fmt.Fprintln(opts.Stderr, "Debug mode enabled")
-		// Use JSONDebugClient for pretty-printed JSON requests and raw SSE streaming output
-		modelOpts = append(modelOpts, cgpt.WithHTTPClient(httputil.JSONDebugClient))
+		// Get the top-level wrapper transport from the global JSONDebugClient.
+		if wrapperTransport, ok := httputil.JSONDebugClient.Transport.(*httputil.Transport); ok {
+			// The actual logging transport is nested inside.
+			type transportSetter interface {
+				SetTransport(http.RoundTripper)
+			}
+			// Use an interface to duck-type our way to setting the inner transport.
+			if setter, ok := wrapperTransport.Transport.(transportSetter); ok {
+				setter.SetTransport(httpClient.Transport)
+				httpClient.Transport = wrapperTransport
+			} else {
+				fmt.Fprintln(opts.Stderr, "Warning: could not set base transport on debug client, using basic logger")
+				httpClient.Transport = &httputil.LoggingTransport{Transport: httpClient.Transport}
+			}
+		} else {
+			fmt.Fprintln(opts.Stderr, "Warning: could not get JSON debug transport, using basic logger")
+			httpClient.Transport = &httputil.LoggingTransport{Transport: httpClient.Transport}
+		}
 	}
+
+	modelOpts := []cgpt.InferenceProviderOption{cgpt.WithHTTPClient(httpClient)}
 	model, err := cgpt.InitializeModel(opts.Config, modelOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to initialize model: %w", err)
+	}
+
+	// Handle fork-specific commands first
+	if opts.ListForks || opts.ShowTree || opts.ForkFrom != "" {
+		return handleForkCommands(ctx, opts)
 	}
 
 	// If stdin is a tty, and no input files, strings, or args are provided,
@@ -205,6 +255,9 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	}
 
 	showAdvancedUsage := fs.String("show-advanced-usage", "", "Show advanced usage examples (comma separated list of sections, or 'all')")
+	examples := fs.Bool("examples", false, "Show quick usage examples and exit")
+	listModels := fs.Bool("list-models", false, "List available model aliases and exit")
+	version := fs.Bool("version", false, "Display version information")
 	help := fs.BoolP("help", "h", false, "Display help information")
 
 	fs.MarkHidden("stream-output")
@@ -213,15 +266,15 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	fs.MarkHidden("show-spinner")
 
 	fs.Usage = func() {
-		fmt.Println("cgpt is a command line tool for interacting with generative AI models")
-		fmt.Println()
+		if *examples {
+			printQuickExamples()
+			return
+		}
 		if *showAdvancedUsage != "" {
 			printAdvancedUsage(*showAdvancedUsage)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Usage of %s:\n", args[0])
-		fs.PrintDefaults()
-		printBasicUsage()
+		printEnhancedHelp(args[0], fs)
 	}
 
 	err := fs.Parse(args[1:])
@@ -229,8 +282,23 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 		return opts, fs, err
 	}
 
+	if *version {
+		printVersion()
+		return opts, fs, pflag.ErrHelp
+	}
+
 	if *help {
 		fs.Usage()
+		return opts, fs, pflag.ErrHelp
+	}
+
+	if *examples {
+		printQuickExamples()
+		return opts, fs, pflag.ErrHelp
+	}
+
+	if *listModels {
+		printListModels()
 		return opts, fs, pflag.ErrHelp
 	}
 
@@ -242,4 +310,64 @@ func initFlags(args []string, stdin io.Reader) (cgpt.RunOptions, *pflag.FlagSet,
 	opts.PositionalArgs = fs.Args()
 
 	return opts, fs, nil
+}
+
+// handleForkCommands handles fork-specific operations
+func handleForkCommands(ctx context.Context, opts cgpt.RunOptions) error {
+	forkManager, err := cgpt.NewForkManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize fork manager: %w", err)
+	}
+
+	// Handle list forks
+	if opts.ListForks {
+		forks, err := forkManager.ListForks()
+		if err != nil {
+			return fmt.Errorf("failed to list forks: %w", err)
+		}
+
+		fmt.Fprintf(opts.Stdout, "Conversation Forks:\n")
+		if len(forks) == 0 {
+			fmt.Fprintf(opts.Stdout, "  No forks found\n")
+		} else {
+			for _, fork := range forks {
+				fmt.Fprintf(opts.Stdout, "  %s: %s\n", fork.Branch, fork.Description)
+			}
+		}
+		return nil
+	}
+
+	// Handle show tree
+	if opts.ShowTree {
+		tree, err := forkManager.GetConversationTree()
+		if err != nil {
+			return fmt.Errorf("failed to get conversation tree: %w", err)
+		}
+
+		fmt.Fprintf(opts.Stdout, "Conversation Tree:\n")
+		fmt.Fprintf(opts.Stdout, "%s", tree.PrintTree())
+		return nil
+	}
+
+	// Handle fork creation
+	if opts.ForkFrom != "" {
+		forkCmd := cgpt.ForkCommand{
+			InputFile:   opts.ForkFrom,
+			OutputFile:  opts.HistoryOut,
+			ForkPoint:   opts.ForkPoint,
+			Description: opts.ForkDescription,
+			BranchName:  opts.ForkBranch,
+		}
+
+		if err := forkManager.ExecuteForkCommand(ctx, forkCmd); err != nil {
+			return fmt.Errorf("failed to execute fork command: %w", err)
+		}
+
+		fmt.Fprintf(opts.Stderr, "Successfully forked conversation from %s\n", filepath.Base(opts.ForkFrom))
+		if forkCmd.OutputFile != "" {
+			fmt.Fprintf(opts.Stderr, "New conversation saved to: %s\n", forkCmd.OutputFile)
+		}
+	}
+
+	return nil
 }

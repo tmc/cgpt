@@ -1,0 +1,29 @@
+╭───────────────────────────────────────────────────╮
+│ ✻ Welcome to Claude Code!                         │
+│                                                   │
+│   /help for help, /status for your current setup  │
+│                                                   │
+│   cwd: /Volumes/tmc/go/src/github.com/tmc/cgpt    │
+╰───────────────────────────────────────────────────╯
+
+> Use the claude-session-monitor agent to check session status
+
+⏺ I'll use the claude-session-monitor agent to check the Claude
+   Code session status.
+
+⏺ Task(Check session status)
+  ⎿  Done (19 tool uses · 33.6k tokens · 1m 40s)              
+
+⏺ There is no claude-session-monitor agent in the cgpt
+  codebase. However, cgpt provides session monitoring through
+  its hook system. You can:
+
+  1. Use hooks - Place scripts in ~/.cgpt/hooks/session-start/
+  and ~/.cgpt/hooks/session-end/
+  2. Check logs - Sessions are logged to ~/.cgpt/session.log
+  3. Monitor history - Session files in
+  ~/.cgpt/history/sessions/
+
+  The hook system allows custom session monitoring via
+  executable scripts that receive event context in JSON format.
+

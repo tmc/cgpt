@@ -5,8 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
+	"syscall"
+	"time"
 
+	"github.com/tmc/cgpt/retry"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"github.com/tmc/langchaingo/llms/openai"
@@ -65,6 +69,23 @@ func (p *ChatCompletionPayload) addAssistantMessage(content string) {
 	p.addMessage(llms.ChatMessageTypeAI, content)
 }
 
+// getRetryConfig creates a retry configuration from the service config.
+func (s *CompletionService) getRetryConfig() retry.Config {
+	if s.cfg.DisableRetry {
+		return retry.Config{MaxRetries: 0}
+	}
+
+	config := retry.DefaultConfig()
+	if s.cfg.MaxRetries > 0 {
+		config.MaxRetries = s.cfg.MaxRetries
+	}
+	if s.cfg.RetryDelay > 0 {
+		config.InitialDelay = s.cfg.RetryDelay
+	}
+	config.Logger = s.logger
+	return config
+}
+
 func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (<-chan string, error) {
 	ch := make(chan string)
 	go func() {
@@ -75,16 +96,16 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 
 		prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 
-		// Send prefill immediately if it exists
+		// Send prefill through stream if it exists and echo is enabled
 		if s.nextCompletionPrefill != "" {
 			if cfg.EchoPrefill {
-				spinnerPos = len(s.nextCompletionPrefill) + 1
-			}
-			select {
-			case ch <- s.nextCompletionPrefill + " ":
-			case <-ctx.Done():
-				prefillCleanup()
-				return
+				select {
+				case ch <- s.nextCompletionPrefill:
+				case <-ctx.Done():
+					prefillCleanup()
+					return
+				}
+				spinnerPos = len(s.nextCompletionPrefill)
 			}
 			payload.addAssistantMessage(s.nextCompletionPrefill)
 			addedAssistantMessage = true
@@ -95,6 +116,7 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		var spinnerStop func()
 		if cfg.ShowSpinner {
 			spinnerStop = spin(spinnerPos)
+			defer spinnerStop()
 		}
 
 		// Create a cancellable context for the generation
@@ -110,36 +132,8 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			}
 		}()
 
-		// Determine temperature based on thinking mode
-		temperature := s.cfg.Temperature
-		if (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) && s.cfg.Backend == "anthropic" {
-			// Anthropic requires temperature=1 when thinking is enabled
-			temperature = 1.0
-		}
-
-		// Validate max_tokens > budget_tokens constraint for Anthropic
-		maxTokens := s.cfg.MaxTokens
-		if s.cfg.Backend == "anthropic" && (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) {
-			// Determine effective thinking budget
-			effectiveBudget := s.cfg.ThinkingBudget
-			if effectiveBudget == 0 && s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" {
-				// API will use default based on mode, but minimum is 1024
-				effectiveBudget = 1024
-			}
-			// Normalize to API minimum if user set a value below 1024
-			if effectiveBudget > 0 && effectiveBudget < 1024 {
-				effectiveBudget = 1024
-			}
-
-			// Ensure max_tokens > budget_tokens
-			if maxTokens <= effectiveBudget {
-				// Auto-adjust max_tokens to be greater than budget
-				maxTokens = effectiveBudget + 1000
-				// Log the adjustment when it happens
-				fmt.Fprintf(s.Stderr, "Note: Auto-adjusted max_tokens from %d to %d (must be > thinking budget of %d)\n",
-					s.cfg.MaxTokens, maxTokens, effectiveBudget)
-			}
-		}
+		// Prepare completion options (temperature and max tokens)
+		temperature, maxTokens := s.prepareCompletionOptions()
 
 		callOpts := []llms.CallOption{
 			llms.WithMaxTokens(maxTokens),
@@ -174,37 +168,50 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			callOpts = append(callOpts, anthropic.WithInterleavedThinking())
 		}
 		// Add streaming reasoning function if we're showing reasoning (multi-provider support)
-	if s.cfg.ShowReasoning && (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" || s.cfg.ThinkingBudget > 0) {
-		callOpts = append(callOpts, llms.WithStreamingReasoningFunc(func(ctx context.Context, reasoningChunk, chunk []byte) error {
-			if len(reasoningChunk) > 0 {
-				// Display thinking content as it arrives
-				select {
-				case ch <- string(reasoningChunk):
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
+		if s.cfg.ShowReasoning && (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" || s.cfg.ThinkingBudget > 0) {
+			callOpts = append(callOpts, llms.WithStreamingReasoningFunc(func(ctx context.Context, reasoningChunk, chunk []byte) error {
+				if len(reasoningChunk) > 0 {
+					// Display thinking content as it arrives in grey (like ollama)
+					const grey = "\033[90m"
+					const reset = "\033[0m"
+					greyReasoning := grey + string(reasoningChunk) + reset
+					select {
+					case ch <- greyReasoning:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
 				}
-			}
-			// If there's regular content alongside, stream it too
-			if len(chunk) > 0 {
-				select {
-				case ch <- string(chunk):
-					return nil
-				case <-ctx.Done():
-					return ctx.Err()
+				// If there's regular content alongside, stream it too
+				if len(chunk) > 0 {
+					select {
+					case ch <- string(chunk):
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
 				}
-			}
-			return nil
-		}))
-	}
-	callOpts = append(callOpts, llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
+				return nil
+			}))
+		}
+		callOpts = append(callOpts, llms.WithStreamingFunc(func(ctx context.Context, chunk []byte) error {
 			if firstChunk {
 				prefillCleanup()
 				if spinnerStop != nil {
 					spinnerStop()
 					spinnerStop = nil
 				}
+				// In debug mode, add small delay to let debug output print first
+				if s.cfg.Debug {
+					time.Sleep(10 * time.Millisecond)
+				}
 				firstChunk = false
+			}
+
+			// If debug mode and same fd, buffer output instead of streaming
+			if s.cfg.Debug && s.sameFileDescriptor() {
+				fullResponse.Write(chunk)
+				return nil
 			}
 
 			select {
@@ -216,61 +223,97 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			}
 		}))
 
-		resp, err := s.model.GenerateContent(genCtx, payload.Messages, callOpts...)
+		// Wrap the GenerateContent call with retry logic
+		retryConfig := s.getRetryConfig()
+		result, err := retryConfig.Do(genCtx, func(ctx context.Context) (interface{}, error) {
+			return s.model.GenerateContent(ctx, payload.Messages, callOpts...)
+		})
+
+		var resp *llms.ContentResponse
+		if result != nil {
+			resp = result.(*llms.ContentResponse)
+		}
 
 		if err != nil && !errors.Is(err, context.Canceled) {
-			log.Printf("failed to generate content: %v", err)
+			// Format multi-line errors (e.g., rate limit details) nicely
+			errStr := err.Error()
+			if strings.Contains(errStr, "\n") {
+				log.Printf("failed to generate content:\n%s", errStr)
+			} else {
+				log.Printf("failed to generate content: %v", err)
+			}
 		}
 
 		// Note: With StreamingReasoningFunc support, thinking content now streams
-		// as it arrives (before the main response). The code below handles any
-		// thinking content that wasn't streamed (e.g., from models that don't
-		// support streaming thinking).
+		// as it arrives (before the main response). When streaming reasoning is enabled,
+		// we skip the fallback display below since thinking was already shown in real-time.
+		usingStreamingReasoning := s.cfg.ShowReasoning && (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" || s.cfg.ThinkingBudget > 0)
 		if resp != nil && len(resp.Choices) > 0 {
 			// Check all choices for thinking content and costs
 			var hasDisplayedCosts bool
 			for _, choice := range resp.Choices {
-				// Display reasoning content if available
-				if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowCosts) {
-					// Check if this is summarized thinking (Claude 4) or full thinking
-					label := "Reasoning"
-					if choice.GenerationInfo != nil {
-						if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
-							label = "Reasoning (summarized)"
+				// Only display thinking content if we're NOT using streaming reasoning
+				// (when streaming reasoning is enabled, it was already displayed in real-time)
+				if !usingStreamingReasoning {
+					// Display reasoning content if available
+					if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowUsage) {
+						// Check if this is summarized thinking (Claude 4) or full thinking
+						label := "Reasoning"
+						if choice.GenerationInfo != nil {
+							if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
+								label = "Reasoning (summarized)"
+							}
 						}
-					}
-					select {
-					case ch <- fmt.Sprintf("\n\n--- %s (streaming limitation: shown after response) ---\n%s\n---\n", label, choice.ReasoningContent):
-					case <-ctx.Done():
-					}
-				}
-
-				// Check for thinking content in GenerationInfo (Anthropic style)
-				if s.cfg.ShowReasoning && choice.GenerationInfo != nil {
-					if thinkingContent, ok := choice.GenerationInfo["ThinkingContent"].(string); ok && thinkingContent != "" {
-						label := "Thinking"
-						// Check for signature indicating this is summarized content
-						if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
-							label = "Thinking (summarized)"
-						}
+						const grey = "\033[90m"
+						const reset = "\033[0m"
 						select {
-						case ch <- fmt.Sprintf("\n\n--- %s (streaming limitation: shown after response) ---\n%s\n---\n", label, thinkingContent):
+						case ch <- fmt.Sprintf("\n\n%s--- %s ---\n%s\n---%s\n", grey, label, choice.ReasoningContent, reset):
 						case <-ctx.Done():
 						}
 					}
-					// Handle redacted thinking if present
-					if redactedThinking, ok := choice.GenerationInfo["redacted_thinking"].(string); ok && redactedThinking != "" {
-						select {
-						case ch <- fmt.Sprintf("\n\n--- Thinking (redacted for safety) ---\n%s\n---\n", redactedThinking):
-						case <-ctx.Done():
+
+					// Check for thinking content in GenerationInfo (Anthropic style)
+					if s.cfg.ShowReasoning && choice.GenerationInfo != nil {
+						if thinkingContent, ok := choice.GenerationInfo["ThinkingContent"].(string); ok && thinkingContent != "" {
+							label := "Thinking"
+							// Check for signature indicating this is summarized content
+							if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
+								label = "Thinking (summarized)"
+							}
+							const grey = "\033[90m"
+							const reset = "\033[0m"
+							select {
+							case ch <- fmt.Sprintf("\n\n%s--- %s ---\n%s\n---%s\n", grey, label, thinkingContent, reset):
+							case <-ctx.Done():
+							}
+						}
+						// Handle redacted thinking if present
+						if redactedThinking, ok := choice.GenerationInfo["redacted_thinking"].(string); ok && redactedThinking != "" {
+							const grey = "\033[90m"
+							const reset = "\033[0m"
+							select {
+							case ch <- fmt.Sprintf("\n\n%s--- Thinking (redacted for safety) ---\n%s\n---%s\n", grey, redactedThinking, reset):
+							case <-ctx.Done():
+							}
 						}
 					}
 				}
 
-				// Display costs once (they should be the same across choices)
-				if !hasDisplayedCosts && s.cfg.ShowCosts && choice.GenerationInfo != nil {
-					s.displayCosts(choice.GenerationInfo)
-					hasDisplayedCosts = true
+				// Store and display usage info
+				if choice.GenerationInfo != nil {
+					// Store the generation info for history tracking (prefer the one with thinking tokens)
+					if s.lastGenerationInfo == nil {
+						s.lastGenerationInfo = choice.GenerationInfo
+					} else if _, hasThinking := choice.GenerationInfo["ThinkingTokens"]; hasThinking {
+						// This choice has thinking tokens, use it instead
+						s.lastGenerationInfo = choice.GenerationInfo
+					}
+
+					// Display costs once (they should be the same across choices)
+					if !hasDisplayedCosts && s.cfg.ShowUsage {
+						s.displayUsage(choice.GenerationInfo)
+						hasDisplayedCosts = true
+					}
 				}
 			}
 		}
@@ -285,6 +328,12 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 			payload.addAssistantMessage(fullResponse.String())
 		}
 
+		// If stderr and stdout are the same fd, show clean output after debug
+		if s.cfg.Debug && s.sameFileDescriptor() {
+			fmt.Fprintf(s.Stderr, "\n\033[36m=== Output ===\033[0m\n")
+			fmt.Fprintf(s.Stderr, "%s\n", fullResponse.String())
+		}
+
 		s.nextCompletionPrefill = ""
 	}()
 	return ch, nil
@@ -295,11 +344,13 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	var stopSpinner func()
 	var spinnerPos int
 	addedAssistantMessage := false
+	var prefillContent string
 
 	prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 	defer prefillCleanup()
 
 	if s.nextCompletionPrefill != "" {
+		prefillContent = s.nextCompletionPrefill
 		payload.addAssistantMessage(s.nextCompletionPrefill)
 		addedAssistantMessage = true
 	}
@@ -309,36 +360,8 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		defer stopSpinner()
 	}
 
-	// Determine temperature based on thinking mode
-	temperature := s.cfg.Temperature
-	if (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) && s.cfg.Backend == "anthropic" {
-		// Anthropic requires temperature=1 when thinking is enabled
-		temperature = 1.0
-	}
-
-	// Validate max_tokens > budget_tokens constraint for Anthropic
-	maxTokens := s.cfg.MaxTokens
-	if s.cfg.Backend == "anthropic" && (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) {
-		// Determine effective thinking budget
-		effectiveBudget := s.cfg.ThinkingBudget
-		if effectiveBudget == 0 && s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" {
-			// API will use default based on mode, but minimum is 1024
-			effectiveBudget = 1024
-		}
-		// Normalize to API minimum if user set a value below 1024
-		if effectiveBudget > 0 && effectiveBudget < 1024 {
-			effectiveBudget = 1024
-		}
-
-		// Ensure max_tokens > budget_tokens
-		if maxTokens <= effectiveBudget {
-			// Auto-adjust max_tokens to be greater than budget
-			maxTokens = effectiveBudget + 1000
-			// Log the adjustment when it happens
-			fmt.Fprintf(s.Stderr, "Note: Auto-adjusted max_tokens from %d to %d (must be > thinking budget of %d)\n",
-				s.cfg.MaxTokens, maxTokens, effectiveBudget)
-		}
-	}
+	// Prepare completion options (temperature and max tokens)
+	temperature, maxTokens := s.prepareCompletionOptions()
 
 	callOpts := []llms.CallOption{
 		llms.WithMaxTokens(maxTokens),
@@ -362,7 +385,16 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 		// Use Anthropic-specific option to set the beta header
 		callOpts = append(callOpts, anthropic.WithInterleavedThinking())
 	}
-	response, err := s.model.GenerateContent(ctx, payload.Messages, callOpts...)
+	// Wrap the GenerateContent call with retry logic
+	retryConfig := s.getRetryConfig()
+	result, err := retryConfig.Do(ctx, func(ctx context.Context) (interface{}, error) {
+		return s.model.GenerateContent(ctx, payload.Messages, callOpts...)
+	})
+
+	var response *llms.ContentResponse
+	if result != nil {
+		response = result.(*llms.ContentResponse)
+	}
 	if err != nil {
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}
@@ -371,9 +403,11 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	}
 
 	// First pass: Display thinking/reasoning before the actual response
+	const grey = "\033[90m"
+	const reset = "\033[0m"
 	for _, choice := range response.Choices {
 		// Display reasoning content if available
-		if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowCosts) {
+		if choice.ReasoningContent != "" && (s.cfg.ShowReasoning || s.cfg.ShowUsage) {
 			// Check if this is summarized thinking (Claude 4) or full thinking
 			label := "Reasoning"
 			if choice.GenerationInfo != nil {
@@ -381,7 +415,7 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 					label = "Reasoning (summarized)"
 				}
 			}
-			fmt.Fprintf(s.Stderr, "\n--- %s ---\n%s\n---\n", label, choice.ReasoningContent)
+			fmt.Fprintf(s.Stderr, "\n%s--- %s ---\n%s\n---%s\n", grey, label, choice.ReasoningContent, reset)
 		}
 
 		// Check for thinking content in GenerationInfo (Anthropic style)
@@ -392,11 +426,11 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 				if signature, ok := choice.GenerationInfo["signature"].(string); ok && signature != "" {
 					label = "Thinking (summarized)"
 				}
-				fmt.Fprintf(s.Stderr, "\n--- %s ---\n%s\n---\n", label, thinkingContent)
+				fmt.Fprintf(s.Stderr, "\n%s--- %s ---\n%s\n---%s\n", grey, label, thinkingContent, reset)
 			}
 			// Handle redacted thinking if present
 			if redactedThinking, ok := choice.GenerationInfo["redacted_thinking"].(string); ok && redactedThinking != "" {
-				fmt.Fprintf(s.Stderr, "\n--- Thinking (redacted for safety) ---\n%s\n---\n", redactedThinking)
+				fmt.Fprintf(s.Stderr, "\n%s--- Thinking (redacted for safety) ---\n%s\n---%s\n", grey, redactedThinking, reset)
 			}
 		}
 	}
@@ -411,15 +445,31 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 			content = choice.Content
 		}
 
-		// Display costs once
-		if !hasDisplayedCosts && s.cfg.ShowCosts && choice.GenerationInfo != nil {
-			s.displayCosts(choice.GenerationInfo)
-			hasDisplayedCosts = true
+		// Store and display usage info
+		if choice.GenerationInfo != nil {
+			// Store the generation info for history tracking (prefer the one with thinking tokens)
+			if s.lastGenerationInfo == nil {
+				s.lastGenerationInfo = choice.GenerationInfo
+			} else if _, hasThinking := choice.GenerationInfo["ThinkingTokens"]; hasThinking {
+				// This choice has thinking tokens, use it instead
+				s.lastGenerationInfo = choice.GenerationInfo
+			}
+
+			// Display costs once
+			if !hasDisplayedCosts && s.cfg.ShowUsage {
+				s.displayUsage(choice.GenerationInfo)
+				hasDisplayedCosts = true
+			}
 		}
 	}
 
 	if !addedAssistantMessage {
 		payload.addAssistantMessage(content)
+	}
+
+	// Include prefill in returned content if echo is enabled
+	if cfg.EchoPrefill && prefillContent != "" {
+		return prefillContent + content, nil
 	}
 
 	return content, nil
@@ -428,8 +478,44 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 // handleAssistantPrefill handles the assistant prefill message.
 // It returns a cleanup function that should be called after the completion is done.
 // The second return value is the location where the spinner could start.
-// displayCosts shows token usage and cost estimates
-func (s *CompletionService) displayCosts(generationInfo map[string]any) {
+// prepareCompletionOptions calculates temperature and max_tokens based on configuration
+// and thinking mode requirements, handling Anthropic-specific constraints.
+func (s *CompletionService) prepareCompletionOptions() (temperature float64, maxTokens int) {
+	// Determine temperature based on thinking mode
+	temperature = s.cfg.Temperature
+	if (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) && s.cfg.Backend == "anthropic" {
+		// Anthropic requires temperature=1 when thinking is enabled
+		temperature = 1.0
+	}
+
+	// Validate max_tokens > budget_tokens constraint for Anthropic
+	maxTokens = s.cfg.MaxTokens
+	if s.cfg.Backend == "anthropic" && (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none")) {
+		// Determine effective thinking budget
+		effectiveBudget := s.cfg.ThinkingBudget
+		if effectiveBudget == 0 && s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" {
+			// API will use default based on mode, but minimum is 1024
+			effectiveBudget = 1024
+		}
+		// Normalize to API minimum if user set a value below 1024
+		if effectiveBudget > 0 && effectiveBudget < 1024 {
+			effectiveBudget = 1024
+		}
+		// Ensure max_tokens > budget_tokens
+		if maxTokens <= effectiveBudget {
+			// Auto-adjust max_tokens to be greater than budget
+			maxTokens = effectiveBudget + 1000
+			// Log the adjustment when it happens
+			fmt.Fprintf(s.Stderr, "Note: Auto-adjusted max_tokens from %d to %d (must be > thinking budget of %d)\n",
+				s.cfg.MaxTokens, maxTokens, effectiveBudget)
+		}
+	}
+
+	return temperature, maxTokens
+}
+
+// displayUsage shows compact token usage statistics
+func (s *CompletionService) displayUsage(generationInfo map[string]any) {
 	if generationInfo == nil {
 		return
 	}
@@ -462,63 +548,99 @@ func (s *CompletionService) displayCosts(generationInfo map[string]any) {
 	// Extract thinking/reasoning tokens if available
 	thinkingUsage := llms.ExtractThinkingTokens(generationInfo)
 
-	// Display token usage
-	fmt.Fprintf(s.Stderr, "\n╭─────────────────────────────────────╮\n")
-	fmt.Fprintf(s.Stderr, "│          TOKEN USAGE REPORT         │\n")
-	fmt.Fprintf(s.Stderr, "├─────────────────────────────────────┤\n")
+	// Compact colon-separated format
+	var parts []string
 
-	// Input tokens
-	fmt.Fprintf(s.Stderr, "│ Input Tokens:        %7d       │\n", inputTokens)
-	if cachedInputTokens > 0 {
-		fmt.Fprintf(s.Stderr, "│   ├─ Cached:        %7d       │\n", cachedInputTokens)
-		fmt.Fprintf(s.Stderr, "│   └─ New:           %7d       │\n", inputTokens-cachedInputTokens)
-	}
+	// Core usage
+	parts = append(parts, fmt.Sprintf("in:%d", inputTokens))
+	parts = append(parts, fmt.Sprintf("out:%d", outputTokens))
+	parts = append(parts, fmt.Sprintf("total:%d", totalTokens))
 
-	// Output tokens
-	fmt.Fprintf(s.Stderr, "│ Output Tokens:       %7d       │\n", outputTokens)
-	if cachedOutputTokens > 0 {
-		fmt.Fprintf(s.Stderr, "│   └─ Cached:        %7d       │\n", cachedOutputTokens)
-	}
-
-	// Thinking tokens breakdown
-	if thinkingUsage != nil && thinkingUsage.ThinkingTokens > 0 {
-		fmt.Fprintf(s.Stderr, "├─────────────────────────────────────┤\n")
-		fmt.Fprintf(s.Stderr, "│ Thinking/Reasoning:                 │\n")
-		if thinkingUsage.ThinkingInputTokens > 0 || thinkingUsage.ThinkingOutputTokens > 0 {
-			fmt.Fprintf(s.Stderr, "│   ├─ Input:         %7d       │\n", thinkingUsage.ThinkingInputTokens)
-			fmt.Fprintf(s.Stderr, "│   ├─ Output:        %7d       │\n", thinkingUsage.ThinkingOutputTokens)
-			if thinkingUsage.ThinkingCachedTokens > 0 {
-				fmt.Fprintf(s.Stderr, "│   ├─ Cached:        %7d       │\n", thinkingUsage.ThinkingCachedTokens)
-			}
-			fmt.Fprintf(s.Stderr, "│   └─ Total:         %7d       │\n", thinkingUsage.ThinkingTokens)
-		} else {
-			fmt.Fprintf(s.Stderr, "│   Total:             %7d       │\n", thinkingUsage.ThinkingTokens)
-		}
-
-		// Thinking budget if specified
-		if thinkingUsage.ThinkingBudgetAllocated > 0 {
-			percentUsed := float64(thinkingUsage.ThinkingBudgetUsed) / float64(thinkingUsage.ThinkingBudgetAllocated) * 100
-			fmt.Fprintf(s.Stderr, "│   Budget: %d/%d (%.1f%%)    │\n",
-				thinkingUsage.ThinkingBudgetUsed, thinkingUsage.ThinkingBudgetAllocated, percentUsed)
-		}
-	}
-
-	// Total
-	fmt.Fprintf(s.Stderr, "├─────────────────────────────────────┤\n")
-	fmt.Fprintf(s.Stderr, "│ TOTAL:               %7d       │\n", totalTokens)
-
-	// Cache savings summary
+	// Cache info if present
 	totalCached := cachedInputTokens + cachedOutputTokens
-	if thinkingUsage != nil {
-		totalCached += thinkingUsage.ThinkingCachedTokens
+	// Extract ThinkingCachedTokens directly since ExtractThinkingTokens doesn't include it
+	if v, ok := generationInfo["ThinkingCachedTokens"].(int); ok {
+		totalCached += v
 	}
 	if totalCached > 0 {
-		cacheSavings := float64(totalCached) / float64(totalTokens) * 100
-		fmt.Fprintf(s.Stderr, "├─────────────────────────────────────┤\n")
-		fmt.Fprintf(s.Stderr, "│ Cache Savings:       %6.1f%%       │\n", cacheSavings)
+		percent := 100 * totalCached / totalTokens
+		parts = append(parts, fmt.Sprintf("cache:%d(%d%%)", totalCached, percent))
 	}
 
-	fmt.Fprintf(s.Stderr, "╰─────────────────────────────────────╯\n")
+	// Thinking info if present
+	if thinkingUsage != nil && thinkingUsage.ThinkingTokens > 0 {
+		if thinkingUsage.ThinkingBudgetAllocated > 0 {
+			usedPct := 100 * thinkingUsage.ThinkingBudgetUsed / thinkingUsage.ThinkingBudgetAllocated
+			parts = append(parts, fmt.Sprintf("think:%d(%d%%)", thinkingUsage.ThinkingTokens, usedPct))
+		} else {
+			parts = append(parts, fmt.Sprintf("think:%d", thinkingUsage.ThinkingTokens))
+		}
+	}
+
+	// Cost estimation (always show when useful)
+	// Simple cost estimation (rough approximation)
+	// Input: $0.003/1K, Output: $0.015/1K for Claude Sonnet
+	inCost := float64(inputTokens) * 0.003 / 1000
+	outCost := float64(outputTokens) * 0.015 / 1000
+	totalCost := inCost + outCost
+	if totalCost >= 0.01 {
+		parts = append(parts, fmt.Sprintf("cost:$%.2f", totalCost))
+	} else {
+		parts = append(parts, fmt.Sprintf("cost:$%.3f", totalCost))
+	}
+
+	// Cache savings if any cached tokens
+	if totalCached > 0 {
+		// Calculate savings from cached tokens
+		// Cached input tokens save input cost, cached output tokens save output cost
+		cachedInSavings := float64(cachedInputTokens) * 0.003 / 1000
+		cachedOutSavings := float64(cachedOutputTokens) * 0.015 / 1000
+
+		// Include thinking cached tokens if present (treated as input cost)
+		if v, ok := generationInfo["ThinkingCachedTokens"].(int); ok && v > 0 {
+			cachedInSavings += float64(v) * 0.003 / 1000
+		}
+
+		totalSavings := cachedInSavings + cachedOutSavings
+		if totalSavings > 0 {
+			if totalSavings >= 0.01 {
+				parts = append(parts, fmt.Sprintf("saved:$%.2f", totalSavings))
+			} else {
+				parts = append(parts, fmt.Sprintf("saved:$%.4f", totalSavings))
+			}
+		}
+	}
+
+	// Output compact format in grey
+	const grey = "\033[90m"
+	const reset = "\033[0m"
+	fmt.Fprintf(s.Stderr, "\n%susage: %s%s\n", grey, strings.Join(parts, " "), reset)
+}
+
+// sameFileDescriptor checks if stderr and stdout point to the same file descriptor
+func (s *CompletionService) sameFileDescriptor() bool {
+	// Get file info for stdout and stderr
+	stdoutFile, ok1 := s.Stdout.(*os.File)
+	stderrFile, ok2 := s.Stderr.(*os.File)
+	if !ok1 || !ok2 {
+		return false
+	}
+
+	// Get file descriptors
+	stdoutFd := int(stdoutFile.Fd())
+	stderrFd := int(stderrFile.Fd())
+
+	// Get stat info for both
+	var stdoutStat, stderrStat syscall.Stat_t
+	if syscall.Fstat(stdoutFd, &stdoutStat) != nil {
+		return false
+	}
+	if syscall.Fstat(stderrFd, &stderrStat) != nil {
+		return false
+	}
+
+	// Compare device and inode
+	return stdoutStat.Dev == stderrStat.Dev && stdoutStat.Ino == stderrStat.Ino
 }
 
 func (s *CompletionService) handleAssistantPrefill(ctx context.Context, payload *ChatCompletionPayload, cfg PerformCompletionConfig) (func(), int) {
@@ -530,9 +652,9 @@ func (s *CompletionService) handleAssistantPrefill(ctx context.Context, payload 
 	// Store the current message count to ensure proper cleanup
 	initialMessageCount := len(payload.Messages)
 
+	// Calculate spinner position if echo is enabled
 	if cfg.EchoPrefill {
-		s.Stdout.Write([]byte(s.nextCompletionPrefill))
-		spinnerPos = len(s.nextCompletionPrefill) + 1
+		spinnerPos = len(s.nextCompletionPrefill)
 	}
 
 	payload.addAssistantMessage(s.nextCompletionPrefill)

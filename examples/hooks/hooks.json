@@ -1,0 +1,40 @@
+[
+  {
+    "name": "log-conversation",
+    "event": "post-completion",
+    "command": "/usr/bin/env",
+    "args": ["python3", "-c", "import json, sys, datetime; ctx=json.load(sys.stdin); print(f'[{datetime.datetime.now()}] Completion for backend {ctx[\"config\"][\"backend\"]} completed in {len(ctx[\"messages\"])} messages')"],
+    "onFailure": "warn",
+    "timeout": "10s"
+  },
+  {
+    "name": "backup-important-conversations",
+    "event": "post-save",
+    "command": "/usr/bin/env",
+    "args": ["bash", "-c", "if [[ $(wc -l < /dev/stdin | cut -d' ' -f1) -gt 10 ]]; then cp \"$CGPT_HISTORY_FILE\" \"$HOME/.cgpt/backups/$(date +%Y%m%d_%H%M%S).backup\"; fi"],
+    "onFailure": "warn",
+    "conditions": [
+      {
+        "field": "backend",
+        "operator": "equals",
+        "value": "anthropic"
+      }
+    ]
+  },
+  {
+    "name": "cost-tracker",
+    "event": "post-completion",
+    "command": "/usr/bin/env",
+    "args": ["python3", "-c", "import json, sys, os; ctx=json.load(sys.stdin); cost_file=os.path.expanduser('~/.cgpt/cost_log.txt'); open(cost_file, 'a').write(f'{ctx[\"timestamp\"]} {ctx[\"config\"][\"backend\"]} {ctx[\"config\"][\"model\"]} {len(str(ctx[\"messages\"]))} chars\\n')"],
+    "onFailure": "ignore",
+    "timeout": "5s"
+  },
+  {
+    "name": "security-scan",
+    "event": "pre-completion",
+    "command": "/usr/bin/env",
+    "args": ["python3", "-c", "import json, sys, re; ctx=json.load(sys.stdin); msgs=str(ctx['messages']); exit(1) if re.search(r'(password|secret|key|token)\\s*[:=]\\s*[\\w\\-]+', msgs, re.IGNORECASE) else exit(0)"],
+    "onFailure": "abort",
+    "timeout": "5s"
+  }
+]

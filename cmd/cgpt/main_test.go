@@ -131,22 +131,34 @@ func Test(t *testing.T) {
 			args:    []string{"--thinking-budget", "2000"},
 		},
 		{
-			name:    "show costs",
+			name:    "show usage",
 			backend: "dummy",
 			model:   "dummy-model",
-			args:    []string{"--show-costs"},
+			args:    []string{"--usage"},
 		},
 		{
 			name:    "combined features",
 			backend: "dummy",
 			model:   "dummy-model",
-			args:    []string{"--prompt-caching", "--thinking-mode", "high", "--show-costs"},
+			args:    []string{"--prompt-caching", "--thinking-mode", "high", "--usage"},
 		},
 		{
 			name:    "prompt caching env",
 			backend: "dummy",
 			model:   "dummy-model",
 			args:    []string{},
+		},
+		{
+			name:    "prefill with echo enabled",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--prefill", "Hello, ", "--prefill-echo=true"},
+		},
+		{
+			name:    "prefill with echo disabled",
+			backend: "dummy",
+			model:   "dummy-model",
+			args:    []string{"--prefill", "Hello, ", "--prefill-echo=false"},
 		},
 	}
 
@@ -334,7 +346,7 @@ func updateGoldenFile(t *testing.T, path, comment string, files map[string][]byt
 	if httpPayload != nil {
 		ar.Files = append(ar.Files, txtar.File{Name: "http_payload", Data: httpPayload})
 	}
-	if err := os.WriteFile(path, txtar.Format(ar), 0644); err != nil {
+	if err := cgpt.AtomicWriteFile(path, txtar.Format(ar), 0644); err != nil {
 		t.Fatalf("Failed to update golden file: %v", err)
 	}
 }

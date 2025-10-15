@@ -1,0 +1,13 @@
+This is a sample input file for testing cgpt integration.
+
+It contains multiple lines of text to test the file input functionality.
+The file input system should be able to read this content and pass it
+to the completion service for processing.
+
+Here are some test scenarios:
+1. Basic text processing
+2. Multi-line input handling
+3. Special characters: !@#$%^&*()
+4. Unicode characters: 你好, 世界! 🌍
+
+This concludes the sample input file.

@@ -13,50 +13,125 @@ This document provides examples and guidance for using cgpt, a command-line tool
 
 ## Basic Usage
 
-Examples: # Basic query about interpreting command output
-$ echo "how should I interpret the output of nvidia-smi?" | cgpt
+### Simple Queries
+```bash
+# Ask a basic question
+echo "What is the difference between HTTP and HTTPS?" | cgpt
 
-    # Quick explanation request
-    $ echo "explain plan 9 in one sentence" | cgpt
+# Get quick explanations
+echo "explain quantum computing in one sentence" | cgpt
 
-Advanced Examples: # Using a system prompt for a specific assistant role
-$ cgpt -s "You are a helpful programming assistant" -i "Write a Python function to calculate the Fibonacci sequence"
+# Interpret command output
+nvidia-smi | cgpt -s "Explain this GPU status output in simple terms"
+```
 
-    # Code review using input from a file
-    $ cat complex_code.py | cgpt -s "You are a code reviewer. Provide constructive feedback." -m "claude-3-7-sonnet-20250219"
+### Interactive Mode
+```bash
+# Start a chat session
+cgpt -c
 
-    # Interactive session for creative writing
-    $ cgpt -c -s "You are a creative writing assistant" # Start an interactive session for story writing
+# Interactive session with a specific role
+cgpt -c -s "You are a helpful programming assistant"
 
-    # Show more advanced examples:
-    $ cgpt --show-advanced-usage basic
-    $ cgpt --show-advanced-usage all
+# Continue your last conversation
+cgpt -C
+```
+
+### File Processing
+```bash
+# Analyze a single file
+cgpt -f script.py -s "Review this code for potential bugs"
+
+# Process multiple files
+cgpt -f config.yaml -f deploy.sh -i "Help me understand these deployment files"
+
+# Use stdin for file input
+cat large_log.txt | cgpt -s "Summarize the key events in this log file"
+```
 
 ## Advanced Usage
 
 These examples showcase more sophisticated uses of cgpt, demonstrating its flexibility and power.
 
-### Shell Script Generation
+### Session Management & History
+```bash
+# Auto-save conversations with timestamps
+cgpt -H auto -c
 
-```shell
-# Generate a shell script using AI assistance
-$ echo "Write a script that analyzes the current local git branch, the recent activity, and suggest a meta-learning for making more effective progress." \
-     | cgpt --system-prompt "You are a self-improving unix toolchain assistant. Output a program that uses AI to the goals of the user. The current system is $(uname). The help for cgpt is <cgpt-help-output>$(cgpt --help 2>&1). Your output should be only valid bash. If you have commentary make sure it is prefixed with comment characters." \
-     --prefill "#!/usr/bin/env" | tee suggest-process-improvement.sh
+# Save conversation to specific file
+cgpt -H my-research-session.json -c
+
+# Load previous conversation and continue
+cgpt -I previous-session.json -O updated-session.json -i "Let's continue our discussion"
+
+# Continue most recent session
+cgpt -C
 ```
 
-### Research Analysis
+### AI Model Configuration
+```bash
+# Use different models for different tasks
+cgpt -m claude-haiku-3-20240307 -i "Quick summary of this file" -f report.md  # Fast, cheap
+cgpt -m claude-sonnet-4-20250514 -i "Detailed analysis of this code" -f complex.py  # Powerful
 
-```shell
-# Analyze research notes with a high token limit
-$ cgpt -f research_notes.txt -s "You are a research assistant. Summarize the key points and suggest follow-up questions." -t 8000
+# Adjust creativity/randomness
+cgpt -T 0.1 -i "Write formal documentation"  # More focused
+cgpt -T 0.8 -i "Write a creative story"     # More creative
+
+# Set token limits
+cgpt -t 500 -i "Brief explanation of AI"    # Short response
+cgpt -t 4000 -i "Comprehensive guide to Go" # Longer response
 ```
 
-### Git Commit Analysis
+### Advanced AI Features (Claude 4+ Models)
+```bash
+# Enable reasoning mode for complex problems
+cgpt --thinking-mode high -i "Solve this logic puzzle: If all bloops are razzles..."
 
-```shell
-# Analyze git commit history
-$ git log --oneline | cgpt -s "You are a git commit analyzer. Provide insights on commit patterns and suggest improvements."
+# Set specific reasoning budget
+cgpt --thinking-budget 1000 -i "Plan a complete software architecture"
+
+# Show AI's reasoning process
+cgpt --show-reasoning --thinking-mode medium -i "Debug this algorithm"
+
+# Enable prompt caching for repeated queries
+cgpt --prompt-caching -f large-codebase.py -i "Find all the functions"
+```
+
+### System Integration & Automation
+```bash
+# Generate shell scripts with context
+echo "Write a script that analyzes git branch activity and suggests improvements" | \
+  cgpt -s "You are a DevOps expert. Output only valid bash. Use comments for explanations. Context: $(uname -a)" \
+  --prefill "#!/bin/bash" | tee analyze-git.sh
+
+# Process command output intelligently
+docker ps | cgpt -s "Analyze these running containers and suggest optimizations"
+
+# Batch process multiple files
+for file in *.log; do
+  echo "=== Processing $file ==="
+  cgpt -f "$file" -s "Summarize key events and errors" --usage
+done
+
+# Chain with other tools
+curl -s https://api.github.com/repos/golang/go/issues | \
+  jq '.[] | .title' | \
+  cgpt -s "Analyze these GitHub issues and identify common themes"
+```
+
+### Code Analysis & Development
+```bash
+# Multi-file code review
+cgpt -f main.go -f config.go -f tests.go \
+     -s "You are a senior Go developer. Review this code for: 1) bugs 2) performance 3) best practices"
+
+# Generate tests with context
+cgpt -f calculator.py -s "Generate comprehensive unit tests for this Python module" \
+     --prefill "import unittest" --max-tokens 2000
+
+# Debug with full context
+cgpt -f error.log -f source.go -i "The error log shows failures. Help me debug the source code."
 ```
 
 ## Meta-Prompting
@@ -140,11 +215,49 @@ $(head -n 20 *)
 
 ## Tips and Tricks
 
-1. Use the `-t` flag to set a higher token limit for complex tasks or longer outputs.
-2. Combine cgpt with other command-line tools using pipes for powerful workflows.
-3. Save frequently used system prompts in a configuration file for quick access.
-4. Use the `--debug` flag to see detailed information about the API requests and responses.
-5. Experiment with different models using the `-m` flag to find the best fit for your task.
+### Performance & Cost Optimization
+- Use `-m claude-haiku-3-20240307` for quick, simple tasks to save on costs
+- Use `-m claude-sonnet-4-20250514` for complex reasoning and code analysis
+- Enable `--prompt-caching` when making multiple requests with similar context
+- Set appropriate `-t` (max-tokens) limits to avoid unnecessarily long responses
+- Use `--usage` flag to monitor token consumption and costs
+
+### Input Management
+- Combine multiple input methods: `cgpt -i "Context: " -f file1.txt -f file2.txt -i "Question: ..."`
+- Use `-f -` to read from stdin when piping: `command | cgpt -f - -s "analyze this"`
+- Save complex system prompts in files: `cgpt -f system-prompt.txt -i "Your question"`
+
+### Session & History Management
+- Use `-H auto` for automatic timestamped session files
+- Use `-C` to quickly continue your last conversation
+- Save important conversations with meaningful names: `-H "project-review-2024.json"`
+- Use history for context: load previous sessions with `-I session.json`
+
+### Advanced Usage Patterns
+- **Chain operations**: `cgpt -i "step 1" | cgpt -s "refine this" | cgpt -s "final polish"`
+- **Batch processing**: Use shell loops with cgpt for multiple files
+- **Template responses**: Use `--prefill` to guide output format
+- **Debug mode**: Use `--debug` to see API requests and troubleshoot issues
+
+### Model-Specific Features
+- **Claude 4+ only**: `--thinking-mode`, `--show-reasoning`, `--interleaved-thinking`
+- **All models**: Adjust `--temperature` (0.0-1.0) for focus vs creativity
+- **OpenAI specific**: Use `--openai-use-max-tokens` if needed for compatibility
+
+### Integration with Other Tools
+```bash
+# Git workflow integration
+git diff | cgpt -s "Review these changes and suggest improvements"
+
+# Log analysis
+tail -f app.log | cgpt -s "Monitor this log and alert me to issues"
+
+# Documentation generation
+find . -name "*.go" | head -5 | xargs cgpt -f -s "Generate API documentation"
+
+# System administration
+ps aux | cgpt -s "Analyze running processes and suggest optimizations"
+```
 
 ## Troubleshooting
 

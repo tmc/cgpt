@@ -1,0 +1,14 @@
+backend: anthropic
+model: claude-3-sonnet-20240229
+temperature: 0.05
+maxTokens: 8000
+systemPrompt: "You are Claude, an AI assistant created by Anthropic."
+promptCaching: true
+showUsage: true
+showReasoning: true
+thinkingMode: medium
+thinkingBudget: 2048
+interleavedThinking: false
+maxRetries: 3
+retryDelay: 2s
+completionTimeout: 120s

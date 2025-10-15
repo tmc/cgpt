@@ -107,27 +107,27 @@ func (d *DummyBackend) GenerateContent(ctx context.Context, messages []llms.Mess
 		choices = append(choices, &llms.ContentChoice{
 			Content: "",
 			GenerationInfo: map[string]any{
-				"ThinkingContent":           "Let me think step by step about developing a metaprompting system:\n1. Define the core components\n2. Design the prompt structure\n3. Implement feedback loops\n4. Add evaluation metrics",
-				"InputTokens":              inputTokenCount,
-				"OutputTokens":             outputTokenCount + thinkingTokenCount,
+				"ThinkingContent":         "Let me think step by step about developing a metaprompting system:\n1. Define the core components\n2. Design the prompt structure\n3. Implement feedback loops\n4. Add evaluation metrics",
+				"InputTokens":             inputTokenCount,
+				"OutputTokens":            outputTokenCount + thinkingTokenCount,
 				"TotalTokens":             inputTokenCount + outputTokenCount + thinkingTokenCount,
-				"CachedInputTokens":        cachedInputTokens,
-				"ThinkingTokens":           thinkingTokenCount,
-				"ThinkingInputTokens":      thinkingInputTokens,
-				"ThinkingOutputTokens":     thinkingOutputTokens,
-				"ThinkingCachedTokens":     thinkingCachedTokens,
-				"ThinkingBudgetUsed":       thinkingBudgetUsed,
-				"ThinkingBudgetAllocated":  thinkingBudgetAllocated,
+				"CachedInputTokens":       cachedInputTokens,
+				"ThinkingTokens":          thinkingTokenCount,
+				"ThinkingInputTokens":     thinkingInputTokens,
+				"ThinkingOutputTokens":    thinkingOutputTokens,
+				"ThinkingCachedTokens":    thinkingCachedTokens,
+				"ThinkingBudgetUsed":      thinkingBudgetUsed,
+				"ThinkingBudgetAllocated": thinkingBudgetAllocated,
 			},
 		})
 		// Add the main content choice
 		choices = append(choices, &llms.ContentChoice{
 			Content: strings.Join(words, " "),
 			GenerationInfo: map[string]any{
-				"InputTokens":              inputTokenCount,
-				"OutputTokens":             outputTokenCount + thinkingTokenCount,
-				"TotalTokens":             inputTokenCount + outputTokenCount + thinkingTokenCount,
-				"CachedInputTokens":        cachedInputTokens,
+				"InputTokens":       inputTokenCount,
+				"OutputTokens":      outputTokenCount + thinkingTokenCount,
+				"TotalTokens":       inputTokenCount + outputTokenCount + thinkingTokenCount,
+				"CachedInputTokens": cachedInputTokens,
 			},
 		})
 	} else {
@@ -138,7 +138,7 @@ func (d *DummyBackend) GenerateContent(ctx context.Context, messages []llms.Mess
 				GenerationInfo: map[string]any{
 					"InputTokens":       inputTokenCount,
 					"OutputTokens":      outputTokenCount,
-					"TotalTokens":      inputTokenCount + outputTokenCount,
+					"TotalTokens":       inputTokenCount + outputTokenCount,
 					"CachedInputTokens": cachedInputTokens,
 				},
 			},

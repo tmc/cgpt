@@ -18,6 +18,7 @@ import (
 	"github.com/tmc/langchaingo/llms/anthropic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/term"
 )
 
 type CompletionService struct {
@@ -40,7 +41,8 @@ type CompletionService struct {
 	readlineHistoryFile string
 	disableHistory      bool
 	autoNameHistory     bool
-	autoHistory         bool // Whether this is an auto-generated session
+	autoHistory         bool               // Whether this is an auto-generated session
+	gitHistoryManager   *GitHistoryManager // Git-based history management
 
 	performCompletionConfig PerformCompletionConfig
 
@@ -57,6 +59,12 @@ type CompletionService struct {
 
 	// useLegacyMaxTokens uses the legacy max_tokens field for OpenAI-compatible backends
 	useLegacyMaxTokens bool
+
+	// lastGenerationInfo stores the last generation info for usage tracking
+	lastGenerationInfo map[string]any
+
+	// hookManager manages lifecycle hooks
+	hookManager *HookManager
 }
 
 type CompletionServiceOption func(*CompletionService)
@@ -112,6 +120,14 @@ func NewCompletionService(cfg *Config, model llms.Model, opts ...CompletionServi
 		Stderr:            os.Stderr,
 		sessionTimestamp:  time.Now().Format("20060102150405"),
 	}
+
+	// Initialize hook manager if hooks are configured
+	if cfg.Hooks != nil {
+		s.hookManager = NewHookManager(cfg.Hooks, s.Stderr)
+	} else {
+		// Use default hook configuration
+		s.hookManager = NewHookManager(nil, s.Stderr)
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -149,6 +165,17 @@ type PerformCompletionConfig struct {
 }
 
 func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
+	// Execute session-start hooks
+	hookCtx := CreateHookContext(EventSessionStart, s.cfg)
+	if _, err := s.hookManager.ExecuteHooks(ctx, EventSessionStart, hookCtx); err != nil {
+		fmt.Fprintf(s.Stderr, "cgpt: warning: session-start hook failed: %v\n", err)
+	}
+
+	// Execute config-loaded hooks
+	if _, err := s.hookManager.ExecuteHooks(ctx, EventConfigLoaded, hookCtx); err != nil {
+		fmt.Fprintf(s.Stderr, "cgpt: warning: config-loaded hook failed: %v\n", err)
+	}
+
 	if err := s.configure(runCfg); err != nil {
 		return fmt.Errorf("configuration error: %w", err)
 	}
@@ -158,10 +185,40 @@ func (s *CompletionService) Run(ctx context.Context, runCfg RunOptions) error {
 	if err := s.handleInput(ctx, runCfg); err != nil {
 		return fmt.Errorf("input handling error: %w", err)
 	}
+
+	// Execute pre-completion hooks
+	preHookCtx := CreateHookContext(EventPreCompletion, s.cfg)
+	preHookCtx.Messages = s.payload.Messages
+	if _, err := s.hookManager.ExecuteHooks(ctx, EventPreCompletion, preHookCtx); err != nil {
+		fmt.Fprintf(s.Stderr, "cgpt: warning: pre-completion hook failed: %v\n", err)
+	}
+
 	err := s.executeCompletion(ctx, runCfg)
+
+	// Execute post-completion or error hooks
+	if err != nil {
+		errorHookCtx := CreateHookContext(EventCompletionError, s.cfg)
+		errorHookCtx.Messages = s.payload.Messages
+		errorHookCtx.Error = err.Error()
+		if _, hookErr := s.hookManager.ExecuteHooks(ctx, EventCompletionError, errorHookCtx); hookErr != nil {
+			fmt.Fprintf(s.Stderr, "cgpt: warning: completion-error hook failed: %v\n", hookErr)
+		}
+	} else {
+		postHookCtx := CreateHookContext(EventPostCompletion, s.cfg)
+		postHookCtx.Messages = s.payload.Messages
+		if _, hookErr := s.hookManager.ExecuteHooks(ctx, EventPostCompletion, postHookCtx); hookErr != nil {
+			fmt.Fprintf(s.Stderr, "cgpt: warning: post-completion hook failed: %v\n", hookErr)
+		}
+	}
 
 	// Handle post-completion tasks (naming, cleanup)
 	s.finalizeHistory(ctx, runCfg)
+
+	// Execute session-end hooks
+	endHookCtx := CreateHookContext(EventSessionEnd, s.cfg)
+	if _, hookErr := s.hookManager.ExecuteHooks(ctx, EventSessionEnd, endHookCtx); hookErr != nil {
+		fmt.Fprintf(s.Stderr, "cgpt: warning: session-end hook failed: %v\n", hookErr)
+	}
 
 	return err
 }
@@ -175,6 +232,12 @@ func (s *CompletionService) configure(runCfg RunOptions) error {
 	s.historyManager, err = newHistoryManager()
 	if err != nil {
 		return fmt.Errorf("failed to initialize history manager: %w", err)
+	}
+
+	// Initialize git history manager
+	s.gitHistoryManager, err = NewGitHistoryManager()
+	if err != nil {
+		return fmt.Errorf("failed to initialize git history manager: %w", err)
 	}
 
 	// Setup history based on flags
@@ -256,6 +319,35 @@ func (s *CompletionService) handleInput(ctx context.Context, runCfg RunOptions) 
 }
 
 func (s *CompletionService) executeCompletion(ctx context.Context, runCfg RunOptions) error {
+	// Validate that we have at least one user message before making API call
+	// (unless we're in continuous mode where input will be gathered interactively)
+	if !runCfg.Continuous {
+		hasUserMessage := false
+		for _, msg := range s.payload.Messages {
+			if msg.Role == llms.ChatMessageTypeHuman {
+				// Check if message has non-empty content
+				for _, part := range msg.Parts {
+					if text, ok := part.(llms.TextContent); ok && strings.TrimSpace(text.Text) != "" {
+						hasUserMessage = true
+						break
+					}
+				}
+				if hasUserMessage {
+					break
+				}
+			}
+		}
+
+		if !hasUserMessage {
+			// Check if stdin is a terminal to provide better suggestions
+			isTerminal := term.IsTerminal(int(os.Stdin.Fd()))
+			if isTerminal {
+				return fmt.Errorf("no input provided\n\nDid you mean to run in interactive mode?\n  cgpt -c                      # Start interactive chat\n\nOther options:\n  cgpt \"your question here\"    # Direct input\n  cgpt -f file.txt             # Read from file\n  echo \"question\" | cgpt       # Pipe input\n  cgpt --help                  # Show full help\n  cgpt --examples              # Quick examples")
+			}
+			return fmt.Errorf("no input provided\n\nUsage:\n  cgpt [input...]              # Direct input\n  cgpt -f file.txt             # Read from file\n  echo \"question\" | cgpt       # Pipe input\n  cgpt -c                      # Interactive mode\n  cgpt --help                  # Show full help")
+		}
+	}
+
 	if runCfg.Continuous {
 		if runCfg.StreamOutput {
 			return s.runContinuousCompletionStreaming(ctx, runCfg)
@@ -353,7 +445,8 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 		}
 		s.historyOutFile = path
 		s.historyFile = file
-		s.autoHistory = true // Mark this as an auto-generated session
+		s.autoHistory = true     // Mark this as an auto-generated session
+		s.autoNameHistory = true // Enable automatic naming for auto sessions
 
 		// Initialize metadata for new session
 		s.historyMetadata = &historyMetadata{
@@ -363,6 +456,7 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 	}
 
 	// Explicit file - read from it if exists, write to it
+	fileExists := false
 	if _, err := os.Stat(historySpec); err == nil {
 		// File exists, load it
 		f, err := os.Open(historySpec)
@@ -370,10 +464,18 @@ func (s *CompletionService) setupHistoryFile(historySpec string) error {
 			return fmt.Errorf("failed to open history file for reading: %w", err)
 		}
 		s.historyIn = f
-		defer f.Close()
 
 		if err := s.loadHistory(); err != nil {
 			return fmt.Errorf("failed to load history: %w", err)
+		}
+		fileExists = true
+	}
+
+	// Initialize metadata if not loaded from file
+	if !fileExists || s.historyMetadata == nil {
+		s.historyMetadata = &historyMetadata{
+			Created:   time.Now().Format(time.RFC3339),
+			UsageInfo: &usageInfo{},
 		}
 	}
 
@@ -397,7 +499,6 @@ func (s *CompletionService) setupExplicitHistory(historyIn, historyOut string) e
 			return fmt.Errorf("failed to open input history file: %w", err)
 		}
 		s.historyIn = f
-		defer f.Close()
 
 		if err := s.loadHistory(); err != nil {
 			return fmt.Errorf("failed to load history: %w", err)
@@ -538,7 +639,12 @@ func (s *CompletionService) runOneShotCompletion(ctx context.Context, runCfg Run
 
 // Enhanced function to run continuous streaming completion mode.
 func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context, runCfg RunOptions) error {
-	fmt.Fprintf(s.Stderr, "\033[38;5;240mcgpt: Running in continuous mode. Press ctrl+c to exit.\033[0m\n")
+	// Print welcome message with model info
+	fmt.Fprintf(s.Stderr, "\033[1mcgpt\033[0m - Interactive Mode\n")
+	fmt.Fprintf(s.Stderr, "  Model: %s (%s)\n", s.cfg.Model, s.cfg.Backend)
+	fmt.Fprintf(s.Stderr, "  Commands: /help for commands, Ctrl+C to exit\n")
+	fmt.Fprintf(s.Stderr, "  Submit: Press Enter twice (blank line) to send message\n")
+	fmt.Fprintf(s.Stderr, "\n")
 
 	// Setup context with cancellation
 	ctxWithCancel, cancel := context.WithCancel(ctx)
@@ -609,7 +715,12 @@ func (s *CompletionService) runContinuousCompletionStreaming(ctx context.Context
 
 // Non-streaming version of continuous completion.
 func (s *CompletionService) runContinuousCompletion(ctx context.Context, runCfg RunOptions) error {
-	fmt.Fprintln(s.Stderr, "Running in continuous mode. Press ctrl+c to exit.")
+	// Print welcome message with model info
+	fmt.Fprintf(s.Stderr, "\033[1mcgpt\033[0m - Interactive Mode\n")
+	fmt.Fprintf(s.Stderr, "  Model: %s (%s)\n", s.cfg.Model, s.cfg.Backend)
+	fmt.Fprintf(s.Stderr, "  Commands: /help for commands, Ctrl+C to exit\n")
+	fmt.Fprintf(s.Stderr, "  Submit: Press Enter twice (blank line) to send message\n")
+	fmt.Fprintf(s.Stderr, "\n")
 	processFn := func(input string) error {
 		input = strings.TrimSpace(input)
 		if input == "" {
@@ -700,40 +811,63 @@ func (s *CompletionService) generateResponse(ctx context.Context, runCfg RunOpti
 // Note that not all inference engines support prefill messages.
 // Whitespace is trimmed from the end of the message.
 func (s *CompletionService) SetNextCompletionPrefill(content string) {
-	s.nextCompletionPrefill = strings.TrimRight(content, " \t\n")
+	s.nextCompletionPrefill = strings.TrimSpace(content)
 }
 
 func (s *CompletionService) finalizeHistory(ctx context.Context, runCfg RunOptions) {
-	// Close history file if open
+	// Close history input file if open and it's a file (not stdin or other reader)
+	if closer, ok := s.historyIn.(io.Closer); ok && s.historyIn != os.Stdin {
+		closer.Close()
+	}
+
+	// Close history output file if open
 	if s.historyFile != nil && s.historyFile != os.Stdout {
 		s.historyFile.Close()
-
-		// Note: Named session functionality removed for simplicity
 	}
-}
 
-func (s *CompletionService) generateHistoryName(ctx context.Context) string {
-	// Generate a name based on the conversation
-	// For now, use a simple approach - can be enhanced with AI later
-	if len(s.payload.Messages) > 0 {
-		firstMsg := s.payload.Messages[0]
-		for _, part := range firstMsg.Parts {
-			if text, ok := part.(llms.TextContent); ok {
-				// Take first 50 chars, clean up
-				name := strings.TrimSpace(text.Text)
-				if len(name) > 50 {
-					name = name[:50]
+	// If using the new history system with auto naming, create a named symlink
+	if s.autoNameHistory && s.historyOutFile != "" && s.historyOutFile != "-" {
+		// Generate a name from the conversation
+		name := s.extractTitleFromConversation()
+		if name != "" && name != "conversation" {
+			// Create a named symlink
+			if s.historyManager != nil {
+				if err := s.historyManager.createNamedLink(s.historyOutFile, name); err != nil {
+					fmt.Fprintf(s.Stderr, "\033[38;5;240mcgpt: Failed to create named link: %v\033[0m\n", err)
+				} else {
+					fmt.Fprintf(s.Stderr, "\033[38;5;240mcgpt: Created named link: %s\033[0m\n", name)
 				}
-				// Replace problematic characters
-				name = strings.ReplaceAll(name, "/", "-")
-				name = strings.ReplaceAll(name, "\n", " ")
-				name = strings.ReplaceAll(name, "\t", " ")
-				// Collapse multiple spaces
-				name = strings.Join(strings.Fields(name), "-")
-				name = strings.ToLower(name)
-				return name
 			}
 		}
 	}
-	return "conversation"
+}
+
+// extractTitleFromConversation generates a title from the current conversation
+func (s *CompletionService) extractTitleFromConversation() string {
+	if len(s.payload.Messages) < 2 {
+		return "conversation"
+	}
+
+	// Get first user message
+	var firstUserMsg string
+	for _, msg := range s.payload.Messages {
+		if msg.Role == "human" || msg.Role == "user" {
+			for _, part := range msg.Parts {
+				if text, ok := part.(llms.TextContent); ok {
+					firstUserMsg = text.Text
+					break
+				}
+			}
+			if firstUserMsg != "" {
+				break
+			}
+		}
+	}
+
+	if firstUserMsg == "" {
+		return "conversation"
+	}
+
+	// Use the extractTitleFromText helper from history.go
+	return s.extractTitleFromText(firstUserMsg)
 }
