@@ -527,6 +527,15 @@ func (s *CompletionService) handleAssistantPrefill(ctx context.Context, payload 
 		return func() {}, spinnerPos
 	}
 
+	// Check if thinking mode is explicitly enabled with Anthropic
+	hasThinking := (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none"))
+	if hasThinking && s.cfg.Backend == "anthropic" {
+		// Prefill is incompatible with thinking mode in Anthropic
+		fmt.Fprintf(s.Stderr, "Warning: Prefill is not supported when thinking mode is enabled with Anthropic. Ignoring prefill.\n")
+		s.nextCompletionPrefill = ""
+		return func() {}, spinnerPos
+	}
+
 	// Store the current message count to ensure proper cleanup
 	initialMessageCount := len(payload.Messages)
 
