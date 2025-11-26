@@ -73,22 +73,26 @@ func (s *CompletionService) PerformCompletionStreaming(ctx context.Context, payl
 		firstChunk := true
 		addedAssistantMessage := false
 
+		// Check if thinking mode will block prefill
+		hasThinking := (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none"))
+		skipPrefill := hasThinking && s.cfg.Backend == "anthropic" && s.nextCompletionPrefill != ""
+
+		// Save prefill before handleAssistantPrefill clears it
+		prefillText := s.nextCompletionPrefill
 		prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 
-		// Send prefill immediately if it exists
-		if s.nextCompletionPrefill != "" {
-			if cfg.EchoPrefill {
-				spinnerPos = len(s.nextCompletionPrefill) + 1
-			}
+		// Send prefill immediately if it exists and wasn't skipped
+		if prefillText != "" && !skipPrefill {
+			// Note: handleAssistantPrefill already handled EchoPrefill
 			select {
-			case ch <- s.nextCompletionPrefill + " ":
+			case ch <- prefillText + " ":
 			case <-ctx.Done():
 				prefillCleanup()
 				return
 			}
-			payload.addAssistantMessage(s.nextCompletionPrefill)
+			// Note: handleAssistantPrefill already added the message
 			addedAssistantMessage = true
-			fullResponse.WriteString(s.nextCompletionPrefill)
+			fullResponse.WriteString(prefillText)
 		}
 
 		// Start spinner on the last character
@@ -296,11 +300,13 @@ func (s *CompletionService) PerformCompletion(ctx context.Context, payload *Chat
 	var spinnerPos int
 	addedAssistantMessage := false
 
+	// Check if we have a prefill before handleAssistantPrefill clears it
+	hasPrefill := s.nextCompletionPrefill != ""
 	prefillCleanup, spinnerPos := s.handleAssistantPrefill(ctx, payload, cfg)
 	defer prefillCleanup()
 
-	if s.nextCompletionPrefill != "" {
-		payload.addAssistantMessage(s.nextCompletionPrefill)
+	if hasPrefill {
+		// Note: handleAssistantPrefill already added the message
 		addedAssistantMessage = true
 	}
 
@@ -527,9 +533,19 @@ func (s *CompletionService) handleAssistantPrefill(ctx context.Context, payload 
 		return func() {}, spinnerPos
 	}
 
+	// Check if thinking mode is enabled with Anthropic
+	hasThinking := (s.cfg.ThinkingBudget > 0 || (s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none"))
+	if hasThinking && s.cfg.Backend == "anthropic" {
+		// Prefill is incompatible with thinking mode in Anthropic
+		fmt.Fprintf(s.Stderr, "Warning: Prefill is not supported when thinking mode is enabled with Anthropic. Ignoring prefill.\n")
+		s.nextCompletionPrefill = ""
+		return func() {}, spinnerPos
+	}
+
 	// Store the current message count to ensure proper cleanup
 	initialMessageCount := len(payload.Messages)
 
+	// Only echo if we're actually using the prefill
 	if cfg.EchoPrefill {
 		s.Stdout.Write([]byte(s.nextCompletionPrefill))
 		spinnerPos = len(s.nextCompletionPrefill) + 1

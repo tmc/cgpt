@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/tmc/langchaingo/llms"
-	"sigs.k8s.io/yaml"
+	"gopkg.in/yaml.v3"
 )
 
 type historyMetadata struct {
@@ -17,6 +17,9 @@ type historyMetadata struct {
 	Description string `yaml:"description,omitempty"`
 	ForkedFrom  string `yaml:"forked_from,omitempty"`
 	ForkPoint   int    `yaml:"fork_point,omitempty"`
+	// Reasoning/thinking mode metadata
+	ThinkingMode   string `yaml:"thinking_mode,omitempty"`   // none, low, medium, high, auto
+	ThinkingBudget int    `yaml:"thinking_budget,omitempty"` // Token budget for thinking
 }
 
 type history struct {
@@ -89,11 +92,22 @@ func (s *CompletionService) saveHistoryToFile(f *os.File) error {
 		s.historyMetadata.Description = s.generateDescription()
 	}
 
+	// Add thinking mode metadata if present
+	if s.historyMetadata != nil && s.cfg != nil {
+		if s.cfg.ThinkingMode != "" && s.cfg.ThinkingMode != "none" {
+			s.historyMetadata.ThinkingMode = s.cfg.ThinkingMode
+		}
+		if s.cfg.ThinkingBudget > 0 {
+			s.historyMetadata.ThinkingBudget = s.cfg.ThinkingBudget
+		}
+	}
+
 	h := history{
 		Metadata: s.historyMetadata,
 		Backend:  s.cfg.Backend,
 		Model:    s.payload.Model,
 		Messages: s.payload.Messages,
+		// TODO: Add prefill tracking via lmhist integration
 	}
 
 	// Marshal to YAML
